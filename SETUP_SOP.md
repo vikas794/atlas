@@ -62,6 +62,16 @@ The standard `requirements.txt` covers the FastAPI application. To use the old G
 uv pip install -r requirements-legacy.txt
 ```
 
+## Stop Atlas
+
+To stop the local frontend and backend safely, run:
+
+```powershell
+.\scripts\stop-dev.ps1
+```
+
+The script stops only a Python process on the Atlas API port (`8000`) and a Node process on the Vite port (`5173`). If another application owns either port, it leaves that process running.
+
 ## Troubleshooting
 
 If PowerShell blocks the launcher, run it for the current session only:
