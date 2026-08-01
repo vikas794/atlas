@@ -60,6 +60,8 @@ playlist_quiz:
   output_folder: "quiz_output"
   delay_between_requests: 2  # seconds between quizzes to avoid Gemini rate limits
   max_retries: 3             # retries per quiz if generation fails
+  transcript_max_retries: 3
+  transcript_delay_between_requests: 4
 
 # Logging Configuration
 logging:

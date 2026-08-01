@@ -5,7 +5,7 @@ python-dotenv
 pyyaml
 google-api-python-client
 google-auth-oauthlib
-google-generativeai
+google-genai
 openai
 yt-dlp>=2025.9.26
 pymupdf

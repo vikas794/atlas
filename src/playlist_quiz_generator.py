@@ -12,7 +12,7 @@ from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
-import google.generativeai as genai
+from google import genai
 
 from src.utils import get_config, setup_logging, get_worker_count
 from src.fetch_youtube_transcript import YouTubeTranscriptFetcher
@@ -92,12 +92,12 @@ class QuizGenerator:
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY is not set.")
         
-        genai.configure(api_key=self.api_key)
         self.model_name = get_config("api.gemini.model", "gemini-3-flash-preview")
-        self.model = genai.GenerativeModel(self.model_name)
+        self.client = genai.Client(api_key=self.api_key)
         
         self.prompt_template = self._load_prompt_template()
         self.logger = logging.getLogger(__name__)
+        self.last_error: Optional[str] = None
         
         # Retry settings from config
         self.max_retries = get_config("playlist_quiz.max_retries", 3)
@@ -118,6 +118,7 @@ class QuizGenerator:
         return " ".join(text_lines)
 
     def generate_quiz(self, video_id: str, title: str, transcript_folder: str) -> Optional[str]:
+        self.last_error = None
         # Assume transcript was fetched and exists in the designated folder
         expected_srt = os.path.join(transcript_folder, f"{video_id}.srt")
         expected_srt_en = os.path.join(transcript_folder, f"{video_id}.en.srt")
@@ -125,11 +126,13 @@ class QuizGenerator:
         srt_path = expected_srt_en if os.path.exists(expected_srt_en) else expected_srt
         if not os.path.exists(srt_path):
             self.logger.warning(f"Transcript not found for {video_id} at {srt_path}")
+            self.last_error = "Transcript was not downloaded for this video."
             return None
 
         transcript_text = self._read_srt(srt_path)
         if not transcript_text.strip():
             self.logger.warning(f"Transcript empty for {video_id}")
+            self.last_error = "Transcript is empty and cannot be converted into a quiz."
             return None
 
         prompt = f"{self.prompt_template}\n\n**Video Title**: {title}\n**Transcript**:\n{transcript_text}"
@@ -137,15 +140,24 @@ class QuizGenerator:
         # Retry logic with exponential backoff
         for attempt in range(self.max_retries):
             try:
-                response = self.model.generate_content(prompt)
-                return response.text
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                )
+                quiz_content = response.text
+                if quiz_content and quiz_content.strip():
+                    return quiz_content
+                self.last_error = "Gemini returned an empty response."
+                self.logger.warning(f"Gemini returned an empty response for {video_id}.")
+                return None
             except Exception as e:
                 wait_time = 2 ** attempt
                 self.logger.warning(f"Error generating quiz for {video_id} (Attempt {attempt+1}/{self.max_retries}): {e}. Retrying in {wait_time}s...")
                 if attempt < self.max_retries - 1:
                     time.sleep(wait_time)
                 else:
-                    self.logger.error(f"Failed to generate quiz for {video_id} after {self.max_retries} attempts.")
+                    self.last_error = "Gemini could not generate a quiz after retries. Check the server log for the provider error."
+                    self.logger.exception(f"Failed to generate quiz for {video_id} after {self.max_retries} attempts.")
                     return None
         return None
 
@@ -279,11 +291,6 @@ class PlaylistQuizPipeline:
         self.logger.info(f"Found {len(videos)} videos in playlist.")
         report("playlist", f"Found {len(videos)} video{'s' if len(videos) != 1 else ''} in {playlist_title}.", total=len(videos))
 
-        # Folder creation
-        folder_id = self.exporter.create_folder(playlist_title)
-        folder_url = f"https://drive.google.com/drive/folders/{folder_id}"
-        self.logger.info(f"Created Google Drive folder: {folder_url}")
-
         # Fetch Transcripts (reuse existing fetcher)
         transcript_folder = get_config("playlist_quiz.output_folder", "quiz_output")
         os.makedirs(transcript_folder, exist_ok=True)
@@ -291,13 +298,44 @@ class PlaylistQuizPipeline:
         transcript_fetcher = YouTubeTranscriptFetcher(output_folder=transcript_folder)
         urls = [f"https://www.youtube.com/watch?v={v['video_id']}" for v in videos]
         report("transcripts", "Fetching transcripts for the playlist videos.", total=len(videos))
-        transcript_fetcher.fetch_transcripts(urls)
-        report("generating", "Transcripts are ready. Generating quizzes and saving them to Drive.", total=len(videos))
+        transcript_results = transcript_fetcher.fetch_transcripts(urls)
+        available_transcripts = sum(
+            os.path.exists(os.path.join(transcript_folder, f"{video['video_id']}.en.srt"))
+            or os.path.exists(os.path.join(transcript_folder, f"{video['video_id']}.srt"))
+            for video in videos
+        )
+        report(
+            "generating",
+            f"Found transcripts for {available_transcripts} of {len(videos)} videos. Generating available quizzes and saving them to Drive.",
+            current=available_transcripts,
+            total=len(videos),
+        )
+
+        folder_id = None
+        folder_url = None
+        if available_transcripts:
+            folder_id = self.exporter.create_folder(playlist_title)
+            folder_url = f"https://drive.google.com/drive/folders/{folder_id}"
+            self.logger.info(f"Created Google Drive folder: {folder_url}")
+        else:
+            self.logger.warning("No transcripts were available; skipping Google Drive folder creation and Gemini generation.")
 
         results = []
         for i, v in enumerate(videos):
             pos = v["position"] + 1
             title_prefix = f"{pos}. {v['title']}"
+            video_url = f"https://www.youtube.com/watch?v={v['video_id']}"
+            transcript_reason = transcript_fetcher.failure_reasons.get(video_url)
+            transcript_exists = (
+                os.path.exists(os.path.join(transcript_folder, f"{v['video_id']}.en.srt"))
+                or os.path.exists(os.path.join(transcript_folder, f"{v['video_id']}.srt"))
+            )
+            if not transcript_results.get(video_url) or transcript_reason or not transcript_exists:
+                status = f"Skipped: {transcript_reason or 'Transcript was not downloaded for this video.'}"
+                results.append({"position": pos, "video_id": v["video_id"], "title": v["title"], "status": status, "doc_url": None})
+                report("generating", f"Skipped quiz {pos} of {len(videos)}: {status}", current=pos, total=len(videos), completed=pos)
+                continue
+
             report("generating", f"Creating quiz {pos} of {len(videos)}: {v['title']}", current=pos, total=len(videos), title=v["title"])
             self.logger.info(f"Generating quiz for: {title_prefix}")
             
@@ -313,7 +351,7 @@ class PlaylistQuizPipeline:
                     status = "Failed Upload"
             else:
                 doc_url = None
-                status = "Failed Generation (No Transcript or API Error)"
+                status = f"Failed: {self.quiz_gen.last_error or 'Quiz generation did not return any content.'}"
                 
             results.append({
                 "position": pos,

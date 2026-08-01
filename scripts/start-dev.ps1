@@ -8,6 +8,11 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $python = Join-Path $repoRoot ".venv\Scripts\python.exe"
 $frontendRoot = Join-Path $repoRoot "frontend"
+$logsRoot = Join-Path $repoRoot "logs"
+$backendLog = Join-Path $logsRoot "backend-dev.log"
+$backendErrorLog = Join-Path $logsRoot "backend-dev.err.log"
+$frontendLog = Join-Path $logsRoot "frontend-dev.log"
+$frontendErrorLog = Join-Path $logsRoot "frontend-dev.err.log"
 
 function Test-Endpoint {
     param([string]$Url)
@@ -35,6 +40,7 @@ function Wait-ForEndpoint {
 
 Set-Location $repoRoot
 $env:PYTHONUTF8 = "1"
+New-Item -ItemType Directory -Path $logsRoot -Force | Out-Null
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     throw "uv is required. Install it from https://docs.astral.sh/uv/getting-started/installation/"
@@ -67,8 +73,10 @@ $frontendUrl = "http://127.0.0.1:5173"
 
 if (-not (Test-Endpoint $backendUrl)) {
     Start-Process -FilePath $python `
-        -ArgumentList "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "8000" `
+        -ArgumentList "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload" `
         -WorkingDirectory $repoRoot `
+        -RedirectStandardOutput $backendLog `
+        -RedirectStandardError $backendErrorLog `
         -WindowStyle Hidden
 }
 
@@ -76,6 +84,8 @@ if (-not (Test-Endpoint $frontendUrl)) {
     Start-Process -FilePath "npm.cmd" `
         -ArgumentList "run", "dev", "--", "--host", "127.0.0.1", "--port", "5173" `
         -WorkingDirectory $frontendRoot `
+        -RedirectStandardOutput $frontendLog `
+        -RedirectStandardError $frontendErrorLog `
         -WindowStyle Hidden
 }
 
@@ -90,6 +100,7 @@ if (-not (Wait-ForEndpoint $frontendUrl)) {
 Write-Host "Atlas is ready"
 Write-Host "  Frontend: http://127.0.0.1:5173"
 Write-Host "  API:      http://127.0.0.1:8000/api/health"
+Write-Host "  Logs:     $logsRoot"
 
 if ($OpenBrowser) {
     Start-Process "http://127.0.0.1:5173"

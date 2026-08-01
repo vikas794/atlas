@@ -1,6 +1,8 @@
 import os
+import random
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from yt_dlp import YoutubeDL
 
@@ -38,6 +40,9 @@ class YouTubeTranscriptFetcher:
         )
         self.language = language or get_config("processing.transcripts.language", "en")
         self.num_workers = get_worker_count(num_workers)
+        self.max_retries = get_config("playlist_quiz.transcript_max_retries", 3)
+        self.delay_between_downloads = get_config("playlist_quiz.transcript_delay_between_requests", 4)
+        self.failure_reasons: Dict[str, str] = {}
 
         # Ensure output folder exists
         self.output_folder = ensure_output_folder(self.output_folder)
@@ -64,6 +69,9 @@ class YouTubeTranscriptFetcher:
             ),
             # Additional options to improve subtitle fetching reliability
             "ignoreerrors": False,  # Don't ignore errors to get proper feedback
+            "retries": self.max_retries,
+            "sleep_interval": 1,
+            "max_sleep_interval": 3,
         }
 
     def fetch_transcript(self, url: str) -> bool:
@@ -75,13 +83,33 @@ class YouTubeTranscriptFetcher:
         Returns:
             bool: True if transcript was successfully downloaded, False otherwise.
         """
-        try:
-            with YoutubeDL(self._get_ydl_opts()) as ydl:
-                ydl.download([url])
-            return True
-        except Exception as e:
-            print(f"Error downloading transcript for {url}: {str(e)}")
-            return False
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                with YoutubeDL(self._get_ydl_opts()) as ydl:
+                    ydl.download([url])
+                self.failure_reasons.pop(url, None)
+                return True
+            except Exception as error:
+                detail = str(error)
+                normalized_detail = detail.lower()
+                if "members-only" in normalized_detail or "members only" in normalized_detail:
+                    reason = "Members-only video; subtitles require authorised access."
+                elif "429" in detail:
+                    reason = "YouTube rate-limited subtitle downloads."
+                elif "no subtitles" in normalized_detail or "subtitle" in normalized_detail and "not available" in normalized_detail:
+                    reason = "No English subtitles are available for this video."
+                else:
+                    reason = "Transcript download failed; see the backend log for details."
+
+                self.failure_reasons[url] = reason
+                print(f"Transcript download failed for {url} (attempt {attempt}/{self.max_retries}): {detail}")
+                if attempt < self.max_retries and "429" in detail:
+                    wait_time = self.delay_between_downloads * (2 ** (attempt - 1)) + random.uniform(0, 1)
+                    print(f"YouTube rate limit detected. Retrying in {wait_time:.1f}s...")
+                    time.sleep(wait_time)
+                else:
+                    break
+        return False
 
     def _fetch_transcripts_sequential(self, urls: List[str]) -> dict:
         """Fetch transcripts sequentially (one at a time).
@@ -93,9 +121,11 @@ class YouTubeTranscriptFetcher:
             dict: Dictionary with URLs as keys and success status as values.
         """
         results = {}
-        for url in urls:
+        for index, url in enumerate(urls):
             print(f"Fetching transcript for: {url}")
             results[url] = self.fetch_transcript(url)
+            if index < len(urls) - 1:
+                time.sleep(self.delay_between_downloads + random.uniform(0, 1))
         return results
 
     def _fetch_transcripts_parallel(self, urls: List[str]) -> dict:
@@ -141,22 +171,8 @@ class YouTubeTranscriptFetcher:
         if not urls:
             return {}
 
-        # Use sequential processing if num_workers is 0 or only one URL
-        if self.num_workers == 0 or len(urls) == 1:
-            print(f"Using sequential processing for {len(urls)} URL(s)")
-            return self._fetch_transcripts_sequential(urls)
-
-        # Try parallel processing first
-        try:
-            print(
-                f"Using parallel processing with {self.num_workers} workers for {len(urls)} URLs"
-            )
-            return self._fetch_transcripts_parallel(urls)
-        except Exception as e:
-            print(
-                f"Parallel processing failed ({str(e)}), falling back to sequential processing"
-            )
-            return self._fetch_transcripts_sequential(urls)
+        print(f"Using paced sequential subtitle downloads for {len(urls)} URL(s)")
+        return self._fetch_transcripts_sequential(urls)
 
 
 # Example usage
