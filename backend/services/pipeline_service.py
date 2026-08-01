@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import time
 from pathlib import Path
 
@@ -17,15 +16,6 @@ from backend.services.artifact_readers import (
     read_videos,
 )
 from backend.services.run_service import RunService
-from src.youtube_pipeline import YouTubePipeline
-
-SRC_ROOT = REPO_ROOT / "src"
-
-if str(SRC_ROOT) not in sys.path:
-    sys.path.append(str(SRC_ROOT))
-
-from assignment_generator import YouTubeAssignmentGenerator
-from compare_youtube_outputs import YouTubeOutputComparator
 
 
 class PipelineService:
@@ -69,6 +59,8 @@ class PipelineService:
 
         try:
             self._apply_api_keys(request)
+            from src.youtube_pipeline import YouTubePipeline
+
             run_id = f"pipeline_output_{int(time.time())}"
             pipeline = YouTubePipeline(
                 max_videos=request.max_videos,
@@ -80,8 +72,17 @@ class PipelineService:
             if not videos:
                 return self._build_fallback_response()
 
-        except Exception:
-            return self._build_fallback_response()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"YouTube search failed: {exc}",
+            ) from exc
+
+        if not videos:
+            raise HTTPException(
+                status_code=404,
+                detail="No YouTube videos matched this query.",
+            )
 
         return PipelineActionResponse(
             run_id=run_id,
@@ -103,6 +104,8 @@ class PipelineService:
         videos = [video.model_dump() for video in read_videos(run_path)]
         if not videos:
             raise HTTPException(status_code=400, detail="This run does not have video metadata to fetch transcripts.")
+
+        from src.youtube_pipeline import YouTubePipeline
 
         pipeline = YouTubePipeline(
             max_videos=len(videos),
@@ -133,6 +136,8 @@ class PipelineService:
         if not videos or not transcript_paths:
             raise HTTPException(status_code=400, detail="This run needs videos and transcripts before summaries can be generated.")
 
+        from src.youtube_pipeline import YouTubePipeline
+
         pipeline = YouTubePipeline(
             max_videos=len(videos),
             transcript_language=request.transcript_language,
@@ -157,6 +162,8 @@ class PipelineService:
                 detail="Comparison will be derived from cached summaries and metadata.",
             )
 
+        from src.compare_youtube_outputs import YouTubeOutputComparator
+
         comparator = YouTubeOutputComparator(
             pipeline_output_folder=str(run_path),
             use_ai_insights=request.use_ai_insights,
@@ -179,6 +186,8 @@ class PipelineService:
                 status="cached",
                 detail="Reused existing assignments from the run folder.",
             )
+
+        from src.assignment_generator import YouTubeAssignmentGenerator
 
         generator = YouTubeAssignmentGenerator(
             pipeline_output_folder=str(run_path),

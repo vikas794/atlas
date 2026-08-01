@@ -128,7 +128,7 @@ class YouTubePipeline:
             return videos
         except Exception as e:
             print(f"[SEARCH] Error during video search: {str(e)}")
-            return []
+            raise RuntimeError(f"YouTube video search failed: {e}") from e
 
     def fetch_transcripts(self, videos: List[Dict]) -> Tuple[List[str], Dict]:
         """Fetch transcripts for the found videos.
@@ -161,9 +161,9 @@ class YouTubePipeline:
 
             if os.path.exists(transcript_path):
                 successful_transcripts.append(transcript_path)
-                print(f"[FETCH] ✓ Transcript available: {transcript_path}")
+                print(f"[FETCH] OK: Transcript available: {transcript_path}")
             else:
-                print(f"[FETCH] ✗ Transcript missing: {transcript_path}")
+                print(f"[FETCH] MISSING: Transcript missing: {transcript_path}")
 
         print(f"[FETCH] Successfully fetched {len(successful_transcripts)} transcripts")
 
@@ -260,7 +260,7 @@ class YouTubePipeline:
         # Log results
         successful_summaries = sum(summarization_results.values())
         print(
-            f"[SUMMARIZE] ✓ Completed: {successful_summaries}/{len(transcript_paths)} summaries successful"
+            f"[SUMMARIZE] OK: Completed {successful_summaries}/{len(transcript_paths)} summaries"
         )
 
         # Save summarization metadata
@@ -308,9 +308,9 @@ class YouTubePipeline:
             success = bool(summary)
 
             if success:
-                print(f"[SUMMARIZE] ✓ Summary saved: {os.path.basename(summary_path)}")
+                print(f"[SUMMARIZE] OK: Summary saved: {os.path.basename(summary_path)}")
             else:
-                print(f"[SUMMARIZE] ✗ Failed to summarize: {video_id}")
+                print(f"[SUMMARIZE] FAILED: Could not summarize: {video_id}")
 
             return success
         except Exception as e:
@@ -436,13 +436,13 @@ class YouTubePipeline:
         print("\n" + "=" * 80)
         print("PIPELINE COMPLETED")
         print("=" * 80)
-        print(f"[PIPELINE] ✓ Search Query: '{search_query}'")
-        print(f"[PIPELINE] ✓ Videos Found: {len(videos)}")
-        print(f"[PIPELINE] ✓ Transcripts Fetched: {len(transcript_paths)}")
-        print(f"[PIPELINE] ✓ Summaries Created: {successful_summaries}")
-        print(f"[PIPELINE] ✓ Total Duration: {pipeline_duration:.2f} seconds")
-        print(f"[PIPELINE] ✓ Results Saved: {results_path}")
-        print(f"[PIPELINE] ✓ Output Folder: {self.output_folder}")
+        print(f"[PIPELINE] OK: Search Query: '{search_query}'")
+        print(f"[PIPELINE] OK: Videos Found: {len(videos)}")
+        print(f"[PIPELINE] OK: Transcripts Fetched: {len(transcript_paths)}")
+        print(f"[PIPELINE] OK: Summaries Created: {successful_summaries}")
+        print(f"[PIPELINE] OK: Total Duration: {pipeline_duration:.2f} seconds")
+        print(f"[PIPELINE] OK: Results Saved: {results_path}")
+        print(f"[PIPELINE] OK: Output Folder: {self.output_folder}")
         print("=" * 80)
 
         return final_results

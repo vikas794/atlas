@@ -1,18 +1,8 @@
 import os
-import sys
 from fastapi import HTTPException
-from pathlib import Path
 
 from backend.schemas.quiz import PlaylistQuizRequest, PlaylistQuizStatusResponse
 from backend.services.artifact_readers import REPO_ROOT
-
-SRC_ROOT = REPO_ROOT / "src"
-
-if str(SRC_ROOT) not in sys.path:
-    sys.path.append(str(SRC_ROOT))
-
-# Import here so that we don't immediately run Google auth on load unless needed
-from src.playlist_quiz_generator import PlaylistQuizPipeline, GoogleDriveExporter
 
 class QuizService:
     def __init__(self):
@@ -37,6 +27,8 @@ class QuizService:
              os.environ["GEMINI_API_KEY"] = request.gemini_api_key
 
         try:
+            from src.playlist_quiz_generator import PlaylistQuizPipeline
+
             pipeline = PlaylistQuizPipeline(gemini_api_key=gemini_key)
             result = pipeline.run(request.playlist_url, max_videos=request.max_videos)
         except Exception as e:

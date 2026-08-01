@@ -88,5 +88,5 @@ tutorial*
 !frontend/tsconfig.node.json
 !frontend/components.json
 # End of Selection
-# Added by code-review-graph
-.code-review-graph/
+
+.claude/

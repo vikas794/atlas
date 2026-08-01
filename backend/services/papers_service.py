@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from backend.schemas.papers import PapersQueryResponse, PapersSource, PapersStatusResponse
-from src.papers_rag import AcademicPapersRAG
+
+if TYPE_CHECKING:
+    from src.papers_rag import AcademicPapersRAG
+
+
+def _get_rag_class():
+    from src.papers_rag import AcademicPapersRAG
+
+    return AcademicPapersRAG
 
 
 @lru_cache(maxsize=1)
 def get_rag_system() -> AcademicPapersRAG | None:
+    AcademicPapersRAG = _get_rag_class()
     rag = AcademicPapersRAG(
         papers_folder="papers/agents",
         chunk_size=512,
@@ -25,6 +35,7 @@ class PapersService:
         self.vector_db_path = "storage/papers_vectordb"
 
     def get_status(self) -> PapersStatusResponse:
+        AcademicPapersRAG = _get_rag_class()
         rag = get_rag_system()
         pdf_count = len(AcademicPapersRAG(papers_folder=self.papers_folder).list_indexed_papers())
         index_exists = AcademicPapersRAG()._index_exists()

@@ -1,0 +1,3 @@
+# Optional dependencies for the legacy Gradio interface in app.py.
+-r requirements.txt
+gradio
