@@ -6,6 +6,9 @@ import type {
   RunBundle,
   RunManifest,
   SearchRequest,
+  PlaylistQuizRequest,
+  PlaylistQuizStatusResponse,
+  DriveStatusResponse,
 } from './types'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
@@ -104,3 +107,38 @@ export function queryPapers(query: string) {
     body: JSON.stringify({ query }),
   })
 }
+
+export function generatePlaylistQuiz(payload: PlaylistQuizRequest) {
+  return request<PlaylistQuizStatusResponse>('/api/quiz/playlist', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function getDriveStatus() {
+  return request<DriveStatusResponse>('/api/quiz/drive-status')
+}
+
+export async function uploadCredentials(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const response = await fetch(`${API_BASE_URL}/api/quiz/credentials`, {
+    method: 'POST',
+    body: formData,
+    // note: intentionally omit 'Content-Type': 'application/json' 
+  })
+
+  if (!response.ok) {
+    throw new Error('Failed to upload credentials')
+  }
+
+  return response.json() as Promise<{ status: string; message: string }>
+}
+
+export function authenticateDrive() {
+  return request<{ status: string; message: string }>('/api/quiz/auth', {
+    method: 'POST',
+  })
+}
+

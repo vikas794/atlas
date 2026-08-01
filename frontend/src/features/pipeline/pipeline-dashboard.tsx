@@ -211,7 +211,7 @@ export function PipelineDashboard({
     }
 
     setAssignmentProgress(nextState)
-  }, [activeRunId, assignments])
+  }, [activeRunId, bundle?.assignments.items])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()

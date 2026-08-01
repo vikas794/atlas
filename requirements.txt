@@ -17,3 +17,7 @@ llama-index-llms-openai
 sentence-transformers
 llama-index-llms-openrouter
 llama-index-embeddings-huggingface
+llama-index-vector-stores-lancedb
+google-auth-oauthlib
+google-auth-httplib2
+google-generativeai

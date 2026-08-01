@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.routers import papers, pipeline, runs
+from backend.routers import papers, pipeline, runs, quiz
 
 app = FastAPI(
     title="Atlas API",
@@ -27,6 +27,7 @@ app.add_middleware(
 app.include_router(runs.router)
 app.include_router(pipeline.router)
 app.include_router(papers.router)
+app.include_router(quiz.router)
 
 
 @app.get("/api/health")

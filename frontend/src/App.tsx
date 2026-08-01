@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { Card } from './components/ui/card'
 import { PapersPanel } from './features/papers/papers-panel'
 import { PipelineDashboard } from './features/pipeline/pipeline-dashboard'
+import { GoogleAuthPanel } from './features/quiz/google-auth-panel'
+import { QuizPanel } from './features/quiz/quiz-panel'
 import {
   getLatestRun,
   getPapersStatus,
@@ -138,6 +140,10 @@ function App() {
             searchQuery={searchQuery}
             transcriptLanguage={transcriptLanguage}
           />
+
+          <GoogleAuthPanel />
+
+          <QuizPanel />
 
           <PapersPanel
             isLoading={papersMutation.isPending}

@@ -16,6 +16,10 @@ api:
     type: "video"
     timeout: 30  # seconds
 
+  gemini:
+    model: "gemini-3-flash-preview"
+    timeout: 180
+
 # Processing Configuration
 processing:
   # Parallel processing settings
@@ -45,11 +49,17 @@ paths:
     summarizer_v2: "summarizer_youtube_v2.yaml"
     default_summarizer: "summarizer_youtube_v2.yaml"
   
-  # Output directories
   outputs:
     transcripts: "transcripts"
     summaries: "summaries"
     logs: "logs"
+    quiz_output: "quiz_output"
+
+# Playlist Quiz Configuration
+playlist_quiz:
+  output_folder: "quiz_output"
+  delay_between_requests: 2  # seconds between quizzes to avoid Gemini rate limits
+  max_retries: 3             # retries per quiz if generation fails
 
 # Logging Configuration
 logging:

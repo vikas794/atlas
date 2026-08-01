@@ -202,3 +202,33 @@ export interface PipelineActionResponse {
   status: string
   detail: string
 }
+
+export interface VideoQuizResult {
+  position: number
+  video_id: string
+  title: string
+  status: string
+  doc_url: string | null
+}
+
+export interface PlaylistQuizRequest {
+  playlist_url: string
+  gemini_api_key?: string
+  use_env_keys: boolean
+  max_videos?: number
+}
+
+export interface PlaylistQuizStatusResponse {
+  status: string
+  playlist_title: string
+  total_videos: number
+  processed: number
+  failed: number
+  drive_folder_url: string | null
+  video_results: VideoQuizResult[]
+}
+
+export interface DriveStatusResponse {
+  configured: boolean
+  message: string
+}
