@@ -228,6 +228,16 @@ export interface PlaylistQuizStatusResponse {
   video_results: VideoQuizResult[]
 }
 
+export interface PlaylistQuizProgress {
+  type: 'progress'
+  stage: 'preparing' | 'playlist' | 'transcripts' | 'generating' | 'finalizing'
+  message: string
+  current?: number
+  completed?: number
+  total?: number
+  title?: string
+}
+
 export interface DriveStatusResponse {
   configured: boolean
   message: string

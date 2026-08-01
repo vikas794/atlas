@@ -7,6 +7,7 @@ import type {
   RunManifest,
   SearchRequest,
   PlaylistQuizRequest,
+  PlaylistQuizProgress,
   PlaylistQuizStatusResponse,
   DriveStatusResponse,
 } from './types'
@@ -113,6 +114,45 @@ export function generatePlaylistQuiz(payload: PlaylistQuizRequest) {
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+export async function generatePlaylistQuizStream(
+  payload: PlaylistQuizRequest,
+  onProgress: (progress: PlaylistQuizProgress) => void,
+) {
+  const response = await fetch(`${API_BASE_URL}/api/quiz/playlist/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok || !response.body) {
+    throw new Error('Unable to start quiz generation.')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done })
+    const events = buffer.split('\n\n')
+    buffer = events.pop() ?? ''
+
+    for (const event of events) {
+      const data = event.split('\n').find((line) => line.startsWith('data: '))?.slice(6)
+      if (!data) continue
+      const message = JSON.parse(data) as PlaylistQuizProgress | ({ type: 'complete' } & PlaylistQuizStatusResponse) | { type: 'error'; message: string }
+      if (message.type === 'progress') onProgress(message)
+      if (message.type === 'complete') return message
+      if (message.type === 'error') throw new Error(message.message)
+    }
+
+    if (done) break
+  }
+
+  throw new Error('Quiz generation ended before returning a result.')
 }
 
 export function getDriveStatus() {

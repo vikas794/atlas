@@ -6,7 +6,7 @@ import json
 import tempfile
 import logging
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import Callable, List, Dict, Optional, Any
 
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
@@ -253,19 +253,31 @@ class PlaylistQuizPipeline:
             return match.group(1)
         return url
 
-    def run(self, playlist_url: str, max_videos: Optional[int] = None) -> Dict[str, Any]:
+    def run(
+        self,
+        playlist_url: str,
+        max_videos: Optional[int] = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
+        def report(stage: str, message: str, **details: Any) -> None:
+            if progress_callback:
+                progress_callback({"stage": stage, "message": message, **details})
+
         setup_logging()
+        report("preparing", "Checking Google Drive access and preparing your quiz workspace.")
         
         # Verify Drive auth upfront
         if not self.exporter:
             self.exporter = GoogleDriveExporter()
 
         playlist_id = self.extract_playlist_id(playlist_url)
+        report("playlist", "Reading playlist details from YouTube.")
         playlist_title = self.fetcher.get_playlist_title(playlist_id)
         self.logger.info(f"Found playlist: {playlist_title}")
 
         videos = self.fetcher.fetch_playlist_videos(playlist_id, max_videos=max_videos)
         self.logger.info(f"Found {len(videos)} videos in playlist.")
+        report("playlist", f"Found {len(videos)} video{'s' if len(videos) != 1 else ''} in {playlist_title}.", total=len(videos))
 
         # Folder creation
         folder_id = self.exporter.create_folder(playlist_title)
@@ -278,12 +290,15 @@ class PlaylistQuizPipeline:
         
         transcript_fetcher = YouTubeTranscriptFetcher(output_folder=transcript_folder)
         urls = [f"https://www.youtube.com/watch?v={v['video_id']}" for v in videos]
+        report("transcripts", "Fetching transcripts for the playlist videos.", total=len(videos))
         transcript_fetcher.fetch_transcripts(urls)
+        report("generating", "Transcripts are ready. Generating quizzes and saving them to Drive.", total=len(videos))
 
         results = []
         for i, v in enumerate(videos):
             pos = v["position"] + 1
             title_prefix = f"{pos}. {v['title']}"
+            report("generating", f"Creating quiz {pos} of {len(videos)}: {v['title']}", current=pos, total=len(videos), title=v["title"])
             self.logger.info(f"Generating quiz for: {title_prefix}")
             
             quiz_content = self.quiz_gen.generate_quiz(v["video_id"], v["title"], transcript_folder)
@@ -307,12 +322,14 @@ class PlaylistQuizPipeline:
                 "status": status,
                 "doc_url": doc_url
             })
+            report("generating", f"Finished quiz {pos} of {len(videos)}.", current=pos, total=len(videos), completed=pos)
             
             # Rate limiting delay (skip on the last item)
             if i < len(videos) - 1:
                self.logger.info(f"Waiting {self.delay_between_requests}s to avoid rate limits...")
                time.sleep(self.delay_between_requests)
             
+        report("finalizing", "Finalizing your results and Drive links.", total=len(videos))
         return {
             "playlist_title": playlist_title,
             "total_videos": len(videos),

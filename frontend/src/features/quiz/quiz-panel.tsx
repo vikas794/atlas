@@ -6,13 +6,13 @@ import { CheckCheck, Circle, ExternalLink, LoaderCircle, Youtube, AlertCircle } 
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card } from '../../components/ui/card'
-import { generatePlaylistQuiz, getDriveStatus } from '../../lib/api'
+import { generatePlaylistQuizStream, getDriveStatus } from '../../lib/api'
+import type { PlaylistQuizProgress } from '../../lib/types'
 
-interface QuizPanelProps {}
-
-export function QuizPanel({}: QuizPanelProps) {
+export function QuizPanel() {
   const [playlistUrl, setPlaylistUrl] = useState('')
   const [maxVideos, setMaxVideos] = useState<number | ''>('')
+  const [progress, setProgress] = useState<PlaylistQuizProgress | null>(null)
   
   const driveStatusQuery = useQuery({
     queryKey: ['drive', 'status'],
@@ -21,16 +21,25 @@ export function QuizPanel({}: QuizPanelProps) {
 
   const quizMutation = useMutation({
     mutationFn: async () => {
-      return generatePlaylistQuiz({
+      return generatePlaylistQuizStream({
         playlist_url: playlistUrl,
         max_videos: maxVideos === '' ? undefined : maxVideos,
         use_env_keys: true,
-      })
+      }, setProgress)
     },
+    onMutate: () => setProgress({ type: 'progress', stage: 'preparing', message: 'Starting your playlist quiz generation.' }),
   })
 
   const isRunning = quizMutation.isPending
   const result = quizMutation.data
+  const stages = [
+    ['preparing', 'Prepare workspace'],
+    ['playlist', 'Read playlist'],
+    ['transcripts', 'Fetch transcripts'],
+    ['generating', 'Create quizzes'],
+    ['finalizing', 'Finalize results'],
+  ] as const
+  const currentStageIndex = Math.max(0, stages.findIndex(([stage]) => stage === progress?.stage))
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -102,6 +111,38 @@ export function QuizPanel({}: QuizPanelProps) {
           </form>
         </Card>
       </motion.div>
+
+      {isRunning && progress && (
+        <motion.div animate={{ opacity: 1, y: 0 }} initial={{ opacity: 0, y: 12 }}>
+          <Card className="overflow-hidden border-sky-400/15 bg-sky-400/[0.04] p-0">
+            <div className="border-b border-white/8 px-5 py-4 md:px-6">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 rounded-full bg-sky-400/10 p-2 text-sky-300"><LoaderCircle className="size-4 animate-spin" /></div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-white">{progress.message}</p>
+                  <p className="mt-1 text-xs text-zinc-400">Keep this tab open — progress updates as each pipeline milestone completes.</p>
+                </div>
+                {progress.total && <span className="shrink-0 text-xs font-medium tabular-nums text-sky-200">{progress.current ?? progress.completed ?? 0}/{progress.total}</span>}
+              </div>
+              {progress.total && (
+                <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/8">
+                  <motion.div className="h-full rounded-full bg-sky-400" animate={{ width: `${Math.max(4, ((progress.current ?? progress.completed ?? 0) / progress.total) * 100)}%` }} />
+                </div>
+              )}
+            </div>
+            <ol className="grid divide-y divide-white/8 sm:grid-cols-5 sm:divide-x sm:divide-y-0">
+              {stages.map(([stage, label], index) => {
+                const completed = index < currentStageIndex
+                const active = index === currentStageIndex
+                return <li key={stage} className="flex items-center gap-2 px-4 py-3 text-xs">
+                  {completed ? <CheckCheck className="size-4 text-emerald-400" /> : active ? <LoaderCircle className="size-4 animate-spin text-sky-300" /> : <Circle className="size-4 text-zinc-600" />}
+                  <span className={active ? 'font-medium text-white' : completed ? 'text-zinc-300' : 'text-zinc-500'}>{label}</span>
+                </li>
+              })}
+            </ol>
+          </Card>
+        </motion.div>
+      )}
 
       {quizMutation.isError && (
         <Card className="border-red-500/20 bg-red-500/10 p-5">

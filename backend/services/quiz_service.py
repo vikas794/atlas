@@ -1,4 +1,5 @@
 import os
+from typing import Any, Callable, Dict, Optional
 from fastapi import HTTPException
 
 from backend.schemas.quiz import PlaylistQuizRequest, PlaylistQuizStatusResponse
@@ -14,7 +15,11 @@ class QuizService:
         has_creds = os.path.exists('credentials.json')
         return has_token or has_creds
 
-    def process_playlist(self, request: PlaylistQuizRequest) -> PlaylistQuizStatusResponse:
+    def process_playlist(
+        self,
+        request: PlaylistQuizRequest,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> PlaylistQuizStatusResponse:
         gemini_key = request.gemini_api_key if not request.use_env_keys else os.getenv("GEMINI_API_KEY")
         if not gemini_key:
             raise HTTPException(
@@ -30,7 +35,11 @@ class QuizService:
             from src.playlist_quiz_generator import PlaylistQuizPipeline
 
             pipeline = PlaylistQuizPipeline(gemini_api_key=gemini_key)
-            result = pipeline.run(request.playlist_url, max_videos=request.max_videos)
+            result = pipeline.run(
+                request.playlist_url,
+                max_videos=request.max_videos,
+                progress_callback=progress_callback,
+            )
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
