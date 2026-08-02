@@ -2,12 +2,11 @@
 Atlas - AI-Powered Content Analysis Platform
 
 This script provides a comprehensive web-based interface for AI-powered content analysis using Gradio.
-It integrates multiple analysis pipelines (YouTube processing, academic papers RAG, educational content generation) into a unified platform.
+It integrates multiple analysis pipelines (YouTube processing, educational content generation) into a unified platform.
 
 Key Features:
 - YouTube video analysis pipeline with natural language search
 - Automatic transcript extraction and AI-powered summarization
-- Academic papers RAG system with semantic search and citations
 - Educational assignment generation for hands-on learning
 - AI-powered comparison analysis with parallel processing
 - Real-time pipeline execution with step-by-step visualization
@@ -567,153 +566,6 @@ def step5_generate_assignments(
 
         traceback.print_exc()
         return f"❌ Assignment Generation Error: {str(e)}"
-
-
-# Global RAG system instance for caching
-_rag_system = None
-
-
-def get_rag_system():
-    """Get or initialize the RAG system (cached globally)."""
-    global _rag_system
-
-    if _rag_system is None:
-        # Import the RAG system
-        import os
-        import sys
-
-        sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
-        from papers_rag import AcademicPapersRAG
-
-        # Initialize the RAG system
-        _rag_system = AcademicPapersRAG(
-            papers_folder="papers/agents",
-            chunk_size=512,
-            chunk_overlap=50,
-            similarity_top_k=5,
-        )
-
-        # Initialize the system (this will use existing index if available)
-        if not _rag_system.initialize_system(force_rebuild=False):
-            print("[RAG] Failed to initialize RAG system")
-            _rag_system = None
-            return None
-
-        print("[RAG] RAG system initialized successfully")
-
-    return _rag_system
-
-
-def query_papers_rag(query: str, progress: gr.Progress = gr.Progress()) -> str:
-    """
-    Query the papers RAG database.
-
-    Args:
-        query: The search query for papers
-
-    Returns:
-        str: Formatted RAG search results with paper citations
-    """
-    try:
-        if not query or not query.strip():
-            return "❌ Please provide a query to search the papers database."
-
-        progress(0.1, desc="🔍 Initializing RAG system...")
-
-        # Get the cached RAG system
-        rag = get_rag_system()
-        if rag is None:
-            return "❌ Failed to initialize RAG system. Please ensure papers are available in the 'papers/agents' folder and the vector database is set up."
-
-        progress(0.5, desc="🔍 Searching papers...")
-
-        # Perform the search
-        result = rag.search_papers(query, include_metadata=True)
-
-        if not result["success"]:
-            return f"❌ Search failed: {result.get('error', 'Unknown error')}"
-
-        progress(1.0, desc="✅ Search completed!")
-
-        # Format the results
-        return format_rag_results(result)
-
-    except Exception as e:
-        print(f"[ERROR] RAG query failed: {str(e)}")
-        import traceback
-
-        traceback.print_exc()
-        return f"❌ RAG Query Error: {str(e)}"
-
-
-def format_rag_results(result: Dict) -> str:
-    """Format the RAG search results with paper citations."""
-    if not result["success"]:
-        return f"❌ Search failed: {result.get('error', 'Unknown error')}"
-
-    response = result["response"]
-    sources = result["sources"]
-    query = result["query"]
-    search_time = result["search_time"]
-
-    # Format the output
-    formatted_result = f"🔍 **Query:** {query}\n\n"
-    formatted_result += f"🤖 **AI Response:**\n\n{response}\n\n"
-    formatted_result += "---\n\n"
-    formatted_result += (
-        f"📚 **Sources & Citations** ({len(sources)} papers referenced):\n\n"
-    )
-
-    # Group sources by paper
-    papers_cited = {}
-    for i, source in enumerate(sources, 1):
-        file_name = source.get("file_name", "Unknown")
-        title = source.get("title", "Unknown Title")
-        authors = source.get("authors", "Unknown Authors")
-        score = source.get("score", 0.0)
-        text_excerpt = source.get("text", "")
-
-        if file_name not in papers_cited:
-            papers_cited[file_name] = {
-                "title": title,
-                "authors": authors,
-                "excerpts": [],
-                "max_score": score,
-            }
-        else:
-            papers_cited[file_name]["max_score"] = max(
-                papers_cited[file_name]["max_score"], score
-            )
-
-        papers_cited[file_name]["excerpts"].append(
-            {"text": text_excerpt, "score": score}
-        )
-
-    # Display papers with their citations
-    for i, (file_name, paper_info) in enumerate(papers_cited.items(), 1):
-        formatted_result += f"### {i}. {paper_info['title']}\n"
-        formatted_result += f"**Authors:** {paper_info['authors']}\n"
-        formatted_result += f"**File:** `{file_name}.pdf`\n"
-        formatted_result += f"**Relevance Score:** {paper_info['max_score']:.3f}\n\n"
-
-        # Show relevant excerpts
-        formatted_result += f"**Relevant Excerpts:**\n"
-        for j, excerpt in enumerate(paper_info["excerpts"], 1):
-            excerpt_text = excerpt["text"]
-            if len(excerpt_text) > 300:
-                excerpt_text = excerpt_text[:300] + "..."
-            formatted_result += f"- *{excerpt_text}* (Score: {excerpt['score']:.3f})\n"
-
-        formatted_result += "\n---\n\n"
-
-    # Add search statistics
-    formatted_result += f"## 📊 Search Statistics\n\n"
-    formatted_result += f"- **Papers Found:** {len(papers_cited)}\n"
-    formatted_result += f"- **Total Sources:** {len(sources)}\n"
-    formatted_result += f"- **Search Time:** {search_time:.2f} seconds\n"
-    formatted_result += f"- **Query:** {query}\n\n"
-
-    return formatted_result
 
 
 def format_assignments_results(
@@ -1468,7 +1320,6 @@ def create_gradio_app():
                     <p>AI-Powered Content Analysis Platform for Educational and Research Content</p>
                     <div style="display: flex; justify-content: center; gap: 20px; margin-top: 20px; flex-wrap: wrap;">
                         <div>🔍 <strong>YouTube Pipeline</strong><br/>Video search & analysis</div>
-                        <div>📚 <strong>Academic RAG</strong><br/>Papers search & citations</div>
                         <div>📝 <strong>Assignment Generator</strong><br/>Educational content creation</div>
                         <div>🤖 <strong>AI Analysis</strong><br/>Parallel content processing</div>
                         <div>📊 <strong>Comparison Engine</strong><br/>Multi-video insights</div>
@@ -1617,61 +1468,6 @@ def create_gradio_app():
             interactive=False,
         )
 
-        # RAG Query Section
-        gr.HTML(
-            '<h2 style="text-align: center; color: #667eea; margin: 30px 0 20px 0;">📚 Academic Papers RAG Query</h2>'
-        )
-
-        with gr.Row():
-            # RAG Query Input
-            with gr.Column(scale=2):
-                rag_query_input = gr.Textbox(
-                    label="🔍 Query Academic Papers",
-                    placeholder="e.g., 'What are the main types of AI agents?', 'How do LLM agents work?', 'What are the challenges in autonomous agents?'",
-                    lines=3,
-                    info="Search through indexed academic papers using natural language queries",
-                )
-
-                rag_query_btn = gr.Button(
-                    "🔍 Search Papers",
-                    variant="secondary",
-                    size="lg",
-                )
-
-            # RAG Instructions
-            with gr.Column(scale=1):
-                gr.HTML(
-                    """
-                    <div style="color: #000000 !important; background-color: #ffffff; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0;">
-                        <h4 style="color: #000000 !important; margin-bottom: 10px; font-weight: bold;">🎯 RAG Query Features:</h4>
-                        <ul style="color: #000000 !important; margin-bottom: 15px; padding-left: 20px;">
-                            <li style="color: #000000 !important; margin-bottom: 5px;">Search through academic papers using natural language</li>
-                            <li style="color: #000000 !important; margin-bottom: 5px;">Get AI-generated answers with paper citations</li>
-                            <li style="color: #000000 !important; margin-bottom: 5px;">View relevant excerpts from source papers</li>
-                            <li style="color: #000000 !important; margin-bottom: 5px;">See relevance scores for each source</li>
-                        </ul>
-                        
-                        <h4 style="color: #000000 !important; margin-bottom: 10px; font-weight: bold;">📖 Example Queries:</h4>
-                        <ul style="color: #000000 !important; padding-left: 20px;">
-                            <li style="color: #000000 !important; margin-bottom: 5px;">"What are the main architectures for AI agents?"</li>
-                            <li style="color: #000000 !important; margin-bottom: 5px;">"How do LLM-based agents handle planning?"</li>
-                            <li style="color: #000000 !important; margin-bottom: 5px;">"What evaluation methods exist for autonomous agents?"</li>
-                            <li style="color: #000000 !important; margin-bottom: 5px;">"What are the current limitations of AI agents?"</li>
-                        </ul>
-                    </div>
-                    """
-                )
-
-        # RAG Results
-        rag_results = gr.Textbox(
-            label="📚 Academic Papers Search Results",
-            lines=10,
-            max_lines=20,
-            show_copy_button=True,
-            info="AI-generated answers with paper citations and source excerpts",
-            interactive=False,
-        )
-
         # Sequential pipeline execution using .then() method
         # Step 1: Search for videos
         step1_event = process_btn.click(
@@ -1719,14 +1515,6 @@ def create_gradio_app():
             inputs=comparison_table,  # Pass the comparison results as input (for chaining)
             outputs=assignments_output,
             show_progress="full",  # Show progress only for this output
-        )
-
-        # RAG Query button click event
-        rag_query_btn.click(
-            fn=query_papers_rag,
-            inputs=rag_query_input,
-            outputs=rag_results,
-            show_progress="full",
         )
 
     return app

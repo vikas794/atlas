@@ -1,7 +1,5 @@
 import type {
   ArtifactGenerationRequest,
-  PapersQueryResponse,
-  PapersStatusResponse,
   PipelineActionResponse,
   RunBundle,
   RunManifest,
@@ -98,17 +96,6 @@ export function triggerAssignments(runId: string, payload: ArtifactGenerationReq
   })
 }
 
-export function getPapersStatus() {
-  return request<PapersStatusResponse>('/api/papers/status')
-}
-
-export function queryPapers(query: string) {
-  return request<PapersQueryResponse>('/api/papers/query', {
-    method: 'POST',
-    body: JSON.stringify({ query }),
-  })
-}
-
 export function generatePlaylistQuiz(payload: PlaylistQuizRequest) {
   return request<PlaylistQuizStatusResponse>('/api/quiz/playlist', {
     method: 'POST',
@@ -166,7 +153,7 @@ export async function uploadCredentials(file: File) {
   const response = await fetch(`${API_BASE_URL}/api/quiz/credentials`, {
     method: 'POST',
     body: formData,
-    // note: intentionally omit 'Content-Type': 'application/json' 
+    // note: intentionally omit 'Content-Type': 'application/json'
   })
 
   if (!response.ok) {
@@ -181,4 +168,3 @@ export function authenticateDrive() {
     method: 'POST',
   })
 }
-

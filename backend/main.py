@@ -5,12 +5,12 @@ import os
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.routers import papers, pipeline, runs, quiz
+from backend.routers import pipeline, runs, quiz
 
 app = FastAPI(
     title="Atlas API",
     version="1.0.0",
-    description="FastAPI backend for the Atlas RAG and YouTube analysis platform.",
+    description="FastAPI backend for the Atlas YouTube analysis platform.",
 )
 
 app.add_middleware(
@@ -28,7 +28,6 @@ app.add_middleware(
 
 app.include_router(runs.router)
 app.include_router(pipeline.router)
-app.include_router(papers.router)
 app.include_router(quiz.router)
 
 

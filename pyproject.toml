@@ -15,14 +15,8 @@ dependencies = [
     "google-genai==2.16.0",
     "openai==2.52.0",
     "yt-dlp==2026.7.4",
-    "pymupdf==1.28.0",
     "tabulate==0.10.0",
     "pandas==3.0.5",
-    "lancedb==0.36.0",
-    "llama-index-core==0.14.23",
-    "llama-index-embeddings-openai==0.6.0",
-    "llama-index-llms-openai==0.7.10",
-    "llama-index-vector-stores-lancedb==0.5.0",
     "pydantic==2.13.4",
 ]
 

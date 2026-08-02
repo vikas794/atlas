@@ -1,8 +1,8 @@
 # Atlas
 
-> AI-powered content analysis platform for technical education and research workflows
+> AI-powered content analysis platform for technical education workflows
 
-Atlas combines a YouTube analysis pipeline, academic papers RAG, comparison analysis, and assignment generation into a single product-oriented experience. The current application uses a `FastAPI` backend and a React frontend while preserving the original Python pipeline modules for search, transcript extraction, summarization, comparison, and educational content generation.
+Atlas combines a YouTube analysis pipeline, comparison analysis, and assignment generation into a single product-oriented experience. The current application uses a `FastAPI` backend and a React frontend while preserving the original Python pipeline modules for search, transcript extraction, summarization, comparison, and educational content generation.
 
 ## What Atlas Does
 
@@ -12,11 +12,6 @@ Atlas combines a YouTube analysis pipeline, academic papers RAG, comparison anal
 - Generate structured AI summaries focused on technical learning outcomes
 - Compare multiple videos across depth, difficulty, teaching style, and audience fit
 - Generate educational assignments from the analyzed content
-
-### Academic papers RAG
-- Query indexed PDFs using natural language
-- Return AI-generated responses with citations and source excerpts
-- Use LanceDB-backed retrieval through the existing paper indexing stack
 
 ### Product interface
 - Browse existing pipeline runs
@@ -30,7 +25,6 @@ Atlas combines a YouTube analysis pipeline, academic papers RAG, comparison anal
 - `Pydantic`
 - Python 3.13
 - Existing pipeline modules in `src/`
-- `LlamaIndex` + `LanceDB` for academic papers retrieval
 
 ### Frontend
 - React
@@ -49,24 +43,21 @@ flowchart LR
   ReactFrontend[ReactFrontend] --> FastAPIBackend[FastAPIBackend]
   FastAPIBackend --> RunService[RunService]
   FastAPIBackend --> PipelineService[PipelineService]
-  FastAPIBackend --> PapersService[PapersService]
   RunService --> PipelineArtifacts[pipeline_output_Artifacts]
   PipelineService --> YouTubePipeline[YouTubePipeline]
   PipelineService --> YouTubeComparator[YouTubeOutputComparator]
   PipelineService --> AssignmentGenerator[YouTubeAssignmentGenerator]
-  PapersService --> AcademicPapersRAG[AcademicPapersRAG]
 ```
 
 ### Backend responsibilities
 - Expose run metadata and artifact endpoints
-- Wrap the existing YouTube and papers workflows
+- Wrap the existing YouTube workflow
 - Read pipeline artifacts from `pipeline_output_*` folders
 - Provide execution endpoints for live searches and downstream pipeline steps
 
 ### Frontend responsibilities
 - Load the latest available run
 - Render structured search, transcript, summary, comparison, and assignment views
-- Query the academic papers system
 - Trigger new runs and artifact generation through the API
 
 ## Core Modules
@@ -75,7 +66,6 @@ flowchart LR
 - `src/youtube_pipeline.py`
 - `src/compare_youtube_outputs.py`
 - `src/assignment_generator.py`
-- `src/papers_rag.py`
 - `src/fetch_youtube_transcript.py`
 - `src/summarize_youtube_transcript.py`
 
@@ -83,16 +73,13 @@ flowchart LR
 - `backend/main.py`
 - `backend/routers/runs.py`
 - `backend/routers/pipeline.py`
-- `backend/routers/papers.py`
 - `backend/services/run_service.py`
 - `backend/services/pipeline_service.py`
-- `backend/services/papers_service.py`
 - `backend/services/artifact_readers.py`
 
 ### Frontend application
 - `frontend/src/App.tsx`
 - `frontend/src/features/pipeline/pipeline-dashboard.tsx`
-- `frontend/src/features/papers/papers-panel.tsx`
 - `frontend/src/lib/api.ts`
 - `frontend/src/lib/types.ts`
 
@@ -113,11 +100,8 @@ atlas/
 │   ├── youtube_pipeline.py
 │   ├── compare_youtube_outputs.py
 │   ├── assignment_generator.py
-│   ├── papers_rag.py
 │   └── configs/config.yaml
-├── papers/agents/                  # Academic PDFs
 ├── pipeline_output_*/              # YouTube pipeline artifacts
-├── storage/                        # Indexed papers storage
 ├── requirements.txt
 └── README.md
 ```
@@ -252,10 +236,6 @@ This uses `uv` to manage the Python 3.13.13 environment and locked dependencies 
 - `POST /api/runs/{run_id}/comparison`
 - `POST /api/runs/{run_id}/assignments`
 
-### Papers endpoints
-- `GET /api/papers/status`
-- `POST /api/papers/query`
-
 ## Application Flow
 
 ### YouTube workflow
@@ -264,11 +244,6 @@ This uses `uv` to manage the Python 3.13.13 environment and locked dependencies 
 3. Video metadata is exposed from run artifacts
 4. Transcript, summary, comparison, and assignment artifacts are read or generated
 5. The frontend renders each stage as a separate structured view
-
-### Papers workflow
-1. Frontend sends a natural language query to `POST /api/papers/query`
-2. FastAPI delegates to `AcademicPapersRAG`
-3. The response includes answer text, citations, excerpts, and timing metadata
 
 ## Configuration
 
@@ -291,11 +266,6 @@ Each pipeline run writes files under a `pipeline_output_<timestamp>` folder:
 - `transcripts/*.srt`
 - `summaries/*_summary.json`
 - `assignments/*_assignment.md`
-
-### Academic papers storage
-- PDFs live in `papers/agents/`
-- paper index storage lives in `storage/papers_index/`
-- vector store data lives in `storage/papers_vectordb/`
 
 ## Legacy Interface
 

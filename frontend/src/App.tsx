@@ -2,15 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import { Card } from './components/ui/card'
-import { PapersPanel } from './features/papers/papers-panel'
 import { PipelineDashboard } from './features/pipeline/pipeline-dashboard'
 import { GoogleAuthPanel } from './features/quiz/google-auth-panel'
 import { QuizPanel } from './features/quiz/quiz-panel'
 import {
   getLatestRun,
-  getPapersStatus,
   getRunBundle,
-  queryPapers,
   searchPipeline,
   triggerAssignments,
   triggerComparison,
@@ -33,7 +30,6 @@ function App() {
   const [maxVideos, setMaxVideos] = useState(4)
   const [transcriptLanguage, setTranscriptLanguage] = useState('en')
   const [numWorkers, setNumWorkers] = useState(4)
-  const [papersQuery, setPapersQuery] = useState('What are the main architectures for AI agents?')
 
   const latestRunQuery = useQuery({
     queryKey: ['runs', 'latest'],
@@ -46,11 +42,6 @@ function App() {
     enabled: Boolean(activeRunId),
     queryKey: ['runs', activeRunId, 'bundle'],
     queryFn: () => getRunBundle(activeRunId),
-  })
-
-  const papersStatusQuery = useQuery({
-    queryKey: ['papers', 'status'],
-    queryFn: getPapersStatus,
   })
 
   const runMutation = useMutation({
@@ -103,11 +94,6 @@ function App() {
     },
   })
 
-  const papersMutation = useMutation({
-    mutationFn: () => queryPapers(papersQuery),
-    onError: (error) => setStatusMessage(error.message),
-  })
-
   return (
     <div className="min-h-screen bg-[#0b0d10] text-white">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.04),transparent_28%),radial-gradient(circle_at_20%_20%,rgba(111,118,130,0.08),transparent_24%),radial-gradient(circle_at_80%_0%,rgba(205,151,74,0.06),transparent_22%)]" />
@@ -144,15 +130,6 @@ function App() {
           <GoogleAuthPanel />
 
           <QuizPanel />
-
-          <PapersPanel
-            isLoading={papersMutation.isPending}
-            onQueryChange={setPapersQuery}
-            onSubmit={() => papersMutation.mutate()}
-            query={papersQuery}
-            result={papersMutation.data}
-            status={papersStatusQuery.data}
-          />
         </main>
       </div>
     </div>

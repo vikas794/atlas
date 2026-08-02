@@ -148,36 +148,6 @@ export interface RunBundle {
   assignments: AssignmentArtifactResponse
 }
 
-export interface PapersStatusResponse {
-  ready: boolean
-  initialized: boolean
-  papers_folder: string
-  pdf_count: number
-  index_exists: boolean
-  vector_store_exists: boolean
-  message: string
-}
-
-export interface PapersSource {
-  file_name: string
-  title: string
-  authors: string
-  score: number
-  text: string
-  page_count: number
-  has_abstract: boolean
-}
-
-export interface PapersQueryResponse {
-  success: boolean
-  query: string
-  response: string
-  sources: PapersSource[]
-  search_time: number
-  num_sources: number
-  error: string
-}
-
 export interface SearchRequest {
   query: string
   max_videos: number
