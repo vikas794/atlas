@@ -6,7 +6,7 @@ Atlas normally starts with one command. The launcher reuses a ready backend and 
 
 - Windows PowerShell
 - Node.js 18+ (`npm.cmd`)
-- `uv`
+- `uv` (Python package manager)
 - API keys in the repository `.env` file:
 
 ```dotenv
@@ -25,7 +25,7 @@ From the repository root, run:
 .\scripts\start-dev.ps1
 ```
 
-The launcher automatically creates `.venv` with Python 3.10, installs the backend and frontend dependencies, starts both servers, and waits until they respond.
+The launcher automatically creates `.venv` with Python 3.13.13, installs the backend and frontend dependencies from `uv.lock`, starts both servers, and waits until they respond.
 
 Open:
 
@@ -58,10 +58,10 @@ After changing either dependency manifest, run:
 .\scripts\start-dev.ps1 -Install
 ```
 
-The standard `requirements.txt` covers the FastAPI application. To use the old Gradio interface in `app.py`, install the optional legacy dependency set:
+The standard dependencies are defined in `pyproject.toml` and locked in `uv.lock`. To use the old Gradio interface in `app.py`, install the optional legacy dependency group:
 
 ```powershell
-uv pip install -r requirements-legacy.txt
+uv sync --locked --extra legacy-gradio
 ```
 
 ## Stop Atlas

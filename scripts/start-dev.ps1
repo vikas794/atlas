@@ -59,14 +59,23 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     throw "uv is required. Install it from https://docs.astral.sh/uv/getting-started/installation/"
 }
 
-$createdVenv = -not (Test-Path $python)
-if ($createdVenv) {
-    uv venv --python 3.10
+$requiredPythonVersion = "3.13.13"
+$venvNeedsRecreate = -not (Test-Path $python)
+
+if (-not $venvNeedsRecreate) {
+    try {
+        $venvPythonVersion = (& $python -c "import sys; print('.'.join(map(str, sys.version_info[:3])))").Trim()
+        $venvNeedsRecreate = $venvPythonVersion -ne $requiredPythonVersion
+    } catch {
+        $venvNeedsRecreate = $true
+    }
 }
 
-if ($Install -or $createdVenv) {
-    uv pip install -r requirements.txt
+if ($venvNeedsRecreate) {
+    uv venv --clear --python $requiredPythonVersion
 }
+
+uv sync --locked --no-dev
 
 if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
     throw "Node.js and npm are required. Install Node.js 18 or later."

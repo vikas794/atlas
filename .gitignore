@@ -32,6 +32,7 @@ venv.bak/
 
 # Lock files
 *.lock
+!uv.lock
 
 # Test, coverage, and profiling
 htmlcov/

@@ -28,6 +28,7 @@ Atlas combines a YouTube analysis pipeline, academic papers RAG, comparison anal
 ### Backend
 - `FastAPI`
 - `Pydantic`
+- Python 3.13
 - Existing pipeline modules in `src/`
 - `LlamaIndex` + `LanceDB` for academic papers retrieval
 
@@ -124,7 +125,7 @@ atlas/
 ## Setup
 
 ### Prerequisites
-- Conda
+- `uv` (Python package manager, install from https://docs.astral.sh/uv/getting-started/installation/)
 - Node.js 18+
 - npm
 - OpenRouter API key
@@ -137,28 +138,15 @@ git clone https://github.com/ishandutta0098/atlas
 cd atlas
 ```
 
-### 2. Activate the conda environment
-
-If your environment already exists:
+### 2. Create Python environment and install dependencies
 
 ```bash
-conda activate atlas
+uv sync --locked --no-dev
 ```
 
-If you need to create it first:
+This creates a `.venv` with Python 3.13.13 and installs locked dependencies from `uv.lock`.
 
-```bash
-conda create -n atlas python=3.10 -y
-conda activate atlas
-```
-
-### 3. Install Python dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Install frontend dependencies
+### 3. Install frontend dependencies
 
 ```bash
 cd frontend
@@ -166,7 +154,7 @@ npm install
 cd ..
 ```
 
-### 5. Configure environment variables
+### 4. Configure environment variables
 
 Create or update `.env` in the repository root:
 
@@ -184,8 +172,7 @@ Atlas runs as two processes during development: the FastAPI backend and the Reac
 From the repository root:
 
 ```bash
-conda activate atlas
-uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+uv run uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Backend health endpoint:
@@ -224,9 +211,27 @@ npm run build
 ### Backend smoke check
 
 ```bash
-conda activate atlas
-python -c "from fastapi.testclient import TestClient; from backend.main import app; client = TestClient(app); print(client.get('/api/health').json())"
+uv run python -c "from fastapi.testclient import TestClient; from backend.main import app; client = TestClient(app); print(client.get('/api/health').json())"
 ```
+
+### Python verification
+
+```bash
+uv sync --locked --dev
+uv run ruff check .
+uv run pytest
+uv pip check
+```
+
+## Development with the Launcher
+
+For a one-command development start on Windows:
+
+```powershell
+.\scripts\start-dev.ps1
+```
+
+This uses `uv` to manage the Python 3.13.13 environment and locked dependencies automatically.
 
 ## API Overview
 
