@@ -8,7 +8,7 @@ from backend.schemas.quiz import PlaylistQuizRequest, PlaylistQuizStatusResponse
 from backend.services.artifact_readers import REPO_ROOT
 from src.utils import get_config
 
-load_dotenv(REPO_ROOT / ".env")
+load_dotenv(REPO_ROOT / ".env", override=True)
 logger = logging.getLogger(__name__)
 
 class QuizService:
@@ -25,7 +25,14 @@ class QuizService:
         """Verify the Gemini key and configured model before consuming playlist resources."""
         from google import genai
 
-        model_name = get_config("api.gemini.model", "gemini-3-flash-preview")
+        api_key = api_key.strip()
+        if not api_key.startswith("AIza"):
+            raise HTTPException(
+                status_code=401,
+                detail="GEMINI_API_KEY must be a Google AI Studio API key (normally starting with 'AIza').",
+            )
+
+        model_name = get_config("api.gemini.model", "gemini-3.6-flash")
         try:
             client = genai.Client(api_key=api_key)
             client.models.get(model=model_name)
@@ -55,6 +62,7 @@ class QuizService:
                 detail="Gemini API Key is required."
             )
 
+        gemini_key = gemini_key.strip()
         self.validate_gemini_credentials(gemini_key)
 
         # Update environment if needed so internal modules can use it

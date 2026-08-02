@@ -42,6 +42,8 @@ Run the same command:
 
 It skips dependency installation when `.venv` and `frontend/node_modules` already exist, then starts only services that are not already running.
 
+Each time the launcher starts a service, it overwrites that service's previous files in `logs/`, keeping the new run's log output clean.
+
 To open the frontend automatically:
 
 ```powershell

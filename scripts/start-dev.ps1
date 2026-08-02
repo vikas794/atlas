@@ -13,6 +13,10 @@ $backendLog = Join-Path $logsRoot "backend-dev.log"
 $backendErrorLog = Join-Path $logsRoot "backend-dev.err.log"
 $frontendLog = Join-Path $logsRoot "frontend-dev.log"
 $frontendErrorLog = Join-Path $logsRoot "frontend-dev.err.log"
+$runtimeRoot = Join-Path $repoRoot ".runtime"
+$backendPidFile = Join-Path $runtimeRoot "backend.pid"
+$frontendPidFile = Join-Path $runtimeRoot "frontend.pid"
+$backendShutdownTokenFile = Join-Path $runtimeRoot "backend-shutdown.token"
 
 function Test-Endpoint {
     param([string]$Url)
@@ -38,9 +42,18 @@ function Wait-ForEndpoint {
     return $false
 }
 
+function Reset-LogFiles {
+    param([string[]]$Paths)
+
+    foreach ($path in $Paths) {
+        Set-Content -LiteralPath $path -Value $null -Encoding utf8
+    }
+}
+
 Set-Location $repoRoot
 $env:PYTHONUTF8 = "1"
 New-Item -ItemType Directory -Path $logsRoot -Force | Out-Null
+New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     throw "uv is required. Install it from https://docs.astral.sh/uv/getting-started/installation/"
@@ -72,21 +85,31 @@ $backendUrl = "http://127.0.0.1:8000/api/health"
 $frontendUrl = "http://127.0.0.1:5173"
 
 if (-not (Test-Endpoint $backendUrl)) {
-    Start-Process -FilePath $python `
-        -ArgumentList "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload" `
+    Reset-LogFiles @($backendLog, $backendErrorLog)
+    $env:ATLAS_DEV_SHUTDOWN_TOKEN = [guid]::NewGuid().ToString("N")
+
+    $backendProcess = Start-Process -FilePath $python `
+        -ArgumentList "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "8000" `
         -WorkingDirectory $repoRoot `
         -RedirectStandardOutput $backendLog `
         -RedirectStandardError $backendErrorLog `
-        -WindowStyle Hidden
+        -WindowStyle Hidden `
+        -PassThru
+    Set-Content -LiteralPath $backendPidFile -Value $backendProcess.Id -Encoding ascii
+    Set-Content -LiteralPath $backendShutdownTokenFile -Value $env:ATLAS_DEV_SHUTDOWN_TOKEN -Encoding ascii
 }
 
 if (-not (Test-Endpoint $frontendUrl)) {
-    Start-Process -FilePath "npm.cmd" `
+    Reset-LogFiles @($frontendLog, $frontendErrorLog)
+
+    $frontendProcess = Start-Process -FilePath "npm.cmd" `
         -ArgumentList "run", "dev", "--", "--host", "127.0.0.1", "--port", "5173" `
         -WorkingDirectory $frontendRoot `
         -RedirectStandardOutput $frontendLog `
         -RedirectStandardError $frontendErrorLog `
-        -WindowStyle Hidden
+        -WindowStyle Hidden `
+        -PassThru
+    Set-Content -LiteralPath $frontendPidFile -Value $frontendProcess.Id -Encoding ascii
 }
 
 if (-not (Wait-ForEndpoint $backendUrl)) {

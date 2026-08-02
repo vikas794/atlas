@@ -17,7 +17,7 @@ api:
     timeout: 30  # seconds
 
   gemini:
-    model: "gemini-3-flash-preview"
+    model: "gemini-3.6-flash"
     timeout: 180
 
 # Processing Configuration

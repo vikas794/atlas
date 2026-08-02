@@ -92,7 +92,7 @@ class QuizGenerator:
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY is not set.")
         
-        self.model_name = get_config("api.gemini.model", "gemini-3-flash-preview")
+        self.model_name = get_config("api.gemini.model", "gemini-3.6-flash")
         self.client = genai.Client(api_key=self.api_key)
         
         self.prompt_template = self._load_prompt_template()
@@ -170,8 +170,8 @@ class GoogleDriveExporter:
         self.drive_service = build('drive', 'v3', credentials=self.creds)
         self.docs_service = build('docs', 'v1', credentials=self.creds)
 
-    def _get_credentials(self) -> Credentials:
-        creds = None
+    def _get_credentials(self) -> Any:
+        creds: Any = None
         if os.path.exists('token.json'):
             creds = Credentials.from_authorized_user_file('token.json', SCOPES)
             
@@ -221,13 +221,14 @@ class GoogleDriveExporter:
         file = self.drive_service.files().create(body=file_metadata, fields='id').execute()
         return file.get('id')
 
-    def create_doc_in_folder(self, title: str, content: str, folder_id: str) -> str:
-        # Create empty doc in folder
-        file_metadata = {
+    def create_doc_in_folder(self, title: str, content: str, folder_id: Optional[str]) -> str:
+        # Create empty doc in folder. If folder_id is None, create at root (no parents field).
+        file_metadata: Dict[str, Any] = {
             'name': title,
             'mimeType': 'application/vnd.google-apps.document',
-            'parents': [folder_id]
         }
+        if folder_id:
+            file_metadata['parents'] = [folder_id]
         doc = self.drive_service.files().create(body=file_metadata, fields='id').execute()
         doc_id = doc.get('id')
         
