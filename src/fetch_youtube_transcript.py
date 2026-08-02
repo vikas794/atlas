@@ -1,8 +1,8 @@
 import os
 import random
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, List, Optional
 
 from yt_dlp import YoutubeDL
 
@@ -18,9 +18,9 @@ class YouTubeTranscriptFetcher:
 
     def __init__(
         self,
-        output_folder: Optional[str] = None,
-        language: Optional[str] = None,
-        num_workers: Optional[int] = None,
+        output_folder: str | None = None,
+        language: str | None = None,
+        num_workers: int | None = None,
     ):
         """Initialize the YouTubeTranscriptFetcher.
 
@@ -40,9 +40,25 @@ class YouTubeTranscriptFetcher:
         )
         self.language = language or get_config("processing.transcripts.language", "en")
         self.num_workers = get_worker_count(num_workers)
-        self.max_retries = get_config("playlist_quiz.transcript_max_retries", 3)
-        self.delay_between_downloads = get_config("playlist_quiz.transcript_delay_between_requests", 4)
-        self.failure_reasons: Dict[str, str] = {}
+        self.retry_wait_seconds = get_config(
+            "playlist_quiz.transcript_retry_wait_seconds", [15, 30, 60, 120]
+        )
+        self.retry_jitter_seconds = float(
+            get_config("playlist_quiz.transcript_retry_jitter_seconds", 5)
+        )
+        self.min_delay_between_videos = float(
+            get_config("playlist_quiz.transcript_min_delay_between_videos", 15)
+        )
+        self.rate_limit_cooldown_seconds = float(
+            get_config("playlist_quiz.transcript_rate_limit_cooldown_seconds", 120)
+        )
+        self.max_retries = len(self.retry_wait_seconds)
+        self.delay_between_downloads = get_config(
+            "playlist_quiz.transcript_delay_between_requests", 4
+        )
+        self.failure_reasons: dict[str, str] = {}
+        self.statuses: dict[str, str] = {}
+        self._cooldown_until: float = 0.0
 
         # Ensure output folder exists
         self.output_folder = ensure_output_folder(self.output_folder)
@@ -55,12 +71,8 @@ class YouTubeTranscriptFetcher:
         """
         return {
             "skip_download": get_config("download.skip_download", True),
-            "writesubtitles": get_config(
-                "download.write_subtitles", True
-            ),  # human captions
-            "writeautomaticsub": get_config(
-                "download.write_automatic_sub", True
-            ),  # auto captions
+            "writesubtitles": get_config("download.write_subtitles", True),  # human captions
+            "writeautomaticsub": get_config("download.write_automatic_sub", True),  # auto captions
             "subtitleslangs": [self.language],
             "subtitlesformat": get_config("download.subtitles_format", "srt"),
             "outtmpl": os.path.join(
@@ -69,10 +81,58 @@ class YouTubeTranscriptFetcher:
             ),
             # Additional options to improve subtitle fetching reliability
             "ignoreerrors": False,  # Don't ignore errors to get proper feedback
-            "retries": self.max_retries,
+            "retries": 0,  # The fetcher owns retry behavior; disable yt-dlp retries
+            "fragment_retries": 0,
+            "extractor_retries": 0,
             "sleep_interval": 1,
             "max_sleep_interval": 3,
         }
+
+    def _classify_failure(self, detail: str) -> str:
+        """Classify a yt-dlp failure into a terminal reason category."""
+        normalized = detail.lower()
+        if (
+            "members-only" in normalized
+            or "members only" in normalized
+            or "channel's members" in normalized
+            or "channel’s members" in normalized
+        ):
+            return "members_only"
+        if "no subtitles" in normalized or (
+            "subtitle" in normalized and "not available" in normalized
+        ):
+            return "no_subtitles"
+        if "429" in detail or "rate limit" in normalized or "too many requests" in normalized:
+            return "rate_limited"
+        return "failed"
+
+    @staticmethod
+    def _safe_diagnostic(detail: str) -> str:
+        """Return a short, log-safe diagnostic for an unexpected failure."""
+        stripped = detail.strip()
+        first_line = stripped.splitlines()[0] if stripped else "unknown error"
+        return first_line[:200]
+
+    @staticmethod
+    def _video_id(url: str) -> str | None:
+        """Extract the 11-char YouTube video id from a watch/short URL."""
+        match = re.search(
+            r"(?:v=([\w-]{11})|youtu\.be/([\w-]{11})|/shorts/([\w-]{11}))",
+            url,
+        )
+        if not match:
+            return None
+        return match.group(1) or match.group(2) or match.group(3)
+
+    def _subtitle_file_exists(self, url: str) -> bool:
+        """Check whether any subtitle file was written for the URL's video."""
+        video_id = self._video_id(url)
+        if not video_id:
+            return True  # cannot verify the file; trust the download result
+        return any(
+            os.path.exists(os.path.join(self.output_folder, f"{video_id}.{self.language}.{ext}"))
+            for ext in ("srt", "vtt")
+        )
 
     def fetch_transcript(self, url: str) -> bool:
         """Fetch transcript for a single YouTube video.
@@ -83,35 +143,79 @@ class YouTubeTranscriptFetcher:
         Returns:
             bool: True if transcript was successfully downloaded, False otherwise.
         """
-        for attempt in range(1, self.max_retries + 1):
+        retry_waits = self.retry_wait_seconds
+        total_attempts = len(retry_waits) + 1
+        for attempt in range(1, total_attempts + 1):
             try:
                 with YoutubeDL(self._get_ydl_opts()) as ydl:
                     ydl.download([url])
+                if not self._subtitle_file_exists(url):
+                    self.failure_reasons[url] = "No English subtitles are available for this video."
+                    self.statuses[url] = "no_subtitles"
+                    print(f"Transcript skipped for {url}: no subtitles were written")
+                    return False
+
                 self.failure_reasons.pop(url, None)
+                self.statuses[url] = "success"
+                self._cooldown_until = 0.0
                 return True
             except Exception as error:
                 detail = str(error)
-                normalized_detail = detail.lower()
-                if "members-only" in normalized_detail or "members only" in normalized_detail:
-                    reason = "Members-only video; subtitles require authorised access."
-                elif "429" in detail:
-                    reason = "YouTube rate-limited subtitle downloads."
-                elif "no subtitles" in normalized_detail or "subtitle" in normalized_detail and "not available" in normalized_detail:
-                    reason = "No English subtitles are available for this video."
-                else:
-                    reason = "Transcript download failed; see the backend log for details."
+                category = self._classify_failure(detail)
 
-                self.failure_reasons[url] = reason
-                print(f"Transcript download failed for {url} (attempt {attempt}/{self.max_retries}): {detail}")
-                if attempt < self.max_retries and "429" in detail:
-                    wait_time = self.delay_between_downloads * (2 ** (attempt - 1)) + random.uniform(0, 1)
-                    print(f"YouTube rate limit detected. Retrying in {wait_time:.1f}s...")
+                if category == "members_only":
+                    self.failure_reasons[url] = "Members-only video; authentication unavailable."
+                    self.statuses[url] = "members_only"
+                    print(
+                        f"Transcript skipped for {url}: members-only video "
+                        f"(authentication unavailable)"
+                    )
+                    return False
+
+                if category == "no_subtitles":
+                    self.failure_reasons[url] = "No English subtitles are available for this video."
+                    self.statuses[url] = "no_subtitles"
+                    print(f"Transcript skipped for {url}: no subtitles available")
+                    return False
+
+                if category == "rate_limited":
+                    self._cooldown_until = max(
+                        self._cooldown_until,
+                        time.time() + self.rate_limit_cooldown_seconds,
+                    )
+                    if attempt >= total_attempts:
+                        self.failure_reasons[url] = (
+                            "YouTube rate-limited subtitle downloads (retries exhausted)."
+                        )
+                        self.statuses[url] = "rate_limited"
+                        print(
+                            f"Transcript download failed for {url} "
+                            f"(attempt {attempt}/{total_attempts}): {detail}"
+                        )
+                        return False
+                    wait_time = retry_waits[attempt - 1] + random.uniform(
+                        0, self.retry_jitter_seconds
+                    )
+                    print(
+                        f"YouTube rate limit detected for {url}. "
+                        f"Retrying in {wait_time:.1f}s "
+                        f"(attempt {attempt}/{total_attempts})..."
+                    )
                     time.sleep(wait_time)
-                else:
-                    break
+                    continue
+
+                self.failure_reasons[url] = (
+                    f"Transcript download failed: {self._safe_diagnostic(detail)}"
+                )
+                self.statuses[url] = "failed"
+                print(
+                    f"Transcript download failed for {url} "
+                    f"(attempt {attempt}/{total_attempts}): {detail}"
+                )
+                return False
         return False
 
-    def _fetch_transcripts_sequential(self, urls: List[str]) -> dict:
+    def _fetch_transcripts_sequential(self, urls: list[str]) -> dict:
         """Fetch transcripts sequentially (one at a time).
 
         Args:
@@ -121,14 +225,28 @@ class YouTubeTranscriptFetcher:
             dict: Dictionary with URLs as keys and success status as values.
         """
         results = {}
+        last_video_end = 0.0
         for index, url in enumerate(urls):
+            if index > 0:
+                self._wait_until_next_video(last_video_end)
             print(f"Fetching transcript for: {url}")
             results[url] = self.fetch_transcript(url)
-            if index < len(urls) - 1:
-                time.sleep(self.delay_between_downloads + random.uniform(0, 1))
+            last_video_end = time.time()
         return results
 
-    def _fetch_transcripts_parallel(self, urls: List[str]) -> dict:
+    def _wait_until_next_video(self, last_video_end: float) -> None:
+        """Enforce inter-video pacing and the pipeline-wide rate-limit cooldown."""
+        now = time.time()
+        inter_video_gate = last_video_end + max(
+            self.delay_between_downloads, self.min_delay_between_videos
+        )
+        gate = max(inter_video_gate, self._cooldown_until)
+        remaining = gate - now
+        if remaining > 0:
+            print(f"Pacing next subtitle download in {remaining:.1f}s...")
+            time.sleep(remaining)
+
+    def _fetch_transcripts_parallel(self, urls: list[str]) -> dict:
         """Fetch transcripts in parallel using ThreadPoolExecutor.
 
         Args:
@@ -141,9 +259,7 @@ class YouTubeTranscriptFetcher:
 
         with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
             # Submit all download tasks
-            future_to_url = {
-                executor.submit(self.fetch_transcript, url): url for url in urls
-            }
+            future_to_url = {executor.submit(self.fetch_transcript, url): url for url in urls}
 
             # Process completed tasks
             for future in as_completed(future_to_url):
@@ -159,7 +275,7 @@ class YouTubeTranscriptFetcher:
 
         return results
 
-    def fetch_transcripts(self, urls: List[str]) -> dict:
+    def fetch_transcripts(self, urls: list[str]) -> dict:
         """Fetch transcripts for multiple YouTube videos with automatic parallel/sequential fallback.
 
         Args:

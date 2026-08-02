@@ -59,8 +59,12 @@ playlist_quiz:
   output_folder: "quiz_output"
   delay_between_requests: 2  # seconds between quizzes to avoid Gemini rate limits
   max_retries: 3             # retries per quiz if generation fails
-  transcript_max_retries: 3
+  transcript_max_retries: 4  # derived from the retry schedule length; kept for compatibility
+  transcript_retry_wait_seconds: [15, 30, 60, 120]  # explicit retry waits between attempts
+  transcript_retry_jitter_seconds: 5                # bounded jitter (seconds) added to each retry wait
   transcript_delay_between_requests: 4
+  transcript_min_delay_between_videos: 15           # minimum delay between different videos
+  transcript_rate_limit_cooldown_seconds: 120       # pipeline-wide cooldown after any HTTP 429
 
 # Logging Configuration
 logging:

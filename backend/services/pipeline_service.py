@@ -94,11 +94,13 @@ class PipelineService:
     def generate_transcripts(self, run_id: str, request: ArtifactGenerationRequest) -> PipelineActionResponse:
         run_path = self._ensure_run_path(run_id)
         if not request.refresh and any(item.available for item in read_transcripts(run_path)):
+            transcript_count = sum(item.available for item in read_transcripts(run_path))
             return PipelineActionResponse(
                 run_id=run_id,
                 source_folder=str(run_path),
                 status="cached",
                 detail="Reused existing transcripts from the run folder.",
+                transcripts_available=transcript_count,
             )
 
         videos = [video.model_dump() for video in read_videos(run_path)]
@@ -114,11 +116,20 @@ class PipelineService:
             num_workers=request.num_workers,
         )
         transcript_paths, _ = pipeline.fetch_transcripts(videos)
+        skipped_counts: dict[str, int] = {}
+        for status in getattr(pipeline.transcript_fetcher, "statuses", {}).values():
+            if status != "success":
+                skipped_counts[status] = skipped_counts.get(status, 0) + 1
+        detail = f"Transcript generation completed for {len(transcript_paths)} of {len(videos)} videos."
+        if skipped_counts:
+            summary = ", ".join(f"{key}: {count}" for key, count in skipped_counts.items())
+            detail += f" Skipped {sum(skipped_counts.values())} ({summary})."
         return PipelineActionResponse(
             run_id=run_id,
             source_folder=str(run_path),
             status="updated",
-            detail=f"Transcript generation completed for {len(transcript_paths)} videos.",
+            detail=detail,
+            transcripts_available=len(transcript_paths),
         )
 
     def generate_summaries(self, run_id: str, request: ArtifactGenerationRequest) -> PipelineActionResponse:

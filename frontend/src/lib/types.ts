@@ -171,6 +171,7 @@ export interface PipelineActionResponse {
   source_folder: string
   status: string
   detail: string
+  transcripts_available?: number
 }
 
 export interface VideoQuizResult {

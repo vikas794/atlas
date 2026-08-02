@@ -174,6 +174,8 @@ class YouTubePipeline:
             "successful_transcripts": len(successful_transcripts),
             "fetch_results": fetch_results,
             "transcript_files": successful_transcripts,
+            "statuses": self.transcript_fetcher.statuses,
+            "failure_reasons": self.transcript_fetcher.failure_reasons,
         }
 
         metadata_path = os.path.join(

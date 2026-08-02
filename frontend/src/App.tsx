@@ -46,7 +46,7 @@ function App() {
 
   const runMutation = useMutation({
     mutationFn: async () => {
-      const result = await searchPipeline({
+      const searchResult = await searchPipeline({
         query: searchQuery,
         max_videos: maxVideos,
         transcript_language: transcriptLanguage,
@@ -55,39 +55,43 @@ function App() {
         prefer_cache: false,
       })
 
-      await triggerTranscripts(result.run_id, {
+      const transcriptResult = await triggerTranscripts(searchResult.run_id, {
         ...defaultArtifactRequest,
         transcript_language: transcriptLanguage,
         num_workers: numWorkers,
       })
 
-      await triggerSummaries(result.run_id, {
+      if (transcriptResult.transcripts_available === 0) {
+        return { runId: searchResult.run_id, transcriptsDetail: transcriptResult.detail }
+      }
+
+      await triggerSummaries(searchResult.run_id, {
         ...defaultArtifactRequest,
         transcript_language: transcriptLanguage,
         num_workers: numWorkers,
       })
 
       await Promise.all([
-        triggerComparison(result.run_id, {
+        triggerComparison(searchResult.run_id, {
           ...defaultArtifactRequest,
           transcript_language: transcriptLanguage,
           num_workers: numWorkers,
           use_ai_insights: false,
         }),
-        triggerAssignments(result.run_id, {
+        triggerAssignments(searchResult.run_id, {
           ...defaultArtifactRequest,
           transcript_language: transcriptLanguage,
           num_workers: numWorkers,
         }),
       ])
 
-      return result
+      return { runId: searchResult.run_id, transcriptsDetail: transcriptResult.detail }
     },
     onSuccess: (result) => {
-      setSelectedRunId(result.run_id)
-      setStatusMessage('Run ready.')
+      setSelectedRunId(result.runId)
+      setStatusMessage(result.transcriptsDetail)
       void queryClient.invalidateQueries({ queryKey: ['runs', 'latest'] })
-      void queryClient.invalidateQueries({ queryKey: ['runs', result.run_id, 'bundle'] })
+      void queryClient.invalidateQueries({ queryKey: ['runs', result.runId, 'bundle'] })
     },
     onError: (error) => {
       setStatusMessage(error.message)

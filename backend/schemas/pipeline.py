@@ -28,3 +28,4 @@ class PipelineActionResponse(BaseModel):
     source_folder: str
     status: str
     detail: str
+    transcripts_available: Optional[int] = None
