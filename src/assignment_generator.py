@@ -27,7 +27,15 @@ import yaml
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from utils import get_config, get_worker_count, setup_logging
+from backend.storage.repository import RunRepository
+from backend.storage.settings import get_settings
+from src.utils import (
+    atomic_write,
+    get_config,
+    get_worker_count,
+    setup_logging,
+    sha256_text,
+)
 
 load_dotenv()
 
@@ -42,7 +50,9 @@ class YouTubeAssignmentGenerator:
 
     def __init__(
         self,
-        pipeline_output_folder: str = "pipeline_output",
+        repository: Optional[object] = None,
+        run_id: Optional[str] = None,
+        pipeline_output_folder: Optional[str] = None,
         output_folder: Optional[str] = None,
         num_workers: Optional[int] = None,
         prompt_file: Optional[str] = None,
@@ -51,17 +61,32 @@ class YouTubeAssignmentGenerator:
         Initialize the assignment generator.
 
         Args:
-            pipeline_output_folder (str): Path to the pipeline output folder containing summaries.
-            output_folder (Optional[str]): Path to save assignments. If None, creates assignments subfolder.
+            repository (object): RunRepository instance that owns all records.
+            run_id (str): Identifier for this run.
+            pipeline_output_folder (str): Kept for backwards compatibility; ignored
+                when ``repository`` and ``run_id`` are provided.
+            output_folder (Optional[str]): Path to save assignments. If None, uses
+                ``repository.artifact_root / run_id / assignments``.
             num_workers (Optional[int]): Number of concurrent workers for parallel processing.
             prompt_file (Optional[str]): Path to the prompt YAML file. If None, uses default.
         """
         # Initialize configuration and logging
         setup_logging()
 
-        self.pipeline_output_folder = Path(pipeline_output_folder)
+        if repository is None:
+            raise ValueError("YouTubeAssignmentGenerator requires a RunRepository instance.")
+        if run_id is None:
+            if pipeline_output_folder:
+                run_id = Path(pipeline_output_folder).name
+            else:
+                raise ValueError("run_id is required for the repository-backed generator.")
+        if run_id is None or not run_id:
+            raise ValueError("run_id must be a non-empty string.")
+
+        self.repository = repository
+        self.run_id = run_id
+        self.pipeline_output_folder = repository.artifact_root / run_id
         self.summaries_folder = self.pipeline_output_folder / "summaries"
-        self.metadata_folder = self.pipeline_output_folder / "metadata"
 
         # Set up assignments output folder
         if output_folder:
@@ -96,14 +121,8 @@ class YouTubeAssignmentGenerator:
 
         self.openai_client = OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
 
-        # Validate folders exist
-        if not self.pipeline_output_folder.exists():
-            raise FileNotFoundError(
-                f"Pipeline output folder not found: {self.pipeline_output_folder}"
-            )
-
         print(f"[INIT] Assignment generator initialized")
-        print(f"[INIT] Pipeline folder: {self.pipeline_output_folder}")
+        print(f"[INIT] Run: {self.run_id}")
         print(f"[INIT] Summaries folder: {self.summaries_folder}")
         print(f"[INIT] Assignments folder: {self.assignments_folder}")
         print(f"[INIT] Workers: {self.num_workers}")
@@ -122,111 +141,40 @@ class YouTubeAssignmentGenerator:
 
     def load_video_metadata(self) -> Dict[str, Dict]:
         """
-        Load video metadata from pipeline results.
+        Load video metadata from the repository.
 
         Returns:
             Dict[str, Dict]: Video metadata indexed by video ID.
         """
-        print("[META] Loading video metadata...")
+        print("[META] Loading video metadata from repository...")
         video_metadata = {}
-
-        if not self.metadata_folder.exists():
-            print("[META] No metadata folder found")
-            return video_metadata
-
-        # Find the most recent pipeline results file
-        pipeline_files = list(self.metadata_folder.glob("pipeline_results_*.json"))
-        if not pipeline_files:
-            search_files = list(self.metadata_folder.glob("search_results_*.json"))
-            if search_files:
-                latest_file = max(search_files, key=lambda f: f.stat().st_mtime)
-                print(f"[META] Using search results file: {latest_file.name}")
-            else:
-                print("[META] No metadata files found")
-                return video_metadata
-        else:
-            latest_file = max(pipeline_files, key=lambda f: f.stat().st_mtime)
-            print(f"[META] Using pipeline results file: {latest_file.name}")
-
-        try:
-            with open(latest_file, "r", encoding="utf-8") as f:
-                metadata = json.load(f)
-
-            videos = metadata.get("videos", [])
-            for video in videos:
-                video_id = video.get("video_id")
-                if video_id:
-                    video_metadata[video_id] = video
-
-            print(f"[META] Loaded metadata for {len(video_metadata)} videos")
-            return video_metadata
-
-        except Exception as e:
-            print(f"[META] Error loading metadata: {e}")
-            return video_metadata
+        for video in self.repository.get_videos(self.run_id):
+            video_id = video.get("video_id")
+            if video_id:
+                video_metadata[video_id] = video
+        print(f"[META] Loaded metadata for {len(video_metadata)} videos")
+        return video_metadata
 
     def load_summary_data(self) -> Dict[str, Dict]:
         """
-        Load and parse summary data from JSON files.
+        Load summary data from the repository.
 
         Returns:
             Dict[str, Dict]: Summary data indexed by video ID.
         """
-        print("[SUMMARY] Loading summary data...")
+        print("[SUMMARY] Loading summary data from repository...")
         summary_data = {}
-
-        if not self.summaries_folder.exists():
-            print("[SUMMARY] No summaries folder found")
-            return summary_data
-
-        summary_files = list(self.summaries_folder.glob("*_summary.json"))
-        print(f"[SUMMARY] Found {len(summary_files)} summary files")
-
-        for summary_file in summary_files:
+        for record in self.repository.get_summaries(self.run_id):
+            if record.get("status") != "succeeded":
+                continue
+            video_id = record.get("video_id")
             try:
-                # Extract video ID from filename
-                video_id = summary_file.name.replace("_summary.json", "")
-
-                with open(summary_file, "r", encoding="utf-8") as f:
-                    content = f.read()
-                
-                # Try to parse JSON, handling malformed content with unescaped newlines
-                try:
-                    summary = json.loads(content)
-                except json.JSONDecodeError:
-                    # Fix unescaped newlines/control chars within JSON string values
-                    fixed_content = []
-                    in_string = False
-                    escape_next = False
-                    
-                    for char in content:
-                        if escape_next:
-                            fixed_content.append(char)
-                            escape_next = False
-                        elif char == '\\':
-                            fixed_content.append(char)
-                            escape_next = True
-                        elif char == '"':
-                            fixed_content.append(char)
-                            in_string = not in_string
-                        elif in_string and char == '\n':
-                            fixed_content.append('\\n')
-                        elif in_string and char == '\r':
-                            fixed_content.append('\\r')
-                        elif in_string and char == '\t':
-                            fixed_content.append('\\t')
-                        else:
-                            fixed_content.append(char)
-                    
-                    content = ''.join(fixed_content)
-                    summary = json.loads(content)
-
-                summary_data[video_id] = summary
-                print(f"[SUMMARY] ✓ Loaded summary for: {video_id}")
-
-            except Exception as e:
-                print(f"[SUMMARY] ✗ Error loading {summary_file.name}: {e}")
-
+                summary = json.loads(record["data"])
+            except (KeyError, TypeError, json.JSONDecodeError):
+                print(f"[SUMMARY] ✗ Error loading summary for: {video_id}")
+                continue
+            summary_data[video_id] = summary
+            print(f"[SUMMARY] ✓ Loaded summary for: {video_id}")
         print(f"[SUMMARY] Successfully loaded {len(summary_data)} summaries")
         return summary_data
 
@@ -259,39 +207,24 @@ class YouTubeAssignmentGenerator:
             print(
                 f"[ASSIGNMENTS] Using sequential processing for {video_count} video(s)"
             )
-            return self._generate_assignments_sequential(video_metadata, summary_data)
+            assignment_results, records = self._generate_assignments_sequential(
+                video_metadata, summary_data
+            )
+        else:
+            print(
+                f"[ASSIGNMENTS] Using parallel processing with {num_workers} workers for {video_count} videos"
+            )
+            assignment_results, records = self._generate_assignments_parallel(
+                video_metadata, summary_data
+            )
 
-        print(
-            f"[ASSIGNMENTS] Using parallel processing with {num_workers} workers for {video_count} videos"
-        )
-
-        # Use parallel processing with ThreadPoolExecutor
-        assignment_results = {}
-
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            # Submit all assignment generation tasks
-            future_to_video_id = {}
-            for video_id in summary_data.keys():
-                video_meta = video_metadata.get(video_id, {})
-                summary = summary_data.get(video_id, {})
-
-                future = executor.submit(
-                    self._generate_single_assignment,
-                    video_id,
-                    video_meta,
-                    summary,
-                )
-                future_to_video_id[future] = video_id
-
-            # Process completed tasks
-            for future in as_completed(future_to_video_id):
-                video_id = future_to_video_id[future]
-                try:
-                    success = future.result()
-                    assignment_results[video_id] = success
-                except Exception as e:
-                    print(f"[ASSIGNMENTS] Error processing {video_id}: {str(e)}")
-                    assignment_results[video_id] = False
+        # Persist repository records for generated assignments
+        if records:
+            self.repository.upsert_assignments(
+                self.run_id,
+                records,
+                {"num_workers": self.num_workers, "model": self.model},
+            )
 
         # Log results
         successful_assignments = sum(assignment_results.values())
@@ -301,9 +234,42 @@ class YouTubeAssignmentGenerator:
 
         return assignment_results
 
+    def _generate_assignments_parallel(
+        self, video_metadata: Dict[str, Dict], summary_data: Dict[str, Dict]
+    ) -> Tuple[Dict[str, bool], List[Dict]]:
+        """Generate assignments in parallel, returning results and repository records."""
+        assignment_results = {}
+        records = []
+
+        with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
+            future_to_video_id = {}
+            for video_id in summary_data.keys():
+                video_meta = video_metadata.get(video_id, {})
+                summary = summary_data.get(video_id, {})
+                future = executor.submit(
+                    self._generate_single_assignment,
+                    video_id,
+                    video_meta,
+                    summary,
+                )
+                future_to_video_id[future] = video_id
+
+            for future in as_completed(future_to_video_id):
+                video_id = future_to_video_id[future]
+                try:
+                    success, record = future.result()
+                    assignment_results[video_id] = success
+                    if record:
+                        records.append(record)
+                except Exception as e:
+                    print(f"[ASSIGNMENTS] Error processing {video_id}: {str(e)}")
+                    assignment_results[video_id] = False
+
+        return assignment_results, records
+
     def _generate_assignments_sequential(
         self, video_metadata: Dict[str, Dict], summary_data: Dict[str, Dict]
-    ) -> Dict[str, bool]:
+    ) -> Tuple[Dict[str, bool], List[Dict]]:
         """
         Generate assignments sequentially as fallback.
 
@@ -312,25 +278,28 @@ class YouTubeAssignmentGenerator:
             summary_data (Dict): Summary data.
 
         Returns:
-            Dict[str, bool]: Assignment generation results for each video ID.
+            Tuple[Dict[str, bool], List[Dict]]: (results, repository records).
         """
         assignment_results = {}
+        records = []
 
         for video_id in summary_data.keys():
             video_meta = video_metadata.get(video_id, {})
             summary = summary_data.get(video_id, {})
 
-            success = self._generate_single_assignment(video_id, video_meta, summary)
+            success, record = self._generate_single_assignment(video_id, video_meta, summary)
             assignment_results[video_id] = success
+            if record:
+                records.append(record)
 
         print(
             f"[ASSIGNMENTS] Generated assignments for {len(assignment_results)} videos (sequential)"
         )
-        return assignment_results
+        return assignment_results, records
 
     def _generate_single_assignment(
         self, video_id: str, video_meta: Dict, summary: Dict
-    ) -> bool:
+    ) -> Tuple[bool, Optional[Dict]]:
         """
         Generate an assignment for a single video.
 
@@ -340,8 +309,9 @@ class YouTubeAssignmentGenerator:
             summary (Dict): Video summary data.
 
         Returns:
-            bool: True if successful, False otherwise.
+            Tuple[bool, Optional[Dict]]: (success flag, repository record or None).
         """
+        record = None
         try:
             # Get thread ID for logging
             import threading
@@ -405,7 +375,7 @@ class YouTubeAssignmentGenerator:
 
             assignment_content = response.choices[0].message.content.strip()
 
-            # Save assignment to file
+            # Save assignment to file (atomically)
             assignment_filename = f"{video_id}_assignment.md"
             assignment_path = self.assignments_folder / assignment_filename
 
@@ -431,8 +401,23 @@ class YouTubeAssignmentGenerator:
 {assignment_content}
 """
 
-            with open(assignment_path, "w", encoding="utf-8") as f:
-                f.write(full_assignment)
+            atomic_write(assignment_path, full_assignment)
+
+            record = {
+                "video_id": video_id,
+                "artifact_path": str(assignment_path),
+                "content_hash": sha256_text(full_assignment),
+                "byte_size": len(full_assignment.encode("utf-8")),
+                "metadata": assignment_metadata,
+                "display_metadata": {
+                    key: str(value)
+                    for key, value in assignment_metadata.items()
+                    if key in ("difficulty_level", "model_used", "channel", "video_id", "video_title", "video_url")
+                    and value not in (None, "")
+                },
+                "status": "succeeded",
+                "error": None,
+            }
 
             total_time = time.time() - start_time
             print(
@@ -440,14 +425,14 @@ class YouTubeAssignmentGenerator:
             )
             print(f"[ASSIGN-{thread_id}] ✓ Saved: {assignment_filename}")
 
-            return True
+            return True, record
 
         except Exception as e:
             total_time = time.time() - start_time
             print(
                 f"[ASSIGN-{thread_id}] ✗ Error generating assignment for {video_id} after {total_time:.2f}s: {str(e)}"
             )
-            return False
+            return False, record
 
     def run_assignment_generation(self) -> Dict:
         """
@@ -503,13 +488,6 @@ class YouTubeAssignmentGenerator:
             "assignment_results": assignment_results,
         }
 
-        # Save results metadata
-        results_path = (
-            self.assignments_folder / f"assignment_results_{int(time.time())}.json"
-        )
-        with open(results_path, "w", encoding="utf-8") as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
-
         # Print final summary
         print("\n" + "=" * 80)
         print("ASSIGNMENT GENERATION COMPLETED")
@@ -521,7 +499,6 @@ class YouTubeAssignmentGenerator:
             f"[ASSIGNMENTS] ✓ Success Rate: {successful_assignments/len(summary_data)*100:.1f}%"
         )
         print(f"[ASSIGNMENTS] ✓ Total Duration: {duration:.2f} seconds")
-        print(f"[ASSIGNMENTS] ✓ Results Saved: {results_path}")
         print(f"[ASSIGNMENTS] ✓ Assignments Folder: {self.assignments_folder}")
         print("=" * 80)
 
@@ -593,9 +570,12 @@ def main():
         sys.exit(1)
 
     try:
-        # Initialize assignment generator
+        # Initialize assignment generator (repository-backed)
         print(f"🔧 Initializing assignment generator...")
+        settings = get_settings()
+        repository = RunRepository(settings["database_path"], settings["artifact_root"])
         generator = YouTubeAssignmentGenerator(
+            repository=repository,
             pipeline_output_folder=args.pipeline_folder,
             output_folder=args.assignments_folder,
             num_workers=args.workers,

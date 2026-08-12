@@ -23,7 +23,9 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from tabulate import tabulate
 
-from utils import get_config, get_worker_count, setup_logging
+from backend.storage.repository import RunRepository
+from backend.storage.settings import get_settings
+from src.utils import get_config, get_worker_count, setup_logging
 
 load_dotenv()
 
@@ -36,7 +38,9 @@ class YouTubeOutputComparator:
 
     def __init__(
         self,
-        pipeline_output_folder: str = "pipeline_output",
+        repository: Optional[object] = None,
+        run_id: Optional[str] = None,
+        pipeline_output_folder: Optional[str] = None,
         use_ai_insights: Optional[bool] = None,
         num_workers: Optional[int] = None,
     ):
@@ -44,7 +48,10 @@ class YouTubeOutputComparator:
         Initialize the output comparator.
 
         Args:
-            pipeline_output_folder (str): Path to the pipeline output folder.
+            repository (object): RunRepository instance that owns all records.
+            run_id (str): Identifier for this run.
+            pipeline_output_folder (str): Kept for backwards compatibility; ignored
+                when ``repository`` and ``run_id`` are provided.
             use_ai_insights (Optional[bool]): Whether to generate AI-powered insights for comparison.
                 If None, defaults to True if OpenAI API key is available.
             num_workers (Optional[int]): Number of concurrent workers for parallel processing.
@@ -53,9 +60,20 @@ class YouTubeOutputComparator:
         # Initialize configuration and logging
         setup_logging()
 
-        self.output_folder = Path(pipeline_output_folder)
+        if repository is None:
+            raise ValueError("YouTubeOutputComparator requires a RunRepository instance.")
+        if run_id is None:
+            if pipeline_output_folder:
+                run_id = Path(pipeline_output_folder).name
+            else:
+                raise ValueError("run_id is required for the repository-backed comparator.")
+        if run_id is None or not run_id:
+            raise ValueError("run_id must be a non-empty string.")
+
+        self.repository = repository
+        self.run_id = run_id
+        self.output_folder = repository.artifact_root / run_id
         self.summaries_folder = self.output_folder / "summaries"
-        self.metadata_folder = self.output_folder / "metadata"
         self.transcripts_folder = self.output_folder / "transcripts"
 
         # Configure OpenAI settings from config
@@ -81,15 +99,12 @@ class YouTubeOutputComparator:
                 self.openai_client = OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
                 print(f"[INIT] OpenRouter client initialized (model: {self.model})")
 
-        # Validate folders exist
-        if not self.output_folder.exists():
-            raise FileNotFoundError(
-                f"Pipeline output folder not found: {self.output_folder}"
-            )
+        # Ensure the managed artifact folder exists
+        self.output_folder.mkdir(parents=True, exist_ok=True)
+        self.summaries_folder.mkdir(parents=True, exist_ok=True)
 
-        print(f"[INIT] Initialized comparator for: {self.output_folder}")
+        print(f"[INIT] Initialized comparator for run: {self.run_id}")
         print(f"[INIT] Summaries folder: {self.summaries_folder}")
-        print(f"[INIT] Metadata folder: {self.metadata_folder}")
         print(f"[INIT] Workers: {self.num_workers}")
         print(
             f"[INIT] AI insights: {'Enabled' if self.use_ai_insights else 'Disabled'}"
@@ -170,112 +185,40 @@ class YouTubeOutputComparator:
 
     def load_video_metadata(self) -> Dict[str, Dict]:
         """
-        Load video metadata from pipeline results.
+        Load video metadata from the repository.
 
         Returns:
             Dict[str, Dict]: Video metadata indexed by video ID.
         """
-        print("[META] Loading video metadata...")
+        print("[META] Loading video metadata from repository...")
         video_metadata = {}
-
-        if not self.metadata_folder.exists():
-            print("[META] No metadata folder found")
-            return video_metadata
-
-        # Find the most recent pipeline results file
-        pipeline_files = list(self.metadata_folder.glob("pipeline_results_*.json"))
-        if not pipeline_files:
-            search_files = list(self.metadata_folder.glob("search_results_*.json"))
-            if search_files:
-                # Use search results as fallback
-                latest_file = max(search_files, key=lambda f: f.stat().st_mtime)
-                print(f"[META] Using search results file: {latest_file.name}")
-            else:
-                print("[META] No metadata files found")
-                return video_metadata
-        else:
-            latest_file = max(pipeline_files, key=lambda f: f.stat().st_mtime)
-            print(f"[META] Using pipeline results file: {latest_file.name}")
-
-        try:
-            with open(latest_file, "r", encoding="utf-8") as f:
-                metadata = json.load(f)
-
-            videos = metadata.get("videos", [])
-            for video in videos:
-                video_id = video.get("video_id")
-                if video_id:
-                    video_metadata[video_id] = video
-
-            print(f"[META] Loaded metadata for {len(video_metadata)} videos")
-            return video_metadata
-
-        except Exception as e:
-            print(f"[META] Error loading metadata: {e}")
-            return video_metadata
+        for video in self.repository.get_videos(self.run_id):
+            video_id = video.get("video_id")
+            if video_id:
+                video_metadata[video_id] = video
+        print(f"[META] Loaded metadata for {len(video_metadata)} videos")
+        return video_metadata
 
     def load_summary_data(self) -> Dict[str, Dict]:
         """
-        Load and parse summary data from JSON files.
+        Load summary data from the repository.
 
         Returns:
             Dict[str, Dict]: Summary data indexed by video ID.
         """
-        print("[SUMMARY] Loading summary data...")
+        print("[SUMMARY] Loading summary data from repository...")
         summary_data = {}
-
-        if not self.summaries_folder.exists():
-            print("[SUMMARY] No summaries folder found")
-            return summary_data
-
-        summary_files = list(self.summaries_folder.glob("*_summary.json"))
-        print(f"[SUMMARY] Found {len(summary_files)} summary files")
-
-        for summary_file in summary_files:
+        for record in self.repository.get_summaries(self.run_id):
+            if record.get("status") != "succeeded":
+                continue
+            video_id = record.get("video_id")
             try:
-                # Extract video ID from filename
-                video_id = summary_file.name.replace("_summary.json", "")
-
-                with open(summary_file, "r", encoding="utf-8") as f:
-                    content = f.read()
-                
-                # Try to parse JSON, handling malformed content with unescaped newlines
-                try:
-                    summary = json.loads(content)
-                except json.JSONDecodeError:
-                    # Fix unescaped newlines/control chars within JSON string values
-                    fixed_content = []
-                    in_string = False
-                    escape_next = False
-                    
-                    for char in content:
-                        if escape_next:
-                            fixed_content.append(char)
-                            escape_next = False
-                        elif char == '\\':
-                            fixed_content.append(char)
-                            escape_next = True
-                        elif char == '"':
-                            fixed_content.append(char)
-                            in_string = not in_string
-                        elif in_string and char == '\n':
-                            fixed_content.append('\\n')
-                        elif in_string and char == '\r':
-                            fixed_content.append('\\r')
-                        elif in_string and char == '\t':
-                            fixed_content.append('\\t')
-                        else:
-                            fixed_content.append(char)
-                    
-                    content = ''.join(fixed_content)
-                    summary = json.loads(content)
-
-                summary_data[video_id] = summary
-                print(f"[SUMMARY] ✓ Loaded summary for: {video_id}")
-
-            except Exception as e:
-                print(f"[SUMMARY] ✗ Error loading {summary_file.name}: {e}")
-
+                summary = json.loads(record["data"])
+            except (KeyError, TypeError, json.JSONDecodeError):
+                print(f"[SUMMARY] ✗ Error loading summary for: {video_id}")
+                continue
+            summary_data[video_id] = summary
+            print(f"[SUMMARY] ✓ Loaded summary for: {video_id}")
         print(f"[SUMMARY] Successfully loaded {len(summary_data)} summaries")
         return summary_data
 
@@ -1073,16 +1016,15 @@ Only respond with valid JSON. Be specific and actionable in your analysis."""
         print("-" * 40)
         insights_report = self.generate_insights_report(video_metadata, summary_data)
 
-        # Step 7: Save detailed comparison if requested
+        # Step 7: Save detailed comparison (repository-backed runs persist via
+        # the service layer; skip the legacy on-disk detailed comparison file)
         if save_detailed:
             print("\n💾 STEP 7: Saving Detailed Comparison")
             print("-" * 40)
-            detailed_path = (
-                self.output_folder
-                / f"detailed_comparison_{int(datetime.now().timestamp())}.json"
-            )
             self.save_detailed_comparison(
-                str(detailed_path), video_metadata, summary_data
+                str(self.output_folder / "detailed_comparison.json"),
+                video_metadata,
+                summary_data,
             )
 
         # Step 8: Generate personalized recommendations if AI insights available
@@ -1170,9 +1112,12 @@ Examples:
     args = parser.parse_args()
 
     try:
-        # Initialize comparator
+        # Initialize comparator (repository-backed)
+        settings = get_settings()
+        repository = RunRepository(settings["database_path"], settings["artifact_root"])
         comparator = YouTubeOutputComparator(
-            args.output_folder,
+            repository=repository,
+            pipeline_output_folder=args.output_folder,
             use_ai_insights=not args.no_ai_insights,
             num_workers=args.workers,
         )

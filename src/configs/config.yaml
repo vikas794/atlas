@@ -66,6 +66,13 @@ playlist_quiz:
   transcript_min_delay_between_videos: 15           # minimum delay between different videos
   transcript_rate_limit_cooldown_seconds: 120       # pipeline-wide cooldown after any HTTP 429
 
+# Storage Configuration (SQLite pipeline store)
+storage:
+  database_path: "data/atlas.sqlite3"
+  artifact_root: "data/artifacts"
+  cache_ttl_days: 30
+  cleanup_retention_days: 90
+
 # Logging Configuration
 logging:
   level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL

@@ -40,6 +40,9 @@ from typing import Dict, List, Optional, Tuple
 import gradio as gr
 from dotenv import load_dotenv
 
+from backend.storage.repository import RunRepository
+from backend.storage.settings import get_settings
+from src.utils import load_json_with_recovery, sha256_text
 # Import components from the YouTube pipeline
 from src.youtube_pipeline import YouTubePipeline
 
@@ -165,7 +168,19 @@ def step1_search_videos(
 
             # Try to initialize the pipeline with user configuration
             try:
+                settings = get_settings()
+                repository = RunRepository(settings["database_path"], settings["artifact_root"])
+                run_id = f"pipeline_output_{int(time.time() * 1000)}"
+                repository.create_run(
+                    run_id=run_id,
+                    search_query=search_query,
+                    normalized_query=search_query.strip().lower(),
+                    max_videos=max_videos,
+                    transcript_language=transcript_language,
+                )
                 pipeline = YouTubePipeline(
+                    repository=repository,
+                    run_id=run_id,
                     max_videos=max_videos,
                     transcript_language=transcript_language,
                     output_folder=f"pipeline_output_{int(time.time())}",
@@ -218,6 +233,43 @@ def step1_search_videos(
                         videos = search_metadata.get("videos", [])
                     
                     if videos:
+                        # Register the read-only legacy run so repository-backed
+                        # readers can consume its existing summaries.
+                        settings = get_settings()
+                        repository = RunRepository(settings["database_path"], settings["artifact_root"])
+                        run_id = Path(fallback_folder).name
+                        if repository.get_run(run_id) is None:
+                            repository.create_run(
+                                run_id=run_id,
+                                search_query=search_metadata.get("search_query", ""),
+                                normalized_query=search_metadata.get("search_query", "").strip().lower(),
+                                max_videos=search_metadata.get("max_videos_requested", len(videos)),
+                                is_fallback=True,
+                            )
+                        repository.set_videos(run_id, videos)
+
+                        summary_records = []
+                        for video in videos:
+                            summary_path = Path(fallback_folder) / "summaries" / f"{video['video_id']}_summary.json"
+                            if not summary_path.exists():
+                                continue
+                            try:
+                                content = summary_path.read_text(encoding="utf-8")
+                                summary_records.append(
+                                    {
+                                        "video_id": video["video_id"],
+                                        "artifact_path": str(summary_path),
+                                        "content_hash": sha256_text(content),
+                                        "byte_size": len(content.encode("utf-8")),
+                                        "data": load_json_with_recovery(content),
+                                        "status": "succeeded",
+                                    }
+                                )
+                            except (OSError, ValueError, json.JSONDecodeError):
+                                continue
+                        if summary_records:
+                            repository.upsert_summaries(run_id, summary_records)
+
                         # Create a read-only pipeline reference (don't modify fallback folder)
                         # Store the fallback folder paths for later use but don't create any new files
                         pipeline_state["fallback_mode"] = True
@@ -226,6 +278,8 @@ def step1_search_videos(
                         pipeline_state["transcripts_folder"] = os.path.join(fallback_folder, "transcripts")
                         pipeline_state["summaries_folder"] = os.path.join(fallback_folder, "summaries")
                         pipeline_state["metadata_folder"] = os.path.join(fallback_folder, "metadata")
+                        pipeline_state["repository"] = repository
+                        pipeline_state["run_id"] = run_id
                         
                         print(f"[FALLBACK] Loaded {len(videos)} videos from existing pipeline (READ-ONLY)")
                         
@@ -493,12 +547,7 @@ def step5_generate_assignments(
             output_folder = pipeline.output_folder
             progress(0.1, desc="📝 Initializing assignment generator...")
 
-        # Import the assignment generator
-        import os
-        import sys
-
-        sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
-        from assignment_generator import YouTubeAssignmentGenerator
+        from src.assignment_generator import YouTubeAssignmentGenerator
 
         # Get the current pipeline state to use the same worker configuration
         num_workers = 2  # Default fallback value
@@ -515,8 +564,17 @@ def step5_generate_assignments(
             progress(0.3, desc="🤖 Running parallel assignment generation...")
 
         # Initialize the assignment generator (in read-only mode for fallback)
+        pipeline = pipeline_state.get("pipeline")
+        repository = getattr(pipeline, "repository", None) or pipeline_state.get("repository")
+        run_id = getattr(pipeline, "run_id", None) or pipeline_state.get("run_id")
+        if repository is None:
+            settings = get_settings()
+            repository = RunRepository(settings["database_path"], settings["artifact_root"])
         generator = YouTubeAssignmentGenerator(
-            pipeline_output_folder=output_folder, num_workers=num_workers if not pipeline_state.get("fallback_mode") else 0
+            repository=repository,
+            run_id=run_id,
+            pipeline_output_folder=output_folder,
+            num_workers=num_workers if not pipeline_state.get("fallback_mode") else 0,
         )
 
         progress(0.5, desc="📊 Loading video data and summaries...")
@@ -548,7 +606,7 @@ def step5_generate_assignments(
             assignment_results,
             video_metadata,
             summary_data,
-            generator.assignments_folder,
+            Path(output_folder) / "assignments" if pipeline_state.get("fallback_mode") else generator.assignments_folder,
         )
         
         # In demo mode, don't add any special prefixes
@@ -919,12 +977,7 @@ def format_summaries_results(
 def generate_comparison_table_with_script(pipeline_output_folder: str) -> str:
     """Generate a comparison table using the existing comparison script."""
     try:
-        # Import the comparison script
-        import os
-        import sys
-
-        sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
-        from compare_youtube_outputs import YouTubeOutputComparator
+        from src.compare_youtube_outputs import YouTubeOutputComparator
 
         # Get the current pipeline state to use the same worker configuration
         global pipeline_state
@@ -939,7 +992,15 @@ def generate_comparison_table_with_script(pipeline_output_folder: str) -> str:
             )  # Minimum 2 workers
 
         # Initialize the comparator with parallel processing optimized for AI insights
+        pipeline = pipeline_state.get("pipeline")
+        repository = getattr(pipeline, "repository", None) or pipeline_state.get("repository")
+        run_id = getattr(pipeline, "run_id", None) or pipeline_state.get("run_id")
+        if repository is None:
+            settings = get_settings()
+            repository = RunRepository(settings["database_path"], settings["artifact_root"])
         comparator = YouTubeOutputComparator(
+            repository=repository,
+            run_id=run_id,
             pipeline_output_folder=pipeline_output_folder,
             use_ai_insights=True,  # Enable AI insights for comprehensive comparison
             num_workers=num_workers,  # Use user-configured worker count for better parallel performance

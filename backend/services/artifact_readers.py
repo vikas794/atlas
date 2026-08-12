@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 from datetime import datetime
@@ -17,165 +16,78 @@ from backend.schemas.runs import (
     TranscriptArtifact,
     VideoResult,
 )
+from backend.storage.repository import RunRepository
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_FALLBACK_RUN_ID = "pipeline_output_1759513972"
 SRC_ROOT = REPO_ROOT / "src"
 
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 if str(SRC_ROOT) not in sys.path:
     sys.path.append(str(SRC_ROOT))
 
-from compare_youtube_outputs import YouTubeOutputComparator
+from src.compare_youtube_outputs import YouTubeOutputComparator  # noqa: E402
+from src.utils import clean_srt_content  # noqa: E402
 
 
-def get_run_path(run_id: str) -> Path:
-    return REPO_ROOT / run_id
+def read_videos(repository: RunRepository, run_id: str) -> list[VideoResult]:
+    return [VideoResult(**video) for video in repository.get_videos(run_id)]
 
 
-def get_latest_file(folder: Path, pattern: str) -> Path | None:
-    files = list(folder.glob(pattern))
-    if not files:
-        return None
-    return max(files, key=lambda path: path.stat().st_mtime)
-
-
-def load_json_with_recovery(raw_content: str) -> dict[str, Any]:
-    try:
-        return json.loads(raw_content)
-    except json.JSONDecodeError:
-        fixed_content: list[str] = []
-        in_string = False
-        escape_next = False
-
-        for char in raw_content:
-            if escape_next:
-                fixed_content.append(char)
-                escape_next = False
-            elif char == "\\":
-                fixed_content.append(char)
-                escape_next = True
-            elif char == '"':
-                fixed_content.append(char)
-                in_string = not in_string
-            elif in_string and char == "\n":
-                fixed_content.append("\\n")
-            elif in_string and char == "\r":
-                fixed_content.append("\\r")
-            elif in_string and char == "\t":
-                fixed_content.append("\\t")
-            else:
-                fixed_content.append(char)
-
-        return json.loads("".join(fixed_content))
-
-
-def read_json_file(path: Path | None) -> dict[str, Any]:
-    if path is None or not path.exists():
-        return {}
-    return load_json_with_recovery(path.read_text(encoding="utf-8"))
-
-
-def read_search_metadata(run_dir: Path) -> dict[str, Any]:
-    metadata_dir = run_dir / "metadata"
-    return read_json_file(get_latest_file(metadata_dir, "search_results_*.json"))
-
-
-def read_fetch_metadata(run_dir: Path) -> dict[str, Any]:
-    metadata_dir = run_dir / "metadata"
-    return read_json_file(get_latest_file(metadata_dir, "fetch_results_*.json"))
-
-
-def read_summary_metadata(run_dir: Path) -> dict[str, Any]:
-    metadata_dir = run_dir / "metadata"
-    return read_json_file(get_latest_file(metadata_dir, "summary_results_*.json"))
-
-
-def read_pipeline_metadata(run_dir: Path) -> dict[str, Any]:
-    metadata_dir = run_dir / "metadata"
-    return read_json_file(get_latest_file(metadata_dir, "pipeline_results_*.json"))
-
-
-def read_videos(run_dir: Path) -> list[VideoResult]:
-    search_metadata = read_search_metadata(run_dir)
-    videos = search_metadata.get("videos", [])
-    return [VideoResult(**video) for video in videos]
-
-
-def build_video_index(run_dir: Path) -> dict[str, VideoResult]:
-    return {video.video_id: video for video in read_videos(run_dir)}
-
-
-def clean_srt_content(raw_srt: str) -> str:
-    clean_content = re.sub(
-        r"\d+\n\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}\n",
-        "",
-        raw_srt,
-    )
-    clean_content = re.sub(r"^\d+$", "", clean_content, flags=re.MULTILINE)
-    clean_content = re.sub(r"\n\s*\n", "\n", clean_content)
-    clean_content = clean_content.strip()
-
-    if not clean_content:
-        return ""
-
-    sentences = clean_content.replace("\n", " ").split(". ")
-    paragraphs: list[str] = []
-    current_paragraph: list[str] = []
-
-    for index, sentence in enumerate(sentences):
-        sentence = sentence.strip()
-        if not sentence:
-            continue
-
-        if index < len(sentences) - 1 and not sentence.endswith("."):
-            sentence += "."
-        current_paragraph.append(sentence)
-
-        if (index + 1) % 4 == 0:
-            paragraphs.append(" ".join(current_paragraph))
-            current_paragraph = []
-
-    if current_paragraph:
-        paragraphs.append(" ".join(current_paragraph))
-
-    return "\n\n".join(paragraphs).strip()
-
-
-def read_transcripts(run_dir: Path) -> list[TranscriptArtifact]:
-    transcripts_dir = run_dir / "transcripts"
-    video_index = build_video_index(run_dir)
+def read_transcripts(repository: RunRepository, run_id: str) -> list[TranscriptArtifact]:
+    video_index = {video.video_id: video for video in read_videos(repository, run_id)}
+    records = {record["video_id"]: record for record in repository.get_transcripts(run_id)}
     artifacts: list[TranscriptArtifact] = []
 
     for video_id, video in video_index.items():
-        transcript_files = sorted(transcripts_dir.glob(f"{video_id}.*.srt"))
-        transcript_path = transcript_files[0] if transcript_files else None
-        raw_srt = transcript_path.read_text(encoding="utf-8") if transcript_path else ""
-        language = transcript_path.name.split(".")[1] if transcript_path else "en"
+        record = records.get(video_id)
+        path = Path(record["artifact_path"]) if record and record.get("artifact_path") else None
+        usable = (
+            record is not None
+            and record["status"] == "succeeded"
+            and path is not None
+            and path.exists()
+        )
+        raw_srt = ""
+        if usable:
+            try:
+                raw_srt = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                usable = False
+                raw_srt = ""
 
         artifacts.append(
             TranscriptArtifact(
                 video_id=video_id,
                 title=video.title,
                 channel=video.channel,
-                language=language,
-                transcript_path=str(transcript_path) if transcript_path else None,
+                language=record["language"] if record else "en",
+                transcript_path=str(path) if usable else None,
                 raw_srt=raw_srt,
-                cleaned_text=clean_srt_content(raw_srt),
-                available=bool(transcript_path),
+                cleaned_text=clean_srt_content(raw_srt) if usable else "",
+                available=usable,
             )
         )
 
     return artifacts
 
 
-def read_summaries(run_dir: Path) -> list[SummaryArtifact]:
-    summaries_dir = run_dir / "summaries"
-    video_index = build_video_index(run_dir)
+def read_summaries(repository: RunRepository, run_id: str) -> list[SummaryArtifact]:
+    video_index = {video.video_id: video for video in read_videos(repository, run_id)}
+    records = {record["video_id"]: record for record in repository.get_summaries(run_id)}
     artifacts: list[SummaryArtifact] = []
 
     for video_id, video in video_index.items():
-        summary_path = summaries_dir / f"{video_id}_summary.json"
-        summary_data = read_json_file(summary_path if summary_path.exists() else None)
+        record = records.get(video_id)
+        usable = record is not None and record["status"] == "succeeded"
+        data: dict[str, Any] = {}
+        if record and record.get("data"):
+            try:
+                data = json.loads(record["data"])
+            except (TypeError, json.JSONDecodeError):
+                data = {}
+        path = Path(record["artifact_path"]) if record and record.get("artifact_path") else None
+        available = usable and path is not None and path.exists()
 
         artifacts.append(
             SummaryArtifact(
@@ -183,13 +95,13 @@ def read_summaries(run_dir: Path) -> list[SummaryArtifact]:
                 title=video.title,
                 channel=video.channel,
                 url=video.url,
-                summary_path=str(summary_path) if summary_path.exists() else None,
-                high_level_overview=summary_data.get("high_level_overview", ""),
-                technical_breakdown=summary_data.get("technical_breakdown", []),
-                insights=summary_data.get("insights", []),
-                applications=summary_data.get("applications", []),
-                limitations=summary_data.get("limitations", []),
-                available=summary_path.exists(),
+                summary_path=str(path) if path else None,
+                high_level_overview=data.get("high_level_overview", ""),
+                technical_breakdown=data.get("technical_breakdown", []),
+                insights=data.get("insights", []),
+                applications=data.get("applications", []),
+                limitations=data.get("limitations", []),
+                available=available,
             )
         )
 
@@ -232,7 +144,6 @@ def _parse_assignment_sections(markdown: str) -> list[dict[str, Any]]:
 
     sections: list[dict[str, Any]] = []
     for index, match in enumerate(matches):
-        start = match.start()
         end = matches[index + 1].start() if index + 1 < len(matches) else len(markdown)
         heading = match.group(0).strip()
         body = markdown[match.end() : end].strip()
@@ -277,21 +188,36 @@ def _build_assignment_display_metadata(metadata: dict[str, Any]) -> dict[str, st
     }
 
 
-def read_assignments(run_dir: Path) -> list[AssignmentArtifact]:
-    assignments_dir = run_dir / "assignments"
-    video_index = build_video_index(run_dir)
+def read_assignments(repository: RunRepository, run_id: str) -> list[AssignmentArtifact]:
+    video_index = {video.video_id: video for video in read_videos(repository, run_id)}
+    records = {record["video_id"]: record for record in repository.get_assignments(run_id)}
     artifacts: list[AssignmentArtifact] = []
 
     for video_id, video in video_index.items():
-        assignment_path = assignments_dir / f"{video_id}_assignment.md"
+        record = records.get(video_id)
+        path = Path(record["artifact_path"]) if record and record.get("artifact_path") else None
+        usable = (
+            record is not None
+            and record["status"] == "succeeded"
+            and path is not None
+            and path.exists()
+        )
         metadata: dict[str, Any] = {}
+        if record and record.get("metadata"):
+            try:
+                metadata = json.loads(record["metadata"])
+            except (TypeError, json.JSONDecodeError):
+                metadata = {}
         markdown = ""
         sections: list[dict[str, Any]] = []
         checklist: list[dict[str, str]] = []
-        if assignment_path.exists():
-            metadata, markdown = parse_assignment_file(assignment_path)
-            sections = _parse_assignment_sections(markdown)
-            checklist = _parse_assignment_checklist(markdown)
+        if usable:
+            try:
+                _, markdown = parse_assignment_file(path)
+                sections = _parse_assignment_sections(markdown)
+                checklist = _parse_assignment_checklist(markdown)
+            except Exception:
+                markdown, sections, checklist = "", [], []
 
         artifacts.append(
             AssignmentArtifact(
@@ -299,13 +225,13 @@ def read_assignments(run_dir: Path) -> list[AssignmentArtifact]:
                 title=video.title,
                 channel=video.channel,
                 url=video.url,
-                assignment_path=str(assignment_path) if assignment_path.exists() else None,
+                assignment_path=str(path) if usable else None,
                 metadata=metadata,
                 display_metadata=_build_assignment_display_metadata(metadata),
                 markdown=markdown,
                 sections=sections,
                 checklist=checklist,
-                available=assignment_path.exists(),
+                available=usable,
             )
         )
 
@@ -429,9 +355,12 @@ def _infer_worth_time(practical_value: str, content_depth: str) -> str:
     return "Maybe"
 
 
-def build_comparison_artifact(run_dir: Path) -> tuple[list[ComparisonRow], str, list[str]]:
+def build_comparison_artifact(
+    repository: RunRepository, run_id: str
+) -> tuple[list[ComparisonRow], str, list[str]]:
     comparator = YouTubeOutputComparator(
-        pipeline_output_folder=str(run_dir),
+        repository=repository,
+        run_id=run_id,
         use_ai_insights=False,
         num_workers=0,
     )
@@ -528,21 +457,11 @@ def build_comparison_artifact(run_dir: Path) -> tuple[list[ComparisonRow], str, 
     return rows, insights_report, [item for item in recommendations if item]
 
 
-def detect_run_created_at(run_dir: Path) -> str:
-    search_metadata = read_search_metadata(run_dir)
-    pipeline_metadata = read_pipeline_metadata(run_dir)
-    return (
-        pipeline_metadata.get("timestamp")
-        or search_metadata.get("timestamp")
-        or datetime.fromtimestamp(run_dir.stat().st_mtime).isoformat()
-    )
-
-
-def build_run_counts(run_dir: Path) -> dict[str, int]:
-    videos = len(read_videos(run_dir))
-    transcripts = len([item for item in read_transcripts(run_dir) if item.available])
-    summaries = len([item for item in read_summaries(run_dir) if item.available])
-    assignments = len([item for item in read_assignments(run_dir) if item.available])
+def build_run_counts(repository: RunRepository, run_id: str) -> dict[str, int]:
+    videos = len(read_videos(repository, run_id))
+    transcripts = len([item for item in read_transcripts(repository, run_id) if item.available])
+    summaries = len([item for item in read_summaries(repository, run_id) if item.available])
+    assignments = len([item for item in read_assignments(repository, run_id) if item.available])
     return {
         "videos": videos,
         "transcripts": transcripts,
@@ -551,10 +470,6 @@ def build_run_counts(run_dir: Path) -> dict[str, int]:
     }
 
 
-def has_comparison_source_data(run_dir: Path) -> bool:
-    counts = build_run_counts(run_dir)
+def has_comparison_source_data(repository: RunRepository, run_id: str) -> bool:
+    counts = build_run_counts(repository, run_id)
     return counts["videos"] > 0 and counts["summaries"] > 0
-
-
-def is_valid_run_directory(run_dir: Path) -> bool:
-    return run_dir.is_dir() and (run_dir / "metadata").exists()

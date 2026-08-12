@@ -14,7 +14,6 @@ The pipeline takes a search query and configuration, then automatically:
 """
 
 import argparse
-import json
 import os
 import sys
 import time
@@ -23,9 +22,11 @@ from typing import Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 
+from backend.storage.repository import RunRepository
+from backend.storage.settings import get_settings
 from src.fetch_youtube_transcript import YouTubeTranscriptFetcher
 from src.summarize_youtube_transcript import YouTubeTranscriptSummarizer
-from src.utils import ensure_output_folder, get_config, setup_logging
+from src.utils import ensure_output_folder, get_config, load_json_with_recovery, setup_logging, sha256_text
 from src.youtube_video_search import search_youtube_videos_api
 
 load_dotenv()
@@ -40,6 +41,8 @@ class YouTubePipeline:
 
     def __init__(
         self,
+        repository: Optional[object] = None,
+        run_id: Optional[str] = None,
         max_videos: Optional[int] = None,
         transcript_language: Optional[str] = None,
         output_folder: Optional[str] = None,
@@ -48,36 +51,47 @@ class YouTubePipeline:
         """Initialize the YouTube pipeline.
 
         Args:
+            repository (object): RunRepository instance that owns all records.
+            run_id (str): Identifier for this run; artifacts are stored under
+                ``repository.artifact_root / run_id``.
             max_videos (Optional[int]): Maximum number of videos to process.
                 If None, uses config default.
             transcript_language (Optional[str]): Language for transcripts.
                 If None, uses config default.
-            output_folder (Optional[str]): Base output folder for all results.
-                If None, uses current directory.
+            output_folder (Optional[str]): Kept for backwards compatibility; when
+                provided without ``run_id`` the folder name is used as the run id.
             num_workers (Optional[int]): Number of concurrent workers.
                 If None, uses config default.
         """
+        if repository is None:
+            raise ValueError("YouTubePipeline requires a RunRepository instance.")
+        if run_id is None:
+            if output_folder:
+                run_id = Path(output_folder).name
+            else:
+                raise ValueError("run_id is required for the repository-backed pipeline.")
+        if run_id is None or not run_id:
+            raise ValueError("run_id must be a non-empty string.")
+
         # Initialize configuration and logging
         setup_logging()
 
         # Set configuration values
+        self.repository = repository
+        self.run_id = run_id
         self.max_videos = max_videos or get_config("api.youtube.max_results", 5)
         self.transcript_language = transcript_language or get_config(
             "processing.transcripts.language", "en"
         )
-        self.output_folder = output_folder or "pipeline_output"
         self.num_workers = num_workers
 
-        # Ensure output directories exist
-        self.output_folder = ensure_output_folder(self.output_folder)
+        # Output folders under the managed artifact directory
+        self.output_folder = str(repository.artifact_root / run_id)
         self.transcripts_folder = ensure_output_folder(
             os.path.join(self.output_folder, "transcripts")
         )
         self.summaries_folder = ensure_output_folder(
             os.path.join(self.output_folder, "summaries")
-        )
-        self.metadata_folder = ensure_output_folder(
-            os.path.join(self.output_folder, "metadata")
         )
 
         # Initialize components
@@ -109,21 +123,8 @@ class YouTubePipeline:
             videos = search_youtube_videos_api(search_query, self.max_videos)
             print(f"[SEARCH] Found {len(videos)} videos")
 
-            # Save search results metadata
-            search_metadata = {
-                "search_query": search_query,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "total_videos_found": len(videos),
-                "max_videos_requested": self.max_videos,
-                "videos": videos,
-            }
-
-            metadata_path = os.path.join(
-                self.metadata_folder, f"search_results_{int(time.time())}.json"
-            )
-            with open(metadata_path, "w", encoding="utf-8") as f:
-                json.dump(search_metadata, f, indent=2, ensure_ascii=False)
-            print(f"[SEARCH] Search metadata saved to: {metadata_path}")
+            self.repository.set_videos(self.run_id, videos)
+            print(f"[SEARCH] Video metadata committed for run {self.run_id}")
 
             return videos
         except Exception as e:
@@ -151,8 +152,9 @@ class YouTubePipeline:
         # Fetch transcripts
         fetch_results = self.transcript_fetcher.fetch_transcripts(urls)
 
-        # Determine successful transcript files
+        # Determine successful transcript files and build repository records
         successful_transcripts = []
+        transcript_records = []
         for video in videos:
             video_id = video["video_id"]
             transcript_path = os.path.join(
@@ -161,29 +163,48 @@ class YouTubePipeline:
 
             if os.path.exists(transcript_path):
                 successful_transcripts.append(transcript_path)
+                status = "succeeded"
+                error = None
                 print(f"[FETCH] OK: Transcript available: {transcript_path}")
             else:
+                url = video["url"]
+                status = "failed"
+                error = self.transcript_fetcher.failure_reasons.get(url)
                 print(f"[FETCH] MISSING: Transcript missing: {transcript_path}")
+
+            if os.path.exists(transcript_path):
+                with open(transcript_path, "rb") as handle:
+                    content = handle.read()
+                content_hash = sha256_text(content.decode("utf-8", errors="replace"))
+                byte_size = os.path.getsize(transcript_path)
+            else:
+                content_hash = None
+                byte_size = None
+
+            transcript_records.append(
+                {
+                    "video_id": video_id,
+                    "language": self.transcript_language,
+                    "artifact_path": transcript_path,
+                    "content_hash": content_hash,
+                    "byte_size": byte_size,
+                    "status": status,
+                    "error": error,
+                }
+            )
 
         print(f"[FETCH] Successfully fetched {len(successful_transcripts)} transcripts")
 
-        # Save fetch metadata
-        fetch_metadata = {
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "total_videos_processed": len(videos),
-            "successful_transcripts": len(successful_transcripts),
-            "fetch_results": fetch_results,
-            "transcript_files": successful_transcripts,
-            "statuses": self.transcript_fetcher.statuses,
-            "failure_reasons": self.transcript_fetcher.failure_reasons,
-        }
-
-        metadata_path = os.path.join(
-            self.metadata_folder, f"fetch_results_{int(time.time())}.json"
+        self.repository.upsert_transcripts(
+            self.run_id,
+            transcript_records,
+            {
+                "transcript_language": self.transcript_language,
+                "num_workers": self.num_workers if self.num_workers is not None else "default",
+            },
         )
-        with open(metadata_path, "w", encoding="utf-8") as f:
-            json.dump(fetch_metadata, f, indent=2, ensure_ascii=False)
-        print(f"[FETCH] Fetch metadata saved to: {metadata_path}")
+        self.repository.mark_stale_derived(self.run_id)
+        print(f"[FETCH] Transcript records committed for run {self.run_id}")
 
         return successful_transcripts, fetch_results
 
@@ -222,42 +243,42 @@ class YouTubePipeline:
                 f"[SUMMARIZE] Using sequential processing for {len(transcript_paths)} transcript(s)"
             )
             # Fall back to sequential processing
-            return self._summarize_transcripts_sequential(
+            summarization_results = self._summarize_transcripts_sequential(
                 transcript_paths, video_info_map
             )
+        else:
+            print(f"[SUMMARIZE] Using parallel processing with {num_workers} workers")
 
-        print(f"[SUMMARIZE] Using parallel processing with {num_workers} workers")
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                # Submit all summarization tasks
+                future_to_path = {}
+                for transcript_path in transcript_paths:
+                    filename = os.path.basename(transcript_path)
+                    video_id = filename.split(".")[0]
+                    video_info = video_info_map.get(video_id, {})
 
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            # Submit all summarization tasks
-            future_to_path = {}
-            for transcript_path in transcript_paths:
-                filename = os.path.basename(transcript_path)
-                video_id = filename.split(".")[0]
-                video_info = video_info_map.get(video_id, {})
+                    summary_filename = f"{video_id}_summary.json"
+                    summary_path = os.path.join(self.summaries_folder, summary_filename)
 
-                summary_filename = f"{video_id}_summary.json"
-                summary_path = os.path.join(self.summaries_folder, summary_filename)
+                    future = executor.submit(
+                        self._summarize_single_transcript,
+                        transcript_path,
+                        video_info.get("title", ""),
+                        video_info.get("description", ""),
+                        summary_path,
+                        video_id,
+                    )
+                    future_to_path[future] = transcript_path
 
-                future = executor.submit(
-                    self._summarize_single_transcript,
-                    transcript_path,
-                    video_info.get("title", ""),
-                    video_info.get("description", ""),
-                    summary_path,
-                    video_id,
-                )
-                future_to_path[future] = transcript_path
-
-            # Process completed tasks
-            for future in as_completed(future_to_path):
-                transcript_path = future_to_path[future]
-                try:
-                    success = future.result()
-                    summarization_results[transcript_path] = success
-                except Exception as e:
-                    print(f"[SUMMARIZE] Error processing {transcript_path}: {str(e)}")
-                    summarization_results[transcript_path] = False
+                # Process completed tasks
+                for future in as_completed(future_to_path):
+                    transcript_path = future_to_path[future]
+                    try:
+                        success = future.result()
+                        summarization_results[transcript_path] = success
+                    except Exception as e:
+                        print(f"[SUMMARIZE] Error processing {transcript_path}: {str(e)}")
+                        summarization_results[transcript_path] = False
 
         # Log results
         successful_summaries = sum(summarization_results.values())
@@ -265,22 +286,65 @@ class YouTubePipeline:
             f"[SUMMARIZE] OK: Completed {successful_summaries}/{len(transcript_paths)} summaries"
         )
 
-        # Save summarization metadata
-        summary_metadata = {
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "total_transcripts_processed": len(transcript_paths),
-            "successful_summaries": sum(summarization_results.values()),
-            "summarization_results": summarization_results,
-        }
-
-        metadata_path = os.path.join(
-            self.metadata_folder, f"summary_results_{int(time.time())}.json"
-        )
-        with open(metadata_path, "w", encoding="utf-8") as f:
-            json.dump(summary_metadata, f, indent=2, ensure_ascii=False)
-        print(f"[SUMMARIZE] Summary metadata saved to: {metadata_path}")
+        self._commit_summary_records(transcript_paths, summarization_results)
 
         return summarization_results
+
+    def _commit_summary_records(
+        self, transcript_paths: List[str], summarization_results: Dict[str, bool]
+    ) -> None:
+        """Persist summary records (structured JSON + artifact metadata) to the repository."""
+        records = []
+        for transcript_path in transcript_paths:
+            video_id = os.path.basename(transcript_path).split(".")[0]
+            summary_path = os.path.join(self.summaries_folder, f"{video_id}_summary.json")
+            if summarization_results.get(transcript_path) and os.path.exists(summary_path):
+                try:
+                    with open(summary_path, "r", encoding="utf-8") as handle:
+                        content = handle.read()
+                    data = load_json_with_recovery(content)
+                    records.append(
+                        {
+                            "video_id": video_id,
+                            "artifact_path": summary_path,
+                            "content_hash": sha256_text(content),
+                            "byte_size": os.path.getsize(summary_path),
+                            "data": data,
+                            "status": "succeeded",
+                            "error": None,
+                        }
+                    )
+                except Exception as exc:
+                    records.append(
+                        {
+                            "video_id": video_id,
+                            "artifact_path": summary_path,
+                            "status": "failed",
+                            "data": {},
+                            "error": str(exc),
+                        }
+                    )
+            else:
+                records.append(
+                    {
+                        "video_id": video_id,
+                        "status": "failed",
+                        "data": {},
+                        "error": "Summary file not written",
+                    }
+                )
+
+        self.repository.upsert_summaries(
+            self.run_id,
+            records,
+            {
+                "transcript_language": self.transcript_language,
+                "num_workers": self.summarizer.num_workers,
+                "model": self.summarizer.model,
+            },
+        )
+        self.repository.mark_stale_derived(self.run_id)
+        print(f"[SUMMARIZE] Summary records committed for run {self.run_id}")
 
     def _summarize_single_transcript(
         self,
@@ -427,13 +491,6 @@ class YouTubePipeline:
             "summarization_results": summarization_results,
         }
 
-        # Save final results
-        results_path = os.path.join(
-            self.metadata_folder, f"pipeline_results_{int(time.time())}.json"
-        )
-        with open(results_path, "w", encoding="utf-8") as f:
-            json.dump(final_results, f, indent=2, ensure_ascii=False)
-
         # Print final summary
         print("\n" + "=" * 80)
         print("PIPELINE COMPLETED")
@@ -443,7 +500,6 @@ class YouTubePipeline:
         print(f"[PIPELINE] OK: Transcripts Fetched: {len(transcript_paths)}")
         print(f"[PIPELINE] OK: Summaries Created: {successful_summaries}")
         print(f"[PIPELINE] OK: Total Duration: {pipeline_duration:.2f} seconds")
-        print(f"[PIPELINE] OK: Results Saved: {results_path}")
         print(f"[PIPELINE] OK: Output Folder: {self.output_folder}")
         print("=" * 80)
 
@@ -536,9 +592,21 @@ def main():
         sys.exit(1)
 
     try:
-        # Initialize pipeline
+        # Initialize pipeline (repository-backed)
         print(f"🔧 Initializing pipeline...")
+        settings = get_settings()
+        repository = RunRepository(settings["database_path"], settings["artifact_root"])
+        run_id = f"pipeline_output_{int(time.time() * 1000)}"
+        repository.create_run(
+            run_id=run_id,
+            search_query=args.query,
+            normalized_query=args.query.strip().lower(),
+            max_videos=args.max_videos or get_config("api.youtube.max_results", 5),
+            transcript_language=args.language or get_config("processing.transcripts.language", "en"),
+        )
         pipeline = YouTubePipeline(
+            repository=repository,
+            run_id=run_id,
             max_videos=args.max_videos,
             transcript_language=args.language,
             output_folder=args.output_folder,

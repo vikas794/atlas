@@ -1,16 +1,26 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.routers import pipeline, runs, quiz
+from backend.routers import pipeline, quiz, runs
+from backend.storage.repository import get_repository
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    get_repository()
+    yield
+
 
 app = FastAPI(
     title="Atlas API",
     version="1.0.0",
     description="FastAPI backend for the Atlas YouTube analysis platform.",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

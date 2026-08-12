@@ -4,8 +4,10 @@ This module contains utility functions for configuration loading, file operation
 and common functionality used across the project.
 """
 
+import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -173,3 +175,97 @@ def ensure_output_folder(folder_path: str) -> str:
     abs_path = os.path.abspath(folder_path)
     os.makedirs(abs_path, exist_ok=True)
     return abs_path
+
+
+def sha256_text(content: str) -> str:
+    """Return the SHA-256 hex digest of a string's UTF-8 bytes."""
+    import hashlib
+
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def atomic_write(path: str, content: str, encoding: str = "utf-8") -> None:
+    """Write content to a temp file then atomically replace ``path``."""
+    import os
+
+    abs_path = os.path.abspath(path)
+    parent = os.path.dirname(abs_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    tmp_path = f"{abs_path}.tmp-{os.getpid()}"
+    with open(tmp_path, "w", encoding=encoding) as handle:
+        handle.write(content)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp_path, abs_path)
+
+
+def load_json_with_recovery(raw_content: str) -> dict[str, Any]:
+    """Parse JSON, repairing unescaped newlines/tabs inside string values.
+
+    Fallback for LLM-produced JSON that is not strictly valid.
+    """
+    try:
+        return json.loads(raw_content)
+    except json.JSONDecodeError:
+        fixed_content: list[str] = []
+        in_string = False
+        escape_next = False
+
+        for char in raw_content:
+            if escape_next:
+                fixed_content.append(char)
+                escape_next = False
+            elif char == "\\":
+                fixed_content.append(char)
+                escape_next = True
+            elif char == '"':
+                fixed_content.append(char)
+                in_string = not in_string
+            elif in_string and char == "\n":
+                fixed_content.append("\\n")
+            elif in_string and char == "\r":
+                fixed_content.append("\\r")
+            elif in_string and char == "\t":
+                fixed_content.append("\\t")
+            else:
+                fixed_content.append(char)
+
+        return json.loads("".join(fixed_content))
+
+
+def clean_srt_content(raw_srt: str) -> str:
+    """Strip SRT cues/timestamps and group the remaining text into paragraphs."""
+    clean_content = re.sub(
+        r"\d+\n\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}\n",
+        "",
+        raw_srt,
+    )
+    clean_content = re.sub(r"^\d+$", "", clean_content, flags=re.MULTILINE)
+    clean_content = re.sub(r"\n\s*\n", "\n", clean_content)
+    clean_content = clean_content.strip()
+
+    if not clean_content:
+        return ""
+
+    sentences = clean_content.replace("\n", " ").split(". ")
+    paragraphs: list[str] = []
+    current_paragraph: list[str] = []
+
+    for index, sentence in enumerate(sentences):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+
+        if index < len(sentences) - 1 and not sentence.endswith("."):
+            sentence += "."
+        current_paragraph.append(sentence)
+
+        if (index + 1) % 4 == 0:
+            paragraphs.append(" ".join(current_paragraph))
+            current_paragraph = []
+
+    if current_paragraph:
+        paragraphs.append(" ".join(current_paragraph))
+
+    return "\n\n".join(paragraphs).strip()
