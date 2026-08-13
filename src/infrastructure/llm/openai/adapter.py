@@ -39,6 +39,7 @@ from src.infrastructure.llm.base import (
     TokenUsage,
     UsageLedgerSink,
 )
+from src.infrastructure.llm.cost import calculate_cost
 from src.infrastructure.llm.openai.retry import OpenAIRetryableProvider
 from src.utils import get_config, get_prompt_path, sha256_text
 
@@ -134,11 +135,16 @@ def _build_usage_record(
     """Build a :class:`UsageRecord` from a call attempt.
 
     On failure ``token_usage`` is zeroed (we have no tokens to bill for
-    when the request never completed) and ``cost_usd`` falls back to
-    ``0.0`` until a :class:`CostCalculator` is wired into the
-    application — we deliberately do not silently estimate it here.
+    when the request never completed) and ``cost_usd`` is calculated
+    via the CostCalculator based on actual token usage.
     """
     usage = response.token_usage if response is not None and response.token_usage else _zero_usage()
+    cost_usd = calculate_cost(
+        provider=provider,
+        model=model,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+    )
     return UsageRecord(
         timestamp=datetime.now(datetime.UTC),
         provider=provider,
@@ -147,7 +153,7 @@ def _build_usage_record(
         input_tokens=usage.input_tokens,
         output_tokens=usage.output_tokens,
         total_tokens=usage.total_tokens,
-        cost_usd=0.0,
+        cost_usd=cost_usd,
         cache_hit=cache_hit,
         run_id=run_id,
         video_id=video_id,

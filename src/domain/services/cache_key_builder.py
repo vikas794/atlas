@@ -15,7 +15,19 @@ class CacheKeyBuilder:
         """Build a cache key from a kind and ordered parts."""
         payload = "|".join(str(p) if p is not None else "" for p in parts)
         digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-        return CacheKey(key=digest, kind=kind)
+        # Parse kind like "search:v2" -> namespace="search", version="v2"
+        if ":" in kind:
+            namespace, version = kind.split(":", 1)
+        else:
+            namespace, version = kind, "v1"
+        # Use first part as params_hash if available, otherwise empty
+        params_hash = str(parts[0]) if parts else ""
+        return CacheKey(
+            namespace=namespace,
+            version=version,
+            content_hash=digest,
+            params_hash=params_hash,
+        )
 
     @classmethod
     def transcript_key(cls, video_id: str, language: str, content_hash: str) -> CacheKey:

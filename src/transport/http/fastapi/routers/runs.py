@@ -26,19 +26,23 @@ from src.transport.http.fastapi.dependencies import get_run_repository
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
 
-def _manifest_from_row(repository: RunRepositoryPort, run: dict) -> RunManifest:
+async def _manifest_from_row(repository: RunRepositoryPort, run: dict) -> RunManifest:
     run_id = run["run_id"]
-    counts = build_run_counts(repository, run_id)
+    counts = await build_run_counts(repository, run_id)
     availability = {
         "videos": counts["videos"] > 0,
         "transcripts": counts["transcripts"] > 0,
         "summaries": counts["summaries"] > 0,
-        "comparison": has_comparison_source_data(repository, run_id),
+        "comparison": await has_comparison_source_data(repository, run_id),
         "assignments": counts["assignments"] > 0,
     }
     updated_at = run["updated_at"]
     if hasattr(updated_at, 'timestamp'):
         updated_at = updated_at.timestamp()
+    elif isinstance(updated_at, str):
+        # Parse ISO string to timestamp
+        from datetime import datetime
+        updated_at = datetime.fromisoformat(updated_at.replace("Z", "+00:00")).timestamp()
     return RunManifest(
         run_id=run_id,
         source_folder=run["source_folder"],
@@ -53,45 +57,55 @@ def _manifest_from_row(repository: RunRepositoryPort, run: dict) -> RunManifest:
 
 
 @router.get("", response_model=RunListResponse)
-def list_runs(repository: RunRepositoryPort = Depends(get_run_repository)) -> RunListResponse:
-    runs = [_manifest_from_row(repository, run) for run in repository.list_runs()]
+async def list_runs(repository: RunRepositoryPort = Depends(get_run_repository)) -> RunListResponse:
+    runs_data = await repository.list_runs()
+    runs = [await _manifest_from_row(repository, run) for run in runs_data]
     return RunListResponse(runs=runs)
 
 
 @router.get("/latest", response_model=RunManifest)
-def get_latest_run(repository: RunRepositoryPort = Depends(get_run_repository)) -> RunManifest:
-    run = repository.latest_run()
+async def get_latest_run(repository: RunRepositoryPort = Depends(get_run_repository)) -> RunManifest:
+    run = await repository.latest_run()
     if run is None:
         raise HTTPException(status_code=404, detail="No pipeline runs found.")
-    return _manifest_from_row(repository, run)
+    return await _manifest_from_row(repository, run)
 
 
 @router.get("/{run_id}", response_model=RunManifest)
-def get_run_manifest(run_id: str, repository: RunRepositoryPort = Depends(get_run_repository)) -> RunManifest:
-    run = repository.get_run(run_id)
+async def get_run_manifest(run_id: str, repository: RunRepositoryPort = Depends(get_run_repository)) -> RunManifest:
+    run = await repository.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
-    return _manifest_from_row(repository, run)
+    return await _manifest_from_row(repository, run)
+
+
+async def _get_run_or_404(repository: RunRepositoryPort, run_id: str) -> dict:
+    run = await repository.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
+    return run
 
 
 @router.get("/{run_id}/videos", response_model=SearchArtifactResponse)
-def get_run_videos(run_id: str, repository: RunRepositoryPort = Depends(get_run_repository)) -> SearchArtifactResponse:
-    run = _manifest_from_row(repository, repository.get_run(run_id))
-    videos = read_videos(repository, run_id)
+async def get_run_videos(run_id: str, repository: RunRepositoryPort = Depends(get_run_repository)) -> SearchArtifactResponse:
+    run_data = await _get_run_or_404(repository, run_id)
+    run = await _manifest_from_row(repository, run_data)
+    videos = await read_videos(repository, run_id)
     return SearchArtifactResponse(
         run=run,
         search_query=run.search_query,
         timestamp=run.created_at,
         total_videos_found=len(videos),
-        max_videos_requested=repository.get_run(run_id)["max_videos"],
+        max_videos_requested=run_data["max_videos"],
         videos=videos,
     )
 
 
 @router.get("/{run_id}/transcripts", response_model=TranscriptArtifactResponse)
-def get_run_transcripts(run_id: str, repository: RunRepositoryPort = Depends(get_run_repository)) -> TranscriptArtifactResponse:
-    run = _manifest_from_row(repository, repository.get_run(run_id))
-    transcripts = read_transcripts(repository, run_id)
+async def get_run_transcripts(run_id: str, repository: RunRepositoryPort = Depends(get_run_repository)) -> TranscriptArtifactResponse:
+    run_data = await _get_run_or_404(repository, run_id)
+    run = await _manifest_from_row(repository, run_data)
+    transcripts = await read_transcripts(repository, run_id)
     return TranscriptArtifactResponse(
         run=run,
         items=transcripts,
@@ -99,9 +113,10 @@ def get_run_transcripts(run_id: str, repository: RunRepositoryPort = Depends(get
 
 
 @router.get("/{run_id}/summaries", response_model=SummaryArtifactResponse)
-def get_run_summaries(run_id: str, repository: RunRepositoryPort = Depends(get_run_repository)) -> SummaryArtifactResponse:
-    run = _manifest_from_row(repository, repository.get_run(run_id))
-    summaries = read_summaries(repository, run_id)
+async def get_run_summaries(run_id: str, repository: RunRepositoryPort = Depends(get_run_repository)) -> SummaryArtifactResponse:
+    run_data = await _get_run_or_404(repository, run_id)
+    run = await _manifest_from_row(repository, run_data)
+    summaries = await read_summaries(repository, run_id)
     return SummaryArtifactResponse(
         run=run,
         items=summaries,
@@ -109,9 +124,10 @@ def get_run_summaries(run_id: str, repository: RunRepositoryPort = Depends(get_r
 
 
 @router.get("/{run_id}/comparison", response_model=ComparisonArtifactResponse)
-def get_run_comparison(run_id: str, repository: RunRepositoryPort = Depends(get_run_repository)) -> ComparisonArtifactResponse:
-    run = _manifest_from_row(repository, repository.get_run(run_id))
-    stored = repository.get_comparison(run_id)
+async def get_run_comparison(run_id: str, repository: RunRepositoryPort = Depends(get_run_repository)) -> ComparisonArtifactResponse:
+    run_data = await _get_run_or_404(repository, run_id)
+    run = await _manifest_from_row(repository, run_data)
+    stored = await repository.get_comparison(run_id)
     if stored is not None and stored["status"] == "succeeded":
         try:
             import json
@@ -130,7 +146,7 @@ def get_run_comparison(run_id: str, repository: RunRepositoryPort = Depends(get_
         except (TypeError, json.JSONDecodeError):
             pass
 
-    rows, insights_report, recommendations = build_comparison_artifact(repository, run_id)
+    rows, insights_report, recommendations = await build_comparison_artifact(repository, run_id)
     return ComparisonArtifactResponse(
         run=run,
         rows=rows,
@@ -141,9 +157,10 @@ def get_run_comparison(run_id: str, repository: RunRepositoryPort = Depends(get_
 
 
 @router.get("/{run_id}/assignments", response_model=AssignmentArtifactResponse)
-def get_run_assignments(run_id: str, repository: RunRepositoryPort = Depends(get_run_repository)) -> AssignmentArtifactResponse:
-    run = _manifest_from_row(repository, repository.get_run(run_id))
-    assignments = read_assignments(repository, run_id)
+async def get_run_assignments(run_id: str, repository: RunRepositoryPort = Depends(get_run_repository)) -> AssignmentArtifactResponse:
+    run_data = await _get_run_or_404(repository, run_id)
+    run = await _manifest_from_row(repository, run_data)
+    assignments = await read_assignments(repository, run_id)
     return AssignmentArtifactResponse(
         run=run,
         items=assignments,

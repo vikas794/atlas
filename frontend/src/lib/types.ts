@@ -213,3 +213,44 @@ export interface DriveStatusResponse {
   configured: boolean
   message: string
 }
+
+export interface UsageProviderAggregate {
+  provider: string
+  total_requests: number
+  total_tokens: number
+  total_cost_usd: number
+  models_used: string[]
+}
+
+export interface UsageOperationAggregate {
+  operation: string
+  total_requests: number
+  total_tokens: number
+  total_cost_usd: number
+  avg_tokens_per_request: number
+}
+
+export interface UsageCacheAggregate {
+  total_hits: number
+  total_misses: number
+  hit_rate: number
+  by_kind: Record<string, [number, number]>
+}
+
+export interface UsageTimeRange {
+  since: string | null
+  until: string | null
+}
+
+export interface UsageAggregateResponse {
+  total_requests: number
+  total_input_tokens: number
+  total_output_tokens: number
+  total_tokens: number
+  total_cost_usd: number
+  cache_hit_rate: number
+  by_provider: UsageProviderAggregate[]
+  by_operation: UsageOperationAggregate[]
+  cache_stats: UsageCacheAggregate | null
+  time_range: UsageTimeRange | null
+}

@@ -166,6 +166,24 @@ class SqlRunRepository(RunRepositoryPort):
     async def stats(self) -> dict:
         return self._repo.stats()
 
+    async def start_job(self, run_id: str, job_type: str, metadata: dict | None = None) -> None:
+        self._repo.start_job(run_id, job_type, metadata)
+
+    async def fail_job(self, run_id: str, job_type: str, error: str) -> None:
+        self._repo.fail_job(run_id, job_type, error)
+
+    async def finish_job(self, run_id: str, job_type: str) -> None:
+        self._repo.finish_job(run_id, job_type)
+
+    async def find_cached_run(self, cache_key: str) -> dict | None:
+        return self._repo.find_cached_run(cache_key)
+
+    async def put_cache_entry(self, cache_key: str, kind: str, run_id: str, normalized_query: str, settings: dict, ttl_days: int) -> None:
+        self._repo.put_cache_entry(cache_key, kind, run_id, normalized_query, settings, ttl_days)
+
+    async def touch_cache_hit(self, cache_key: str) -> None:
+        self._repo.touch_cache_hit(cache_key)
+
 
 class SqlUsageLedger(UsageLedgerPort):
     """SQLite-backed usage ledger implementation.

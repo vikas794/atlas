@@ -8,6 +8,7 @@ import type {
   PlaylistQuizProgress,
   PlaylistQuizStatusResponse,
   DriveStatusResponse,
+  UsageAggregateResponse,
 } from './types'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
@@ -168,3 +169,27 @@ export function authenticateDrive() {
     method: 'POST',
   })
 }
+
+export interface UsageQueryParams {
+  provider?: string
+  model?: string
+  operation?: string
+  since?: string
+  until?: string
+  cache_status?: boolean
+}
+
+export function getUsageAggregate(params?: UsageQueryParams) {
+  const searchParams = new URLSearchParams()
+  if (params?.provider) searchParams.set('provider', params.provider)
+  if (params?.model) searchParams.set('model', params.model)
+  if (params?.operation) searchParams.set('operation', params.operation)
+  if (params?.since) searchParams.set('since', params.since)
+  if (params?.until) searchParams.set('until', params.until)
+  if (params?.cache_status !== undefined) searchParams.set('cache_status', String(params.cache_status))
+
+  const query = searchParams.toString()
+  return request<UsageAggregateResponse>(`/api/usage${query ? `?${query}` : ''}`)
+}
+
+export type { UsageAggregateResponse }

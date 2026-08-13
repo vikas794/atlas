@@ -5,6 +5,7 @@ import { Card } from './components/ui/card'
 import { PipelineDashboard } from './features/pipeline/pipeline-dashboard'
 import { GoogleAuthPanel } from './features/quiz/google-auth-panel'
 import { QuizPanel } from './features/quiz/quiz-panel'
+import { UsageDashboard } from './features/usage/usage-dashboard'
 import {
   getLatestRun,
   getRunBundle,
@@ -130,6 +131,8 @@ function App() {
             searchQuery={searchQuery}
             transcriptLanguage={transcriptLanguage}
           />
+
+          <UsageDashboard />
 
           <GoogleAuthPanel />
 

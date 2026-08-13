@@ -11,13 +11,15 @@ import yaml
 from src.application.ports.provider_ports import RunRepositoryPort
 
 
-def read_videos(repository: RunRepositoryPort, run_id: str) -> list[dict[str, Any]]:
-    return [{"video_id": v["video_id"], "title": v["title"], "channel": v["channel"], "url": v["url"], "description": v.get("description", ""), "published_at": v.get("published_at", ""), "duration": v.get("duration", "Unknown")} for v in repository.get_videos(run_id)]
+async def read_videos(repository: RunRepositoryPort, run_id: str) -> list[dict[str, Any]]:
+    videos = await repository.get_videos(run_id)
+    return [{"video_id": v["video_id"], "title": v["title"], "channel": v["channel"], "url": v["url"], "description": v.get("description", ""), "published_at": v.get("published_at", ""), "duration": v.get("duration", "Unknown")} for v in videos]
 
 
-def read_transcripts(repository: RunRepositoryPort, run_id: str) -> list[dict[str, Any]]:
-    video_index = {video["video_id"]: video for video in read_videos(repository, run_id)}
-    records = {record["video_id"]: record for record in repository.get_transcripts(run_id)}
+async def read_transcripts(repository: RunRepositoryPort, run_id: str) -> list[dict[str, Any]]:
+    videos_data = await read_videos(repository, run_id)
+    video_index = {video["video_id"]: video for video in videos_data}
+    records = {record["video_id"]: record for record in await repository.get_transcripts(run_id)}
     artifacts: list[dict[str, Any]] = []
 
     for video_id, video in video_index.items():
@@ -53,9 +55,10 @@ def read_transcripts(repository: RunRepositoryPort, run_id: str) -> list[dict[st
     return artifacts
 
 
-def read_summaries(repository: RunRepositoryPort, run_id: str) -> list[dict[str, Any]]:
-    video_index = {video["video_id"]: video for video in read_videos(repository, run_id)}
-    records = {record["video_id"]: record for record in repository.get_summaries(run_id)}
+async def read_summaries(repository: RunRepositoryPort, run_id: str) -> list[dict[str, Any]]:
+    videos_data = await read_videos(repository, run_id)
+    video_index = {video["video_id"]: video for video in videos_data}
+    records = {record["video_id"]: record for record in await repository.get_summaries(run_id)}
     artifacts: list[dict[str, Any]] = []
 
     for video_id, video in video_index.items():
@@ -169,9 +172,10 @@ def _build_assignment_display_metadata(metadata: dict[str, Any]) -> dict[str, st
     }
 
 
-def read_assignments(repository: RunRepositoryPort, run_id: str) -> list[dict[str, Any]]:
-    video_index = {video["video_id"]: video for video in read_videos(repository, run_id)}
-    records = {record["video_id"]: record for record in repository.get_assignments(run_id)}
+async def read_assignments(repository: RunRepositoryPort, run_id: str) -> list[dict[str, Any]]:
+    videos_data = await read_videos(repository, run_id)
+    video_index = {video["video_id"]: video for video in videos_data}
+    records = {record["video_id"]: record for record in await repository.get_assignments(run_id)}
     artifacts: list[dict[str, Any]] = []
 
     for video_id, video in video_index.items():
@@ -336,7 +340,7 @@ def _infer_worth_time(practical_value: str, content_depth: str) -> str:
     return "Maybe"
 
 
-def build_comparison_artifact(
+async def build_comparison_artifact(
     repository: RunRepositoryPort, run_id: str
 ) -> tuple[list[dict[str, Any]], str, list[str]]:
     # Import here to avoid circular imports
@@ -349,8 +353,8 @@ def build_comparison_artifact(
         use_ai_insights=False,
         num_workers=0,
     )
-    video_metadata = comparator.load_video_metadata()
-    summary_data = comparator.load_summary_data()
+    video_metadata = await comparator.load_video_metadata()
+    summary_data = await comparator.load_summary_data()
     insights_report = comparator.generate_insights_report(video_metadata, summary_data)
 
     rows: list[dict[str, Any]] = []
@@ -442,11 +446,11 @@ def build_comparison_artifact(
     return rows, insights_report, [item for item in recommendations if item]
 
 
-def build_run_counts(repository: RunRepositoryPort, run_id: str) -> dict[str, int]:
-    videos = len(read_videos(repository, run_id))
-    transcripts = len([item for item in read_transcripts(repository, run_id) if item["available"]])
-    summaries = len([item for item in read_summaries(repository, run_id) if item["available"]])
-    assignments = len([item for item in read_assignments(repository, run_id) if item["available"]])
+async def build_run_counts(repository: RunRepositoryPort, run_id: str) -> dict[str, int]:
+    videos = len(await read_videos(repository, run_id))
+    transcripts = len([item for item in await read_transcripts(repository, run_id) if item["available"]])
+    summaries = len([item for item in await read_summaries(repository, run_id) if item["available"]])
+    assignments = len([item for item in await read_assignments(repository, run_id) if item["available"]])
     return {
         "videos": videos,
         "transcripts": transcripts,
@@ -455,8 +459,8 @@ def build_run_counts(repository: RunRepositoryPort, run_id: str) -> dict[str, in
     }
 
 
-def has_comparison_source_data(repository: RunRepositoryPort, run_id: str) -> bool:
-    counts = build_run_counts(repository, run_id)
+async def has_comparison_source_data(repository: RunRepositoryPort, run_id: str) -> bool:
+    counts = await build_run_counts(repository, run_id)
     return counts["videos"] > 0 and counts["summaries"] > 0
 
 
@@ -512,12 +516,12 @@ class YouTubeOutputComparator:
         self.use_ai_insights = use_ai_insights
         self.num_workers = num_workers
 
-    def load_video_metadata(self) -> dict[str, dict[str, Any]]:
-        videos = self.repository.get_videos(self.run_id)
+    async def load_video_metadata(self) -> dict[str, dict[str, Any]]:
+        videos = await self.repository.get_videos(self.run_id)
         return {v["video_id"]: v for v in videos}
 
-    def load_summary_data(self) -> dict[str, dict[str, Any]]:
-        records = self.repository.get_summaries(self.run_id)
+    async def load_summary_data(self) -> dict[str, dict[str, Any]]:
+        records = await self.repository.get_summaries(self.run_id)
         data: dict[str, dict[str, Any]] = {}
         for record in records:
             if record["status"] == "succeeded" and record.get("data"):

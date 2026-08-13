@@ -34,6 +34,7 @@ from src.infrastructure.llm.base import (
     TokenUsage,
     UsageLedgerSink,
 )
+from src.infrastructure.llm.cost import calculate_cost
 from src.utils import get_prompt_path
 
 logger = logging.getLogger(__name__)
@@ -143,6 +144,12 @@ def _build_usage_record(
     video_id: str | None = None,
 ) -> UsageRecord:
     effective_usage = usage if usage is not None else _one_zero_usage()
+    cost_usd = calculate_cost(
+        provider=provider,
+        model=model,
+        input_tokens=effective_usage.input_tokens,
+        output_tokens=effective_usage.output_tokens,
+    )
     return UsageRecord(
         timestamp=datetime.now(UTC),
         provider=provider,
@@ -151,7 +158,7 @@ def _build_usage_record(
         input_tokens=effective_usage.input_tokens,
         output_tokens=effective_usage.output_tokens,
         total_tokens=effective_usage.total_tokens,
-        cost_usd=0.0,
+        cost_usd=cost_usd,
         cache_hit=False,
         run_id=run_id,
         video_id=video_id,
