@@ -6,14 +6,29 @@ from contextlib import asynccontextmanager
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.routers import pipeline, quiz, runs
-from backend.storage.repository import get_repository
+from src.config import load_settings
+from src.transport.http.fastapi.dependencies import (
+    get_run_repository,
+    get_cache,
+    get_usage_ledger,
+)
+from src.transport.http.fastapi.errors import register_error_handlers
+from src.transport.http.fastapi.middleware import CorrelationIdMiddleware, RequestLoggingMiddleware
+from src.transport.http.fastapi.routers import pipeline, quiz, runs, usage
+from src.transport.http.fastapi.schemas.usage import UsageAggregateResponse
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
-    get_repository()
+async def lifespan(app: FastAPI):
+    """Application lifespan - initialize connections on startup."""
+    # Initialize repository connection
+    get_run_repository()
+    # Initialize cache
+    get_cache()
+    # Initialize usage ledger
+    get_usage_ledger()
     yield
+    # Cleanup on shutdown if needed
 
 
 app = FastAPI(
@@ -36,9 +51,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add custom middleware
+app.add_middleware(CorrelationIdMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
+
+# Register error handlers
+register_error_handlers(app)
+
+# Include routers
 app.include_router(runs.router)
 app.include_router(pipeline.router)
 app.include_router(quiz.router)
+app.include_router(usage.router)
 
 
 @app.get("/api/health")
@@ -52,7 +76,8 @@ def shutdown_development_server(
     x_atlas_dev_token: str | None = Header(default=None),
 ) -> dict[str, str]:
     """Stop a locally launched development server after validating its ephemeral token."""
-    expected_token = os.getenv("ATLAS_DEV_SHUTDOWN_TOKEN")
+    settings = load_settings()
+    expected_token = settings.dev_shutdown_token or os.getenv("ATLAS_DEV_SHUTDOWN_TOKEN")
     if not expected_token or x_atlas_dev_token != expected_token:
         raise HTTPException(status_code=404, detail="Not found")
 

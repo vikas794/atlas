@@ -2,42 +2,23 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from backend.schemas.runs import (
-    AssignmentArtifact,
-    ComparisonRow,
-    SummaryArtifact,
-    TranscriptArtifact,
-    VideoResult,
-)
-from backend.storage.repository import RunRepository
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SRC_ROOT = REPO_ROOT / "src"
-
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-if str(SRC_ROOT) not in sys.path:
-    sys.path.append(str(SRC_ROOT))
-
-from src.compare_youtube_outputs import YouTubeOutputComparator  # noqa: E402
-from src.utils import clean_srt_content  # noqa: E402
+from src.application.ports.provider_ports import RunRepositoryPort
 
 
-def read_videos(repository: RunRepository, run_id: str) -> list[VideoResult]:
-    return [VideoResult(**video) for video in repository.get_videos(run_id)]
+def read_videos(repository: RunRepositoryPort, run_id: str) -> list[dict[str, Any]]:
+    return [{"video_id": v["video_id"], "title": v["title"], "channel": v["channel"], "url": v["url"], "description": v.get("description", ""), "published_at": v.get("published_at", ""), "duration": v.get("duration", "Unknown")} for v in repository.get_videos(run_id)]
 
 
-def read_transcripts(repository: RunRepository, run_id: str) -> list[TranscriptArtifact]:
-    video_index = {video.video_id: video for video in read_videos(repository, run_id)}
+def read_transcripts(repository: RunRepositoryPort, run_id: str) -> list[dict[str, Any]]:
+    video_index = {video["video_id"]: video for video in read_videos(repository, run_id)}
     records = {record["video_id"]: record for record in repository.get_transcripts(run_id)}
-    artifacts: list[TranscriptArtifact] = []
+    artifacts: list[dict[str, Any]] = []
 
     for video_id, video in video_index.items():
         record = records.get(video_id)
@@ -57,25 +38,25 @@ def read_transcripts(repository: RunRepository, run_id: str) -> list[TranscriptA
                 raw_srt = ""
 
         artifacts.append(
-            TranscriptArtifact(
-                video_id=video_id,
-                title=video.title,
-                channel=video.channel,
-                language=record["language"] if record else "en",
-                transcript_path=str(path) if usable else None,
-                raw_srt=raw_srt,
-                cleaned_text=clean_srt_content(raw_srt) if usable else "",
-                available=usable,
-            )
+            {
+                "video_id": video_id,
+                "title": video["title"],
+                "channel": video["channel"],
+                "language": record["language"] if record else "en",
+                "transcript_path": str(path) if usable else None,
+                "raw_srt": raw_srt,
+                "cleaned_text": clean_srt_content(raw_srt) if usable else "",
+                "available": usable,
+            }
         )
 
     return artifacts
 
 
-def read_summaries(repository: RunRepository, run_id: str) -> list[SummaryArtifact]:
-    video_index = {video.video_id: video for video in read_videos(repository, run_id)}
+def read_summaries(repository: RunRepositoryPort, run_id: str) -> list[dict[str, Any]]:
+    video_index = {video["video_id"]: video for video in read_videos(repository, run_id)}
     records = {record["video_id"]: record for record in repository.get_summaries(run_id)}
-    artifacts: list[SummaryArtifact] = []
+    artifacts: list[dict[str, Any]] = []
 
     for video_id, video in video_index.items():
         record = records.get(video_id)
@@ -90,19 +71,19 @@ def read_summaries(repository: RunRepository, run_id: str) -> list[SummaryArtifa
         available = usable and path is not None and path.exists()
 
         artifacts.append(
-            SummaryArtifact(
-                video_id=video_id,
-                title=video.title,
-                channel=video.channel,
-                url=video.url,
-                summary_path=str(path) if path else None,
-                high_level_overview=data.get("high_level_overview", ""),
-                technical_breakdown=data.get("technical_breakdown", []),
-                insights=data.get("insights", []),
-                applications=data.get("applications", []),
-                limitations=data.get("limitations", []),
-                available=available,
-            )
+            {
+                "video_id": video_id,
+                "title": video["title"],
+                "channel": video["channel"],
+                "url": video["url"],
+                "summary_path": str(path) if path else None,
+                "high_level_overview": data.get("high_level_overview", ""),
+                "technical_breakdown": data.get("technical_breakdown", []),
+                "insights": data.get("insights", []),
+                "applications": data.get("applications", []),
+                "limitations": data.get("limitations", []),
+                "available": available,
+            }
         )
 
     return artifacts
@@ -188,10 +169,10 @@ def _build_assignment_display_metadata(metadata: dict[str, Any]) -> dict[str, st
     }
 
 
-def read_assignments(repository: RunRepository, run_id: str) -> list[AssignmentArtifact]:
-    video_index = {video.video_id: video for video in read_videos(repository, run_id)}
+def read_assignments(repository: RunRepositoryPort, run_id: str) -> list[dict[str, Any]]:
+    video_index = {video["video_id"]: video for video in read_videos(repository, run_id)}
     records = {record["video_id"]: record for record in repository.get_assignments(run_id)}
-    artifacts: list[AssignmentArtifact] = []
+    artifacts: list[dict[str, Any]] = []
 
     for video_id, video in video_index.items():
         record = records.get(video_id)
@@ -220,19 +201,19 @@ def read_assignments(repository: RunRepository, run_id: str) -> list[AssignmentA
                 markdown, sections, checklist = "", [], []
 
         artifacts.append(
-            AssignmentArtifact(
-                video_id=video_id,
-                title=video.title,
-                channel=video.channel,
-                url=video.url,
-                assignment_path=str(path) if usable else None,
-                metadata=metadata,
-                display_metadata=_build_assignment_display_metadata(metadata),
-                markdown=markdown,
-                sections=sections,
-                checklist=checklist,
-                available=usable,
-            )
+            {
+                "video_id": video_id,
+                "title": video["title"],
+                "channel": video["channel"],
+                "url": video["url"],
+                "assignment_path": str(path) if usable else None,
+                "metadata": metadata,
+                "display_metadata": _build_assignment_display_metadata(metadata),
+                "markdown": markdown,
+                "sections": sections,
+                "checklist": checklist,
+                "available": usable,
+            }
         )
 
     return artifacts
@@ -356,8 +337,12 @@ def _infer_worth_time(practical_value: str, content_depth: str) -> str:
 
 
 def build_comparison_artifact(
-    repository: RunRepository, run_id: str
-) -> tuple[list[ComparisonRow], str, list[str]]:
+    repository: RunRepositoryPort, run_id: str
+) -> tuple[list[dict[str, Any]], str, list[str]]:
+    # Import here to avoid circular imports
+    from src.infrastructure.llm.openai.adapter import OpenAIInsightsProvider
+    from src.config.settings import AtlasSettings
+    
     comparator = YouTubeOutputComparator(
         repository=repository,
         run_id=run_id,
@@ -368,7 +353,7 @@ def build_comparison_artifact(
     summary_data = comparator.load_summary_data()
     insights_report = comparator.generate_insights_report(video_metadata, summary_data)
 
-    rows: list[ComparisonRow] = []
+    rows: list[dict[str, Any]] = []
     for video_id, video_meta in video_metadata.items():
         summary = summary_data.get(video_id, {})
         extracted = comparator.extract_key_insights(summary) if summary else {}
@@ -396,59 +381,59 @@ def build_comparison_artifact(
         )
 
         rows.append(
-            ComparisonRow(
-                video_id=video_id,
-                title=video_meta.get("title", "Unknown Title"),
-                channel=video_meta.get("channel", "Unknown Channel"),
-                published=published,
-                recency=recency,
-                difficulty=difficulty,
-                teaching_style=teaching_style,
-                practical_value=practical_value,
-                content_depth=content_depth,
-                worth_time=_infer_worth_time(practical_value, content_depth),
-                learning_outcome=_infer_learning_outcome(
+            {
+                "video_id": video_id,
+                "title": video_meta.get("title", "Unknown Title"),
+                "channel": video_meta.get("channel", "Unknown Channel"),
+                "published": published,
+                "recency": recency,
+                "difficulty": difficulty,
+                "teaching_style": teaching_style,
+                "practical_value": practical_value,
+                "content_depth": content_depth,
+                "worth_time": _infer_worth_time(practical_value, content_depth),
+                "learning_outcome": _infer_learning_outcome(
                     summary.get("high_level_overview", ""),
                     summary.get("insights", []),
                 ),
-                target_audience=_infer_target_audience(
+                "target_audience": _infer_target_audience(
                     video_meta.get("title", ""),
                     summary.get("high_level_overview", ""),
                     key_technologies,
                 ),
-                prerequisites=_infer_prerequisites(
+                "prerequisites": _infer_prerequisites(
                     video_meta.get("title", ""),
                     summary.get("high_level_overview", ""),
                     key_technologies,
                 ),
-                key_differentiators=_infer_key_differentiators(
+                "key_differentiators": _infer_key_differentiators(
                     summary.get("high_level_overview", ""),
                     summary.get("applications", []),
                 ),
-                tools_count=extracted.get("num_tools", 0),
-                key_technologies=key_technologies,
-                complexity_score=round(extracted.get("complexity_score", 0), 1),
-                summary_available=bool(summary),
-                url=video_meta.get("url", ""),
-                full_overview=summary.get("high_level_overview", ""),
-                insights=summary.get("insights", []),
-                applications=summary.get("applications", []),
-                limitations=summary.get("limitations", []),
-            )
+                "tools_count": extracted.get("num_tools", 0),
+                "key_technologies": key_technologies,
+                "complexity_score": round(extracted.get("complexity_score", 0), 1),
+                "summary_available": bool(summary),
+                "url": video_meta.get("url", ""),
+                "full_overview": summary.get("high_level_overview", ""),
+                "insights": summary.get("insights", []),
+                "applications": summary.get("applications", []),
+                "limitations": summary.get("limitations", []),
+            }
         )
 
     rows.sort(
         key=lambda row: (
-            {"High": 3, "Medium": 2, "Low": 1}.get(row.practical_value, 0),
-            {"Yes": 3, "Maybe": 2, "No": 1}.get(row.worth_time, 0),
-            row.complexity_score,
+            {"High": 3, "Medium": 2, "Low": 1}.get(row["practical_value"], 0),
+            {"Yes": 3, "Maybe": 2, "No": 1}.get(row["worth_time"], 0),
+            row["complexity_score"],
         ),
         reverse=True,
     )
 
     recommendations = [
-        f"Start with '{rows[0].title}' for the strongest practical payoff." if rows else "",
-        f"Use '{rows[0].title}' as the anchor lesson, then compare with '{rows[1].title}' for contrast."
+        f"Start with '{rows[0]['title']}' for the strongest practical payoff." if rows else "",
+        f"Use '{rows[0]['title']}' as the anchor lesson, then compare with '{rows[1]['title']}' for contrast."
         if len(rows) > 1
         else "",
         "Switch to a live comparison refresh only when you want fresh AI-derived teaching-style labels.",
@@ -457,11 +442,11 @@ def build_comparison_artifact(
     return rows, insights_report, [item for item in recommendations if item]
 
 
-def build_run_counts(repository: RunRepository, run_id: str) -> dict[str, int]:
+def build_run_counts(repository: RunRepositoryPort, run_id: str) -> dict[str, int]:
     videos = len(read_videos(repository, run_id))
-    transcripts = len([item for item in read_transcripts(repository, run_id) if item.available])
-    summaries = len([item for item in read_summaries(repository, run_id) if item.available])
-    assignments = len([item for item in read_assignments(repository, run_id) if item.available])
+    transcripts = len([item for item in read_transcripts(repository, run_id) if item["available"]])
+    summaries = len([item for item in read_summaries(repository, run_id) if item["available"]])
+    assignments = len([item for item in read_assignments(repository, run_id) if item["available"]])
     return {
         "videos": videos,
         "transcripts": transcripts,
@@ -470,6 +455,97 @@ def build_run_counts(repository: RunRepository, run_id: str) -> dict[str, int]:
     }
 
 
-def has_comparison_source_data(repository: RunRepository, run_id: str) -> bool:
+def has_comparison_source_data(repository: RunRepositoryPort, run_id: str) -> bool:
     counts = build_run_counts(repository, run_id)
     return counts["videos"] > 0 and counts["summaries"] > 0
+
+
+def clean_srt_content(raw_srt: str) -> str:
+    """Strip SRT cues/timestamps and group the remaining text into paragraphs."""
+    clean_content = re.sub(
+        r"\d+\n\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}\n",
+        "",
+        raw_srt,
+    )
+    clean_content = re.sub(r"^\d+$", "", clean_content, flags=re.MULTILINE)
+    clean_content = re.sub(r"\n\s*\n", "\n", clean_content)
+    clean_content = clean_content.strip()
+
+    if not clean_content:
+        return ""
+
+    sentences = clean_content.replace("\n", " ").split(". ")
+    paragraphs: list[str] = []
+    current_paragraph: list[str] = []
+
+    for index, sentence in enumerate(sentences):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+
+        if index < len(sentences) - 1 and not sentence.endswith("."):
+            sentence += "."
+        current_paragraph.append(sentence)
+
+        if (index + 1) % 4 == 0:
+            paragraphs.append(" ".join(current_paragraph))
+            current_paragraph = []
+
+    if current_paragraph:
+        paragraphs.append(" ".join(current_paragraph))
+
+    return "\n\n".join(paragraphs).strip()
+
+
+class YouTubeOutputComparator:
+    """Compare YouTube pipeline outputs across videos in a run."""
+    
+    def __init__(
+        self,
+        repository: RunRepositoryPort,
+        run_id: str,
+        use_ai_insights: bool = False,
+        num_workers: int = 0,
+    ) -> None:
+        self.repository = repository
+        self.run_id = run_id
+        self.use_ai_insights = use_ai_insights
+        self.num_workers = num_workers
+
+    def load_video_metadata(self) -> dict[str, dict[str, Any]]:
+        videos = self.repository.get_videos(self.run_id)
+        return {v["video_id"]: v for v in videos}
+
+    def load_summary_data(self) -> dict[str, dict[str, Any]]:
+        records = self.repository.get_summaries(self.run_id)
+        data: dict[str, dict[str, Any]] = {}
+        for record in records:
+            if record["status"] == "succeeded" and record.get("data"):
+                try:
+                    data[record["video_id"]] = json.loads(record["data"])
+                except (TypeError, json.JSONDecodeError):
+                    pass
+        return data
+
+    def extract_key_insights(self, summary: dict[str, Any]) -> dict[str, Any]:
+        """Extract structured insights from summary data."""
+        tools = summary.get("tools_mentioned", [])
+        processes = summary.get("processes", [])
+        return {
+            "tools_mentioned": tools,
+            "num_tools": len(tools),
+            "num_processes": len(processes),
+            "complexity_score": min(100, len(processes) * 5 + len(tools) * 3),
+        }
+
+    def generate_insights_report(self, video_metadata: dict, summary_data: dict) -> str:
+        lines = [f"Comparison Report for Run {self.run_id}", "=" * 50, ""]
+        for vid, meta in video_metadata.items():
+            summary = summary_data.get(vid, {})
+            extracted = self.extract_key_insights(summary)
+            lines.append(f"Video: {meta.get('title', 'Unknown')} ({vid})")
+            lines.append(f"  Channel: {meta.get('channel', 'Unknown')}")
+            lines.append(f"  Tools: {extracted['num_tools']}, Processes: {extracted['num_processes']}")
+            lines.append(f"  Complexity Score: {extracted['complexity_score']}")
+            lines.append("")
+        return "\n".join(lines)

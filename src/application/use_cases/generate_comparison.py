@@ -15,7 +15,7 @@ from src.domain.services.hash_computer import RunHashComputer
 from src.domain.exceptions import DomainError, ProviderError
 from src.infrastructure.llm.openai.adapter import OpenAIInsightsProvider
 from src.infrastructure.llm.base import SettingsLoader
-from src.services.artifact_readers import build_comparison_artifact
+from src.application.artifact_readers import build_comparison_artifact
 
 
 class GenerateComparisonUseCase:
