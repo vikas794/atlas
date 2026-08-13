@@ -20,21 +20,30 @@ from src.utils import get_config, get_worker_count
 
 
 class PipelineService:
-    def __init__(self, run_service: RunService | None = None, repository: RunRepository | None = None):
+    def __init__(
+        self,
+        run_service: RunService | None = None,
+        repository: RunRepository | None = None,
+        openrouter_api_key: str | None = None,
+        youtube_api_key: str | None = None,
+    ):
         self.repository = repository or get_repository()
         self.run_service = run_service or RunService(self.repository)
+        self._openrouter_api_key = openrouter_api_key
+        self._youtube_api_key = youtube_api_key
 
-    def _apply_api_keys(self, request: SearchRequest) -> None:
+    def _apply_api_keys(self, request: SearchRequest) -> tuple[str | None, str | None]:
         if request.use_env_keys:
-            return
+            return (
+                self._openrouter_api_key or os.getenv("OPENROUTER_API_KEY"),
+                self._youtube_api_key or os.getenv("YOUTUBE_API_KEY"),
+            )
         if not request.openrouter_api_key or not request.youtube_api_key:
             raise HTTPException(
                 status_code=400,
                 detail="Both openrouter_api_key and youtube_api_key are required when use_env_keys is false.",
             )
-
-        os.environ["OPENROUTER_API_KEY"] = request.openrouter_api_key
-        os.environ["YOUTUBE_API_KEY"] = request.youtube_api_key
+        return request.openrouter_api_key, request.youtube_api_key
 
     @staticmethod
     def _settings_for(request: ArtifactGenerationRequest) -> dict:
@@ -65,7 +74,7 @@ class PipelineService:
                     detail="Reused an existing cached run for the same query.",
                 )
 
-        self._apply_api_keys(request)
+        openrouter_key, youtube_key = self._apply_api_keys(request)
 
         run_id = f"pipeline_output_{int(time.time() * 1000)}"
         self.repository.create_run(
@@ -92,6 +101,8 @@ class PipelineService:
                 max_videos=request.max_videos,
                 transcript_language=request.transcript_language,
                 num_workers=request.num_workers,
+                openrouter_api_key=openrouter_key,
+                youtube_api_key=youtube_key,
             )
             videos = pipeline.search_videos(request.query)
         except Exception as exc:

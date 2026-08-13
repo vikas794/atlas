@@ -65,10 +65,6 @@ class QuizService:
         gemini_key = gemini_key.strip()
         self.validate_gemini_credentials(gemini_key)
 
-        # Update environment if needed so internal modules can use it
-        if not request.use_env_keys and request.gemini_api_key:
-             os.environ["GEMINI_API_KEY"] = request.gemini_api_key
-
         try:
             from src.playlist_quiz_generator import PlaylistQuizPipeline
 

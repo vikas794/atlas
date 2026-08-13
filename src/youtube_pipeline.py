@@ -47,6 +47,8 @@ class YouTubePipeline:
         transcript_language: Optional[str] = None,
         output_folder: Optional[str] = None,
         num_workers: Optional[int] = None,
+        openrouter_api_key: Optional[str] = None,
+        youtube_api_key: Optional[str] = None,
     ):
         """Initialize the YouTube pipeline.
 
@@ -62,6 +64,8 @@ class YouTubePipeline:
                 provided without ``run_id`` the folder name is used as the run id.
             num_workers (Optional[int]): Number of concurrent workers.
                 If None, uses config default.
+            openrouter_api_key (Optional[str]): OpenRouter API key for summarization.
+            youtube_api_key (Optional[str]): YouTube Data API key for search.
         """
         if repository is None:
             raise ValueError("YouTubePipeline requires a RunRepository instance.")
@@ -84,6 +88,8 @@ class YouTubePipeline:
             "processing.transcripts.language", "en"
         )
         self.num_workers = num_workers
+        self._openrouter_api_key = openrouter_api_key
+        self._youtube_api_key = youtube_api_key
 
         # Output folders under the managed artifact directory
         self.output_folder = str(repository.artifact_root / run_id)
@@ -120,7 +126,11 @@ class YouTubePipeline:
         print(f"[SEARCH] Maximum videos to retrieve: {self.max_videos}")
 
         try:
-            videos = search_youtube_videos_api(search_query, self.max_videos)
+            videos = search_youtube_videos_api(
+                search_query,
+                self.max_videos,
+                youtube_api_key=self._youtube_api_key,
+            )
             print(f"[SEARCH] Found {len(videos)} videos")
 
             self.repository.set_videos(self.run_id, videos)

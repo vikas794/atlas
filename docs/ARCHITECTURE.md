@@ -1,10 +1,14 @@
 # Atlas — Target Architecture
 
-## 1. Target Directory Structure
+> **Status (post-Wave-B):** Domain ✅, Infrastructure ✅, Application (use cases) ✅, Transport (legacy backend) partially migrated. Next: Wave C (slim FastAPI routers onto application layer) + Wave D (frontend usage dashboard).
+
+---
+
+## 1. Target Directory Structure (with Current Status)
 
 ```
 src/
-├── domain/
+├── domain/                          ✅ IMPLEMENTED (Wave A1)
 │   ├── __init__.py
 │   ├── models/
 │   │   ├── __init__.py
@@ -16,14 +20,14 @@ src/
 │   │   └── quiz.py              # QuizResult, PlaylistResult
 │   ├── interfaces/
 │   │   ├── __init__.py
-│   │   ├── transcript_provider.py    # TranscriptProviderPort
-│   │   ├── summarizer.py             # SummarizerPort
-│   │   ├── insights_provider.py      # InsightsProviderPort
-│   │   ├── assignment_generator.py   # AssignmentGeneratorPort
-│   │   ├── quiz_generator.py         # QuizGeneratorPort
+│   │   ├── transcript_provider.py    # TranscriptProviderPort, TranscriptResult
+│   │   ├── summarizer.py             # SummarizerPort, SummaryContext, SummaryResult
+│   │   ├── insights_provider.py      # InsightsProviderPort, InsightsResult
+│   │   ├── assignment_generator.py   # AssignmentGeneratorPort, AssignmentResult
+│   │   ├── quiz_generator.py         # QuizGeneratorPort, QuizContext, QuizResult
 │   │   ├── cache.py                  # CachePort, CacheKey
 │   │   ├── usage_ledger.py           # UsageLedgerPort, UsageRecord, UsageAggregate
-│   │   └── storage.py                # RunRepositoryPort, ArtifactStorePort
+│   │   └── storage.py                # RunRepositoryPort, ArtifactStorePort, RunRecord, CacheEntry
 │   ├── services/
 │   │   ├── __init__.py
 │   │   ├── comparison_inference.py   # ComparisonInferenceService (difficulty, style, value)
@@ -31,9 +35,9 @@ src/
 │   │   └── cache_key_builder.py      # CacheKeyBuilder (canonical key construction)
 │   └── exceptions/
 │       ├── __init__.py
-│       └── domain.py                 # DomainError, ProviderError, CacheError
+│       └── domain.py                 # DomainError, ProviderError, CacheError, StorageError
 │
-├── application/
+├── application/                     ✅ IMPLEMENTED (Wave B)
 │   ├── __init__.py
 │   ├── use_cases/
 │   │   ├── __init__.py
@@ -45,7 +49,7 @@ src/
 │   │   └── generate_quiz.py          # GenerateQuizUseCase
 │   ├── ports/
 │   │   ├── __init__.py
-│   │   └── provider_ports.py         # Concrete protocol classes mirroring domain interfaces
+│   │   └── provider_ports.py         # Re-exports domain interfaces as app ports
 │   └── dto/
 │       ├── __init__.py
 │       ├── search.py                 # SearchInput, SearchOutput
@@ -53,69 +57,73 @@ src/
 │       ├── summaries.py              # SummaryGenerationInput, SummaryGenerationOutput
 │       ├── comparison.py             # ComparisonGenerationInput, ComparisonGenerationOutput
 │       ├── assignments.py            # AssignmentGenerationInput, AssignmentGenerationOutput
-│       └── quiz.py                   # QuizGenerationInput, QuizGenerationOutput
+│       └── quiz.py                   # QuizGenerationInput, QuizGenerationOutput, VideoQuizResult
 │
-├── infrastructure/
+├── infrastructure/                  ✅ IMPLEMENTED (Waves A2–A8)
 │   ├── __init__.py
 │   ├── llm/
 │   │   ├── __init__.py
 │   │   ├── base.py                   # LLMProvider base, RetryPolicy, LLMResponse, TokenUsage
+│   │   │                             # SettingsLoader, UsageLedgerSink, RetryableProvider
 │   │   ├── openai/
 │   │   │   ├── __init__.py
 │   │   │   ├── adapter.py            # OpenAISummarizerAdapter, OpenAIInsightsProvider, OpenAIAssignmentAdapter
-│   │   │   └── retry.py              # OpenAIRetryPolicy (exponential backoff, rate-limit handling)
+│   │   │   └── retry.py              # OpenAIRetryableProvider (bounded exp backoff + jitter)
 │   │   └── gemini/
 │   │       ├── __init__.py
-│   │       └── adapter.py            # GeminiQuizProvider
+│   │       └── adapter.py            # GeminiQuizProvider (legacy retry: 2**attempt, max 3)
 │   ├── transcript/
 │   │   └── ytdlp/
 │   │       ├── __init__.py
-│   │       └── provider.py            # YtDlpTranscriptProvider
+│   │       └── provider.py            # YtDlpTranscriptProvider (legacy retry [15,30,60,120]+jitter)
 │   ├── storage/
 │   │   ├── __init__.py
-│   │   ├── sql.py                     # SqlRunRepository, SqlCacheRepository, SqlUsageLedger
-│   │   └── filesystem.py             # ArtifactFileStore (reads/writes transcript/summary/assignment files)
+│   │   ├── sql.py                     # SqlRunRepository (delegates to backend.storage.repository.RunRepository),
+│   │   │                             # SqlUsageLedger (record/aggregate/recent + aliases)
+│   │   └── filesystem.py             # ArtifactFileStore (atomic writes via src.utils.atomic_write)
 │   ├── cache/
-│   │   ├── __init__.py
-│   │   └── sql_cache.py               # SqlCacheAdapter (content-derived keys, TTL, namespaces)
+│   │   ├── __init__.py               # exports SqlCacheAdapter
+│   │   └── sql_cache.py               # SqlCacheAdapter (zlib-compressed, TTL, hit_count, invalidate*)
 │   ├── youtube/
-│   │   ├── __init__.py
+│   │   ├── __init__.py               # exports both providers
 │   │   ├── search.py                  # YouTubeDataApiSearchProvider
-│   │   └── playlist.py                # YouTubePlaylistProvider
+│   │   └── playlist.py                # YouTubePlaylistProvider (+ get_playlist_title)
 │   └── google/
-│       ├── __init__.py
-│       └── drive.py                   # GoogleDriveExporter
+│       ├── __init__.py               # exports GoogleDriveExporter
+│       └── drive.py                   # GoogleDriveExporter (OAuth web→installed rewrite preserved)
 │
-├── config/
+├── config/                            ⏳ PENDING (Wave C)
 │   ├── __init__.py
-│   ├── settings.py                     # SettingsLoader, AtlasSettings (env + config.yaml)
-│   ├── prompts.py                      # PromptRegistry (YAML prompt templates with versioning)
-│   └── models.py                       # ModelRegistry (provider/model configuration)
+│   ├── settings.py                    # SettingsLoader, AtlasSettings (env + config.yaml)
+│   ├── prompts.py                     # PromptRegistry (YAML prompt templates with versioning)
+│   └── models.py                      # ModelRegistry (provider/model configuration)
 │
-└── transport/
-    └── http/
-        ├── __init__.py
-        ├── fastapi/
-        │   ├── __init__.py
-        │   ├── main.py                 # FastAPI app, lifespan, CORS, middleware
-        │   ├── routers/
-        │   │   ├── __init__.py
-        │   │   ├── pipeline.py         # /api/pipeline/search, /api/runs/{id}/transcripts|summaries|comparison|assignments
-        │   │   ├── runs.py             # /api/runs, /api/runs/latest, /api/runs/{id}
-        │   │   ├── quiz.py             # /api/quiz/playlist, /api/quiz/playlist/stream, /api/quiz/drive-status, /api/quiz/credentials, /api/quiz/auth
-        │   │   └── usage.py            # GET /api/usage (usage aggregation endpoint)
-        │   ├── schemas/
-        │   │   ├── __init__.py
-        │   │   ├── pipeline.py         # SearchRequest, ArtifactGenerationRequest, PipelineActionResponse
-        │   │   ├── runs.py              # RunManifest, RunListResponse, SearchArtifactResponse, TranscriptArtifactResponse, SummaryArtifactResponse, ComparisonArtifactResponse, AssignmentArtifactResponse
-        │   │   └── quiz.py              # PlaylistQuizRequest, PlaylistQuizStatusResponse, DriveStatusResponse, VideoQuizResult
-        │   ├── dependencies.py          # FastAPI Depends() providers (repository, cache, ledger, providers)
-        │   └── errors.py                # HTTPException mappings, domain-to-HTTP error translation
-        │   └── middleware.py            # CorrelationIdMiddleware, RequestLoggingMiddleware
-        │
-        └── legacy/                     # Temporary compatibility shims during migration
-            └── adapters.py             # Thin wrappers making new services look like old src/* classes
+├── transport/
+│   └── http/
+│       ├── __init__.py
+│       └── fastapi/
+│           ├── __init__.py
+│           ├── main.py                 # ⏳ FastAPI app, lifespan, CORS, middleware (still in backend/main.py)
+│           ├── routers/
+│           │   ├── __init__.py
+│           │   ├── pipeline.py         # ⏳ /api/pipeline/search, /api/runs/{id}/transcripts|summaries|comparison|assignments
+│           │   ├── runs.py             # ⏳ /api/runs, /api/runs/latest, /api/runs/{id}
+│           │   ├── quiz.py             # ⏳ /api/quiz/playlist, /api/quiz/playlist/stream, /api/quiz/drive-status, /api/quiz/credentials, /api/quiz/auth
+│           │   └── usage.py            # ✅ GET /api/usage (usage aggregation endpoint)
+│           ├── schemas/
+│           │   ├── __init__.py
+│           │   ├── pipeline.py         # ✅ SearchRequest, ArtifactGenerationRequest, PipelineActionResponse
+│           │   ├── runs.py             # ⏳ RunManifest, RunListResponse, SearchArtifactResponse, ...
+│           │   └── quiz.py             # ✅ PlaylistQuizRequest, PlaylistQuizStatusResponse, DriveStatusResponse, VideoQuizResult
+│           ├── dependencies.py          # ⏳ FastAPI Depends() providers
+│           ├── errors.py                # ⏳ domain-to-HTTP error translation
+│           └── middleware.py            # ⏳ CorrelationIdMiddleware, RequestLoggingMiddleware
+│
+└── (legacy transport still in backend/ — routers/, schemas/, services/, storage/ —
+     remains until Wave C slims it; backend/storage/settings.py + repository.py + database.py + cache.py + migrations.py reused)
 ```
+
+**Legend:** ✅ done · ⏳ pending/partial · `backend/` = legacy transport layer to be slimmed in Wave C.
 
 ---
 
@@ -125,20 +133,20 @@ src/
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        LAYER LADDERS                            │
+│                        LAYER LADDERS                             │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  transport/http/fastapi                                         │
-│       │                                                         │
-│       ▼                                                         │
-│  application/use_cases                                          │
-│       │                                                         │
-│       ▼                                                         │
-│  domain/                                                        │
-│       ▲                                                         │
-│       │                                                         │
-│  infrastructure/                                                 │
-│    (implements domain/application ports)                         │
+│  transport/http/fastapi                                          │
+│       │                                                          │
+│       ▼                                                          │
+│  application/use_cases                                           │
+│       │                                                          │
+│       ▼                                                          │
+│  domain/                                                         │
+│       ▲                                                          │
+│       │                                                          │
+│  infrastructure/                                                  │
+│    (implements domain/application ports)                          │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -148,257 +156,240 @@ src/
 | Layer | Forbidden Dependency | Rationale |
 |-------|----------------------|-----------|
 | `domain/` | FastAPI, HTTP, SQLite, yt-dlp, OpenAI SDK, Gemini SDK, filesystem paths, pandas | Domain must be pure, testable without external systems |
-| `domain/` | `src/utils.py` (current kitchen-sink module) | Too many mixed concerns; decompose into focused utilities |
+| `domain/` | `src/utils.py` (kitchen-sink module) | Too many mixed concerns; decompose into focused utilities |
 | `application/` | Concrete provider SDKs (OpenAI, Gemini, yt-dlp) | Application orchestrates via ports; infrastructure provides adapters |
 | `application/` | Pydantic models | Application uses plain Python DTOs/dataclasses; transport layer handles serialization |
 | `infrastructure/` | `backend/routers/`, `backend/schemas/` | Infrastructure must not depend on transport layer |
-| `infrastructure/` | `app.py` (Gradio) | Legacy UI to be deleted |
-| `transport/` | `src/youtube_pipeline.py`, `src/summarize_youtube_transcript.py`, etc. | Route handlers must call application use cases, not legacy modules directly |
+| `transport/` | `src/youtube_pipeline.py`, `src/summarize_youtube_transcript.py`, etc. | Route handlers must call application use cases, not legacy modules directly (Wave C) |
 | `infrastructure/llm/` | ThreadPoolExecutor for parallelism | Parallelism is an application concern; adapters should be stateless and reentrant |
-| All layers | `os.environ[...] = ...` mutation | Secrets injected via configuration; never mutate global state |
+| All layers | `os.environ[...] = ...` mutation | Secrets injected via configuration; never mutate global state (Wave B ✅) |
 
 ---
 
 ## 3. Interface Contracts
 
+*Implemented as `typing.Protocol` classes in `src/domain/interfaces/`. All domain code is pure Python. Adapters live in `src/infrastructure/` and accept `SettingsLoader` + optional `UsageLedgerSink` via constructor injection.*
+
 ### 3.1 Transcript Provider
 
 ```python
 class TranscriptProviderPort(Protocol):
-    def fetch_transcript(self, video_id: str, language: str) -> TranscriptResult:
-        """Fetch transcript for a single video. Returns TranscriptResult with content, status, error."""
-        ...
+    async def fetch_transcript(self, video_id: str, language: str = "en") -> TranscriptResult: ...
+    async def fetch_transcripts(self, video_ids: list[str], language: str = "en") -> list[TranscriptResult]: ...
 
 @dataclass(frozen=True)
 class TranscriptResult:
     video_id: str
     language: str
-    content: str | None           # SRT text
-    content_hash: str | None      # sha256 of content
-    byte_size: int | None
-    status: Literal["succeeded", "no_subtitles", "rate_limited", "members_only", "failed"]
-    error: str | None
-    artifact_path: str | None     # If saved to disk
+    raw_srt: str
+    cleaned_text: str
+    content_hash: str
+    artifact_path: str
+    byte_size: int
 ```
+
+Implementation: `YtDlpTranscriptProvider` — preserves legacy retry schedule, rate-limit cooldown, inter-video pacing.
 
 ### 3.2 Summarizer
 
 ```python
 class SummarizerPort(Protocol):
-    def summarize(self, transcript: TranscriptRef, context: SummaryContext) -> SummaryResult:
-        """Summarize a transcript. Cache key derived from transcript content + prompt version + model."""
-        ...
+    async def summarize(self, context: SummaryContext) -> SummaryResult: ...
+    async def summarize_batch(self, contexts: list[SummaryContext]) -> list[SummaryResult]: ...
 
 @dataclass(frozen=True)
 class SummaryContext:
-    video_title: str
-    video_description: str
-    prompt_version: str           # Hash of prompt template content
-    model: str
+    video_id: str
+    title: str
+    channel: str
+    transcript_text: str
+    language: str = "en"
+    prompt_version: str = "v1"
+    model: str = "gpt-4o-mini"
 
 @dataclass(frozen=True)
 class SummaryResult:
     video_id: str
-    data: dict[str, Any]          # Structured summary JSON
+    summary_data: dict
     content_hash: str
-    token_usage: TokenUsage | None
-    latency_ms: int
+    artifact_path: str
+    byte_size: int
+    prompt_version: str
+    model: str
 ```
+
+Implementation: `OpenAISummarizerAdapter` — bounded exp backoff retry, usage ledger emission.
 
 ### 3.3 Insights Provider
 
 ```python
 class InsightsProviderPort(Protocol):
-    def analyze(self, summary: SummaryData, video_meta: VideoMetadata) -> InsightsResult:
-        """Generate AI-powered insights for comparison. Cache key from summary + prompt version."""
-        ...
+    async def generate_insights(self, video_metadata: dict, summary_data: dict, prompt_version: str = "v1", model: str = "gpt-4o-mini") -> InsightsResult: ...
+    async def generate_insights_batch(self, video_metadata_list: list[dict], summary_data_list: list[dict], prompt_version: str = "v1", model: str = "gpt-4o-mini") -> list[InsightsResult]: ...
 
 @dataclass(frozen=True)
 class InsightsResult:
     video_id: str
-    difficulty: str
+    learning_outcome: str
+    difficulty_level: str
     teaching_style: str
     practical_value: str
     content_depth: str
-    learning_outcome: str
     target_audience: str
-    prerequisites: str
     key_differentiators: str
     time_investment_worth: str
-    token_usage: TokenUsage | None
+    prerequisites: str
+    follow_up_recommendations: str
+    content_hash: str
+    artifact_path: str
+    prompt_version: str
+    model: str
 ```
+
+Implementation: `OpenAIInsightsProvider` — JSON fallback to `_get_fallback_insights()`.
 
 ### 3.4 Assignment Generator
 
 ```python
 class AssignmentGeneratorPort(Protocol):
-    def generate(self, summary: SummaryData, video_meta: VideoMetadata, template: str) -> AssignmentResult:
-        """Generate educational assignment. Cache key from summary + prompt version + template."""
-        ...
+    async def generate_assignment(self, video_id: str, title: str, channel: str, summary_data: dict, prompt_version: str = "v1", model: str = "gpt-4o-mini") -> AssignmentResult: ...
+    async def generate_assignments_batch(self, videos: list[dict], summaries: list[dict], prompt_version: str = "v1", model: str = "gpt-4o-mini") -> list[AssignmentResult]: ...
 
 @dataclass(frozen=True)
 class AssignmentResult:
     video_id: str
     markdown: str
-    metadata: dict[str, Any]
+    sections: list[dict]
+    checklist: list[dict]
+    metadata: dict
+    display_metadata: dict[str, str]
     content_hash: str
-    token_usage: TokenUsage | None
+    artifact_path: str
+    byte_size: int
+    prompt_version: str
+    model: str
 ```
+
+Implementation: `OpenAIAssignmentAdapter` — prompt templates loaded from YAML.
 
 ### 3.5 Quiz Generator
 
 ```python
 class QuizGeneratorPort(Protocol):
-    def generate_quiz(self, transcript: TranscriptRef, title: str) -> QuizResult:
-        """Generate quiz from transcript. Cache key from transcript + prompt version + model."""
-        ...
+    async def generate_quiz(self, transcript: TranscriptRef, title: str, context: QuizContext) -> QuizResult: ...
+
+@dataclass(frozen=True)
+class QuizContext:
+    playlist_url: str
+    gemini_api_key: str | None = None
+    max_videos: int | None = None
+    model: str = "gemini-1.5-pro"
 
 @dataclass(frozen=True)
 class QuizResult:
     video_id: str
     content: str
     token_usage: TokenUsage | None
+    success: bool
 ```
+
+Implementation: `GeminiQuizProvider` — new `genai.Client` per call (thread-safety), token counts from `usage_metadata`.
 
 ### 3.6 Cache Port
 
 ```python
 class CachePort(Protocol):
-    def get(self, key: CacheKey) -> bytes | None: ...
-    def set(self, key: CacheKey, value: bytes, ttl: timedelta) -> None: ...
-    def invalidate(self, key: CacheKey) -> None: ...
-    def invalidate_namespace(self, namespace: str) -> None: ...
+    async def get(self, key: CacheKey) -> bytes | None: ...
+    async def set(self, key: CacheKey, value: bytes, ttl: timedelta) -> None: ...
+    async def delete(self, key: CacheKey) -> None: ...
+    async def exists(self, key: CacheKey) -> bool: ...
+    async def touch(self, key: CacheKey) -> None: ...
 
 @dataclass(frozen=True)
 class CacheKey:
-    namespace: str                 # "transcript", "summary", "comparison", "assignment", "quiz"
-    version: str                   # Semantic version of key schema (e.g., "v2")
-    content_hash: str              # sha256(canonical_input)
-    params_hash: str               # sha256(settings_json)
+    namespace: str
+    version: str
+    content_hash: str
+    params_hash: str
+
+    def __str__(self) -> str:
+        return f"{self.namespace}:{self.version}:{self.content_hash}:{self.params_hash}"
 ```
+
+Implementation: `SqlCacheAdapter` — zlib-compressed JSON, TTL check, hit_count tracking, default `run_id="global-cache"`.
 
 ### 3.7 Usage Ledger Port
 
 ```python
 class UsageLedgerPort(Protocol):
-    def record(self, record: UsageRecord) -> None: ...
-    def aggregate(self, *, provider: str | None = None, model: str | None = None,
-                  operation: str | None = None, since: datetime | None = None,
-                  until: datetime | None = None, cache_status: bool | None = None) -> UsageAggregate: ...
-    def recent(self, limit: int = 100) -> list[UsageRecord]: ...
+    async def record(self, record: UsageRecord) -> None: ...
+    async def aggregate(self, *, provider: str | None = None, model: str | None = None,
+                        operation: str | None = None, since: datetime | None = None,
+                        until: datetime | None = None, cache_status: bool | None = None) -> UsageAggregate: ...
+    async def recent(self, limit: int = 100) -> list[UsageRecord]: ...
 
 @dataclass(frozen=True)
 class UsageRecord:
-    request_id: str                # Correlation ID (UUID)
-    run_id: str | None
-    timestamp: datetime            # UTC
-    provider: Literal["openai", "gemini", "youtube"]
-    model: str
+    timestamp: datetime
+    provider: str
     operation: str
+    model: str
     input_tokens: int
     output_tokens: int
     total_tokens: int
-    estimated_cost_usd: float
-    currency: Literal["USD"] = "USD"
-    latency_ms: int
-    success: bool
-    error_category: str | None
+    cost_usd: float
     cache_hit: bool
-    cache_key: str | None
-    cache_namespace: str | None
-    retry_count: int
-    metadata: dict[str, Any]
+    run_id: str | None = None
+    video_id: str | None = None
 
 @dataclass(frozen=True)
 class UsageAggregate:
     total_requests: int
     total_input_tokens: int
     total_output_tokens: int
+    total_tokens: int
     total_cost_usd: float
-    by_provider: dict[str, ProviderAggregate]
-    by_operation: dict[str, OperationAggregate]
-    by_cache_status: dict[str, CacheAggregate]
-    time_range: TimeRange
-
-@dataclass(frozen=True)
-class ProviderAggregate:
-    provider: str
-    requests: int
-    input_tokens: int
-    output_tokens: int
-    cost_usd: float
-
-@dataclass(frozen=True)
-class OperationAggregate:
-    operation: str
-    requests: int
-    avg_latency_ms: float
-    success_rate: float
-
-@dataclass(frozen=True)
-class CacheAggregate:
-    cache_hit: bool
-    requests: int
-    saved_cost_usd: float
-
-@dataclass(frozen=True)
-class TimeRange:
-    since: datetime
-    until: datetime
+    cache_hit_rate: float
 ```
+
+Implementation: `SqlUsageLedger` — provides both protocol and legacy (`record_usage`, `get_aggregate`, `get_by_provider`, `get_by_operation`, `get_cache_stats`).
 
 ### 3.8 Run Repository Port
 
 ```python
 class RunRepositoryPort(Protocol):
-    # Runs
-    def create_run(self, *, run_id: str, search_query: str, normalized_query: str,
-                   max_videos: int, transcript_language: str) -> str: ...
-    def get_run(self, run_id: str) -> RunRecord | None: ...
-    def list_runs(self) -> list[RunRecord]: ...
-    def latest_run(self) -> RunRecord | None: ...
-    def set_run_status(self, run_id: str, status: str, error: str | None = None) -> None: ...
-
-    # Videos
-    def set_videos(self, run_id: str, videos: list[dict]) -> None: ...
-    def get_videos(self, run_id: str) -> list[dict]: ...
-    def videos_state_hash(self, run_id: str) -> str: ...
-
-    # Transcripts
-    def upsert_transcripts(self, run_id: str, records: list[dict], settings: dict | None = None) -> None: ...
-    def get_transcripts(self, run_id: str) -> list[dict]: ...
-    def transcripts_state_hash(self, run_id: str) -> str: ...
-
-    # Summaries
-    def upsert_summaries(self, run_id: str, records: list[dict], settings: dict | None = None) -> None: ...
-    def get_summaries(self, run_id: str) -> list[dict]: ...
-    def summaries_state_hash(self, run_id: str) -> str: ...
-
-    # Comparisons
-    def set_comparison(self, run_id: str, payload: dict, settings: dict | None = None) -> None: ...
-    def get_comparison(self, run_id: str) -> dict | None: ...
-
-    # Assignments
-    def upsert_assignments(self, run_id: str, records: list[dict], settings: dict | None = None) -> None: ...
-    def get_assignments(self, run_id: str) -> list[dict]: ...
-
-    # Generation jobs
-    def start_job(self, run_id: str, kind: str, settings: dict | None = None) -> int: ...
-    def finish_job(self, run_id: str, kind: str) -> None: ...
-    def fail_job(self, run_id: str, kind: str, error: str | None = None) -> None: ...
-
-    # Cache
-    def get_cache_entry(self, cache_key: str) -> CacheEntry | None: ...
-    def put_cache_entry(self, cache_key: str, kind: str, run_id: str, ttl_days: int = 30) -> None: ...
-    def touch_cache_hit(self, cache_key: str) -> None: ...
-    def find_cached_run(self, cache_key: str) -> CacheEntry | None: ...
-
-    # Maintenance
-    def recompute_run_hashes(self, run_id: str) -> None: ...
-    def mark_stale_derived(self, run_id: str) -> None: ...
-    def purge_expired(self, retention_days: int = 90) -> dict: ...
-    def stats(self) -> dict: ...
+    async def create_run(self, *, run_id: str, cache_key: str | None, search_query: str, normalized_query: str,
+                         max_videos: int, transcript_language: str, is_fallback: bool) -> str: ...
+    async def get_run(self, run_id: str) -> dict | None: ...
+    async def list_runs(self) -> list[dict]: ...
+    async def latest_run(self) -> dict | None: ...
+    async def set_run_status(self, run_id: str, status: str, error: str | None = None) -> None: ...
+    async def set_videos(self, run_id: str, videos: list[dict]) -> None: ...
+    async def get_videos(self, run_id: str) -> list[dict]: ...
+    async def videos_state_hash(self, run_id: str) -> str: ...
+    async def upsert_transcripts(self, run_id: str, transcripts: list[dict], settings: dict | None = None) -> None: ...
+    async def get_transcripts(self, run_id: str) -> list[dict]: ...
+    async def transcripts_state_hash(self, run_id: str) -> str: ...
+    async def upsert_summaries(self, run_id: str, summaries: list[dict], settings: dict | None = None) -> None: ...
+    async def get_summaries(self, run_id: str) -> list[dict]: ...
+    async def summaries_state_hash(self, run_id: str) -> str: ...
+    async def set_comparison(self, run_id: str, rows: list[dict], insights_report: dict, recommendations: dict,
+                             settings: dict | None = None, status: str = "succeeded", error: str | None = None) -> None: ...
+    async def get_comparison(self, run_id: str) -> tuple[list[dict], dict, dict] | None: ...
+    async def upsert_assignments(self, run_id: str, assignments: list[dict], settings: dict | None = None) -> None: ...
+    async def get_assignments(self, run_id: str) -> list[dict]: ...
+    async def set_quiz_result(self, run_id: str, result: dict, settings: dict | None = None) -> None: ...
+    async def get_quiz_result(self, run_id: str) -> dict | None: ...
+    async def recompute_run_hashes(self, run_id: str) -> None: ...
+    async def mark_stale_derived(self, run_id: str) -> None: ...
+    async def purge_expired(self, retention_days: int = 90) -> dict: ...
+    async def stats(self) -> dict: ...
+    async def find_cached_run(self, cache_key: str) -> dict | None: ...
+    async def put_cache_entry(self, cache_key: str, kind: str, run_id: str, normalized_query: str, settings: dict, ttl_days: int) -> None: ...
+    async def touch_cache_hit(self, cache_key: str) -> None: ...
 ```
+
+Implementation: `SqlRunRepository` — delegates to `backend.storage.repository.RunRepository` (no logic rewrite).
 
 ---
 
@@ -406,50 +397,7 @@ class RunRepositoryPort(Protocol):
 
 ### 4.1 Key Construction
 
-```python
-class CacheKeyBuilder:
-    VERSION = "v2"
-
-    def transcript_key(self, video_id: str, language: str, content_hash: str) -> CacheKey:
-        return CacheKey(
-            namespace="transcript",
-            version=self.VERSION,
-            content_hash=content_hash,  # sha256(transcript_text + language)
-            params_hash=self._params_hash({"language": language}),
-        )
-
-    def summary_key(self, video_id: str, transcript_hash: str, prompt_version: str, model: str) -> CacheKey:
-        return CacheKey(
-            namespace="summary",
-            version=self.VERSION,
-            content_hash=sha256(f"{transcript_hash}:{prompt_version}:{model}"),
-            params_hash=self._params_hash({"prompt_version": prompt_version, "model": model}),
-        )
-
-    def comparison_key(self, run_id: str, input_hash: str, prompt_version: str, model: str) -> CacheKey:
-        return CacheKey(
-            namespace="comparison",
-            version=self.VERSION,
-            content_hash=input_hash,
-            params_hash=self._params_hash({"prompt_version": prompt_version, "model": model, "use_ai_insights": True}),
-        )
-
-    def assignment_key(self, video_id: str, summary_hash: str, prompt_version: str, model: str) -> CacheKey:
-        return CacheKey(
-            namespace="assignment",
-            version=self.VERSION,
-            content_hash=sha256(f"{summary_hash}:{prompt_version}:{model}"),
-            params_hash=self._params_hash({"prompt_version": prompt_version, "model": model}),
-        )
-
-    def quiz_key(self, video_id: str, transcript_hash: str, prompt_version: str, model: str) -> CacheKey:
-        return CacheKey(
-            namespace="quiz",
-            version=self.VERSION,
-            content_hash=sha256(f"{transcript_hash}:{prompt_version}:{model}"),
-            params_hash=self._params_hash({"prompt_version": prompt_version, "model": model}),
-        )
-```
+`CacheKeyBuilder.VERSION = "v2"` — methods: `transcript_key`, `summary_key`, `comparison_key`, `assignment_key`, `quiz_key`, `search_key`. Each builds a `CacheKey(namespace, version, content_hash, params_hash)`.
 
 ### 4.2 TTL Policy
 
@@ -464,22 +412,13 @@ class CacheKeyBuilder:
 
 ### 4.3 Storage Format
 
-Cache entries stored in SQLite `cache_entries` table extended with:
-- `namespace` TEXT NOT NULL
-- `version` TEXT NOT NULL
-- `content_hash` TEXT NOT NULL
-- `params_hash` TEXT NOT NULL
-- `value` BLOB (compressed JSON via zlib)
-- `created_at` TEXT NOT NULL
-- `expires_at` TEXT NOT NULL
-- `hit_count` INTEGER NOT NULL DEFAULT 0
-- `last_hit_at` TEXT
+SQLite `cache_entries` extended with `namespace`, `version`, `content_hash`, `params_hash`, `value` (zlib-compressed JSON). Legacy rows remain readable.
 
 ---
 
 ## 5. Usage Ledger Model Details
 
-### 5.1 SQL Schema (Migration)
+### 5.1 SQL Schema (Migration 0002 — APPLIED ✅)
 
 ```sql
 CREATE TABLE IF NOT EXISTS usage_ledger (
@@ -502,10 +441,9 @@ CREATE TABLE IF NOT EXISTS usage_ledger (
     cache_key TEXT,
     cache_namespace TEXT,
     retry_count INTEGER NOT NULL DEFAULT 0,
-    metadata TEXT,  -- JSON blob
+    metadata TEXT,
     created_at TEXT NOT NULL
 );
-
 CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage_ledger(timestamp);
 CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_ledger(provider);
 CREATE INDEX IF NOT EXISTS idx_usage_model ON usage_ledger(model);
@@ -514,35 +452,20 @@ CREATE INDEX IF NOT EXISTS idx_usage_run_id ON usage_ledger(run_id);
 CREATE INDEX IF NOT EXISTS idx_usage_request_id ON usage_ledger(request_id);
 ```
 
-### 5.2 Token Counting Strategy
+### 5.2 Token Counting & Cost
 
-- **OpenAI/OpenRouter**: Use `response.usage.prompt_tokens`, `response.usage.completion_tokens`, `response.usage.total_tokens` when available
-- **Gemini**: Use `response.usage_metadata.prompt_token_count`, `response.usage_metadata.candidates_token_count` when available
-- **Estimation fallback**: tiktoken encoding for known models when provider doesn't report usage
-- **Cache hit**: input_tokens=0, output_tokens=0, cache_hit=True (no LLM call made)
-
-### 5.3 Cost Calculation
-
-```python
-class CostCalculator:
-    PRICING = {
-        "openai/gpt-5-mini": {"input": 0.15, "output": 0.60},  # per 1M tokens
-        "openai/gpt-4o-mini": {"input": 0.15, "output": 0.60},
-        "gemini-3.6-flash": {"input": 0.075, "output": 0.30},
-    }
-
-    def calculate(self, provider: str, model: str, input_tokens: int, output_tokens: int) -> float:
-        rates = self.PRICING.get(model, {"input": 0.0, "output": 0.0})
-        return (input_tokens * rates["input"] + output_tokens * rates["output"]) / 1_000_000
-```
+- OpenAI/OpenRouter: `response.usage.*` when available
+- Gemini: `response.usage_metadata.*` when available
+- Cache hit: `input_tokens=0, output_tokens=0, cache_hit=True`
+- Cost calculator not yet wired (adapters emit `cost_usd=0.0`)
 
 ---
 
 ## 6. API Compatibility Assessment
 
-**No breaking changes planned.** All existing endpoint paths, methods, request/response shapes, and status codes are preserved.
+**No breaking changes.** All existing endpoint paths, methods, request/response shapes, and status codes preserved.
 
-### Preserved Contracts
+### Preserved Contracts (backend/ legacy transport, unchanged)
 
 | Endpoint | Method | Request Shape | Response Shape | Status Codes |
 |----------|--------|---------------|----------------|--------------|
@@ -565,18 +488,13 @@ class CostCalculator:
 | `/api/quiz/credentials` | POST | UploadFile | `{status, message}` | 200, 400 |
 | `/api/quiz/auth` | POST | — | `{status, message}` | 200, 400 |
 
-### New Endpoint (Backward Compatitive Addition)
+### New Endpoint (Additive — IMPLEMENTED ✅)
 
 | Endpoint | Method | Response | Description |
 |----------|--------|----------|-------------|
 | `/api/usage` | GET | `UsageAggregateResponse` | Aggregated usage/cost data with optional filters |
 
-### Frontend Compatibility
-
-- `frontend/src/lib/types.ts` interfaces mirror backend Pydantic schemas exactly
-- No changes to existing types planned
-- New types for usage aggregation will be added in a separate `types/usage.ts` file
-- Existing `api.ts` functions will be preserved; new `usageApi` object added
+Router: `src/transport/http/fastapi/routers/usage.py`; schemas: `src/transport/http/fastapi/schemas/usage.py`. Not yet mounted in `backend/main.py` — Wave C.
 
 ---
 
@@ -584,36 +502,29 @@ class CostCalculator:
 
 ### No Data Loss
 
-1. **Existing SQLite database** (`data/atlas.sqlite3`) — preserved as-is; new migrations append tables
-2. **Existing artifact files** (`data/artifacts/`, `pipeline_output_*/`) — preserved; read by `ArtifactFileStore`
-3. **Existing cache entries** — preserved; new `cache_entries` columns added via migration
+1. **Existing SQLite database** (`data/atlas.sqlite3`) — preserved; migration `0002` appends `usage_ledger` + extends `cache_entries` ✅ applied
+2. **Existing artifact files** (`data/artifacts/`, `pipeline_output_*/`) — preserved; `ArtifactFileStore` reads/writes under `artifact_root`
+3. **Existing cache entries** — preserved; legacy rows readable (new columns nullable)
 
-### New Tables (Appended Migrations)
+### Applied Migrations
 
-- `usage_ledger` — new table, no migration needed
-- `cache_entries` extended with `namespace`, `version`, `content_hash`, `params_hash`, `value` — migration alters existing table
-
-### Reversibility
-
-- Old `cache_entries` schema can be restored by dropping new columns (SQLite ALTER TABLE DROP COLUMN supported in 3.35+)
-- `usage_ledger` can be dropped entirely if feature is reverted
+- `0001_initial` — original schema
+- `0002_usage_ledger_and_extended_cache` — `usage_ledger` table + 6 indexes; `ALTER TABLE cache_entries ADD COLUMN namespace/version/content_hash/params_hash/value`
 
 ---
 
 ## 8. Configuration
 
-### Environment Variables (Preserved + Extended)
-
 | Variable | Purpose | Required |
 |----------|---------|----------|
-| `OPENROUTER_API_KEY` | OpenAI API via OpenRouter | Yes (for summarization/comparison/assignments) |
-| `YOUTUBE_API_KEY` | YouTube Data API | Yes (for search/playlist) |
-| `GEMINI_API_KEY` | Google AI Studio / Gemini | Yes (for quiz generation) |
+| `OPENROUTER_API_KEY` | OpenAI API via OpenRouter | Yes |
+| `YOUTUBE_API_KEY` | YouTube Data API | Yes |
+| `GEMINI_API_KEY` | Google AI Studio / Gemini | Yes |
 | `ATLAS_DB_PATH` | SQLite database path | No (default: `data/atlas.sqlite3`) |
 | `ATLAS_ARTIFACT_ROOT` | Artifact storage root | No (default: `data/artifacts`) |
 | `ATLAS_CACHE_TTL_DAYS` | Default cache TTL | No (default: 30) |
-| `ATLAS_GOOGLE_CREDS_PATH` | Google OAuth credentials JSON | No (default: `credentials.json` in repo root) |
-| `ATLAS_GOOGLE_TOKEN_PATH` | Google OAuth token JSON | No (default: `token.json` in repo root) |
+| `ATLAS_GOOGLE_CREDS_PATH` | Google OAuth credentials JSON | No (default: `credentials.json`) |
+| `ATLAS_GOOGLE_TOKEN_PATH` | Google OAuth token JSON | No (default: `token.json`) |
 | `ATLAS_DEV_SHUTDOWN_TOKEN` | Dev server shutdown token | No |
 | `ATLAS_RETENTION_DAYS` | Artifact retention | No (default: 90) |
 
@@ -621,46 +532,24 @@ class CostCalculator:
 
 ## 9. Testing Strategy
 
-### Unit Tests
+> **Current state:** no tests exist yet for new layers. Test suite to be added alongside Waves C–D.
 
-- Domain models and services (pure Python, no mocks of external systems)
+### Unit Tests
+- Domain models and services (pure Python)
 - Cache key builder determinism
 - Usage ledger aggregation correctness
-- Comparison inference logic (difficulty, style, value)
+- Comparison inference logic
 
 ### Integration Tests
-
-- Each adapter with real or fixture-based external systems:
-  - `SqlRunRepository` with in-memory SQLite
-  - `SqlCacheAdapter` with in-memory SQLite
-  - `OpenAISummarizerAdapter` with recorded HTTP fixtures (httpx)
-  - `GeminiQuizProvider` with recorded HTTP fixtures
-  - `YtDlpTranscriptProvider` with mock yt-dlp responses
+- Each adapter with real/fixture external systems:
+  - `SqlRunRepository`, `SqlCacheAdapter` with in-memory SQLite
+  - LLM adapters with recorded HTTP fixtures (httpx)
+  - `YtDlpTranscriptProvider` with mock responses
 
 ### API Tests
-
-- Existing endpoint contracts verified with pytest + httpx
-- New `/api/usage` endpoint tested for aggregation correctness
-- SSE streaming endpoint tested for proper event format
-
-### Cache Tests
-
-- Cold miss → populate → hot hit
-- Different content → different key
-- Changed parameters → different key
-- Expired entry → miss
-- Corrupted entry → miss + log
-- Cache unavailable → graceful fallback
-- Concurrent access (thread safety)
-
-### Usage Tests
-
-- Successful LLM call → record persisted
-- Failed LLM call → error_category recorded
-- Retry sequence → retry_count recorded
-- Cache hit → zero tokens, cache_hit=True
-- Cache miss → tokens recorded, cache_hit=False
-- Aggregation correctness across time ranges
+- Existing endpoint contracts verified (pytest + httpx)
+- New `/api/usage` endpoint tested
+- SSE streaming endpoint tested
 
 ---
 
@@ -668,36 +557,72 @@ class CostCalculator:
 
 | Path | Current Behavior | Target After Refactor |
 |------|------------------|-----------------------|
-| Repeated summary request | Re-calls OpenAI every time | Cache hit → zero LLM calls, <50ms response |
-| Repeated comparison request | Re-calls OpenAI N times for insights | Cache hit → zero LLM calls, <100ms response |
-| Repeated transcript request | Re-runs yt-dlp | Cache hit → zero network I/O, <10ms response |
-| Repeated assignment request | Re-calls OpenAI N times | Cache hit → zero LLM calls, <50ms response |
-| OpenAPI client creation | Creates new `OpenAI()` per thread per call | Reuse clients via dependency injection |
-| Gemini client creation | Creates new `genai.Client` per request | Reuse clients via dependency injection |
-| Config loading | Reloads YAML on first `get_config()` call | Single load at startup, passed via settings |
+| Repeated summary request | Re-calls OpenAI every time | Cache hit → zero LLM calls, <50ms |
+| Repeated comparison request | Re-calls OpenAI N times | Cache hit → zero LLM calls, <100ms |
+| Repeated transcript request | Re-runs yt-dlp | Cache hit → zero network I/O, <10ms |
+| Repeated assignment request | Re-calls OpenAI N times | Cache hit → zero LLM calls, <50ms |
+| OpenAI client creation | New client per call | Reuse via DI |
+| Gemini client creation | New client per request | Reuse via DI |
+| Config loading | Reloads YAML on first call | Single load at startup |
 
 ---
 
-## 11. Migration Checklist
+## 11. Migration Checklist — **Current Progress**
 
-- [ ] Create `docs/ARCHITECTURE.md` (this document)
-- [ ] Define all domain models and ports
-- [ ] Implement `SqlRunRepository` with new schema
-- [ ] Implement `SqlCacheAdapter` with content-derived keys
-- [ ] Implement `SqlUsageLedger` with aggregation queries
-- [ ] Implement OpenAI adapters with retry/backoff and instrumentation
-- [ ] Implement Gemini adapter with retry/backoff and instrumentation
-- [ ] Implement yt-dlp transcript provider
-- [ ] Implement comparison inference service
-- [ ] Implement application use cases
-- [ ] Slim FastAPI routers to use application layer
-- [ ] Add `/api/usage` endpoint
-- [ ] Add frontend usage dashboard
-- [ ] Delete `app.py` (Gradio legacy)
-- [ ] Remove `src/youtube_pipeline.py`, `src/summarize_youtube_transcript.py`, etc. (migrated to new modules)
-- [ ] Remove `os.environ[...]` mutations from services
-- [ ] Make Google OAuth paths configurable
+- [x] Create `docs/ARCHITECTURE.md` (this document)
+- [x] Define all domain models and ports (`src/domain/`, 18 files)
+- [x] Implement `SqlRunRepository` + `SqlUsageLedger` (`src/infrastructure/storage/sql.py`)
+- [x] Implement `SqlCacheAdapter` with content-derived keys (`src/infrastructure/cache/sql_cache.py`)
+- [x] Implement OpenAI adapters with retry/backoff and instrumentation (`src/infrastructure/llm/openai/`)
+- [x] Implement Gemini adapter with retry/backoff and instrumentation (`src/infrastructure/llm/gemini/`)
+- [x] Implement yt-dlp transcript provider (`src/infrastructure/transcript/ytdlp/`)
+- [x] Implement YouTube search/playlist adapters (`src/infrastructure/youtube/`)
+- [x] Implement Google Drive exporter + ArtifactFileStore (`src/infrastructure/google/`, `src/infrastructure/storage/filesystem.py`)
+- [x] Add `/api/usage` endpoint + schemas (`src/transport/http/fastapi/routers/usage.py`, `schemas/usage.py`)
+- [x] Apply migration `0002_usage_ledger_and_extended_cache`
+- [x] Delete `app.py` (Gradio legacy)
+- [x] Remove stale build artifacts (`src/atlas.egg-info/`, all `__pycache__/`)
+- [x] Make Google OAuth paths configurable (`ATLAS_GOOGLE_CREDS_PATH`, `ATLAS_GOOGLE_TOKEN_PATH`)
+- [x] **Implement application use cases (Wave B)** — 6 use cases + DTOs + ports
+- [x] **Remove `os.environ[...]` mutations** from `backend/services/pipeline_service.py` + `backend/services/quiz_service.py`
+- [ ] Implement `src/config/` layer (settings, prompts, models) — Wave C
+- [ ] Slim FastAPI routers to use application layer (Wave C)
+- [ ] Mount `/api/usage` router into app + wire DI container (Wave C)
+- [ ] Add correlation-ID middleware + error mapping (Wave C)
+- [ ] Remove legacy `src/youtube_pipeline.py`, `src/summarize_youtube_transcript.py`, `src/compare_youtube_outputs.py`, `src/assignment_generator.py`, `src/playlist_quiz_generator.py`, `src/fetch_youtube_transcript.py`, `src/youtube_video_search.py` (Wave C — after backend no longer imports them)
+- [ ] Add frontend usage dashboard (Wave D)
+- [ ] Wire `CostCalculator` into ledger
+- [ ] Add tests (domain/cache/usage/API)
 - [ ] Run `uv run ruff check .`
 - [ ] Run `uv run pytest`
 - [ ] Verify `pipeline_output_*` artifacts intact
 - [ ] Verify `data/atlas.sqlite3` migrated successfully
+
+---
+
+## 12. Implementation Plan Summary
+
+### Wave A — Foundation (✅ COMPLETED)
+- Domain models, interfaces, exceptions
+- Infrastructure adapters (LLM, transcript, storage, cache, YouTube, Google)
+- Migration `0002`, `/api/usage` router, cleanup
+
+### Wave B — Application Layer (✅ COMPLETED)
+- `src/application/dto/` — 6 DTO modules
+- `src/application/ports/provider_ports.py` — domain interface re-exports
+- `src/application/use_cases/` — 6 use cases orchestrating via ports
+- Removed `os.environ` mutations from backend services
+
+### Wave C — Transport Slimming (🟡 NEXT)
+1. Implement `src/config/` (settings, prompts, models)
+2. Wire DI in `backend/main.py` → inject use cases into FastAPI
+3. Replace `PipelineService`/`QuizService` calls with `SearchPipelineUseCase` etc.
+4. Mount `/api/usage` router
+5. Add correlation-ID middleware, error mapping
+6. Delete legacy `src/*.py` modules once no longer imported
+
+### Wave D — Frontend & Polish (⏳ PENDING)
+- Frontend usage dashboard (`types/usage.ts`, `api.ts`, dashboard component)
+- Wire `CostCalculator` into ledger
+- Comprehensive test suite
+- Lint + typecheck + pytest

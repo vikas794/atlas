@@ -51,13 +51,14 @@ def parse_duration(iso_duration):
         return f"{minutes}:{seconds:02d}"
 
 
-def search_youtube_videos_api(search_query, max_results=None):
+def search_youtube_videos_api(search_query, max_results=None, youtube_api_key=None):
     """
     Search for YouTube videos using the YouTube Data API.
 
     Args:
         search_query (str): The search query to find relevant YouTube videos
         max_results (int): Maximum number of results to return
+        youtube_api_key (Optional[str]): YouTube API key. If not provided, reads from env.
 
     Returns:
         list: List of video information dictionaries
@@ -69,7 +70,7 @@ def search_youtube_videos_api(search_query, max_results=None):
     if max_results is None:
         max_results = get_config("search.default_max_results", 10)
 
-    api_key = os.getenv("YOUTUBE_API_KEY")
+    api_key = youtube_api_key or os.getenv("YOUTUBE_API_KEY")
     if not api_key:
         raise ValueError(
             "YouTube API key is required. Set YOUTUBE_API_KEY environment variable."
@@ -195,20 +196,21 @@ def format_video_results(videos, search_query):
     return result
 
 
-def search_youtube_videos(search_query, max_results=10):
+def search_youtube_videos(search_query, max_results=10, youtube_api_key=None):
     """
     Searches for YouTube videos based on a query using the YouTube Data API.
 
     Args:
         search_query (str): The search query to find relevant YouTube videos
         max_results (int): Maximum number of results to return
+        youtube_api_key (Optional[str]): YouTube API key. If not provided, reads from env.
 
     Returns:
         str: Formatted search results
     """
     try:
         # Get videos using the YouTube API
-        videos = search_youtube_videos_api(search_query, max_results)
+        videos = search_youtube_videos_api(search_query, max_results, youtube_api_key)
 
         # Format and return the results
         return format_video_results(videos, search_query)
@@ -217,18 +219,19 @@ def search_youtube_videos(search_query, max_results=10):
         return f"Error searching YouTube videos: {str(e)}"
 
 
-def search_youtube_direct(search_query, max_results=10):
+def search_youtube_direct(search_query, max_results=10, youtube_api_key=None):
     """
     Direct YouTube search - returns raw video data.
 
     Args:
         search_query (str): The search query to find relevant YouTube videos
         max_results (int): Maximum number of results to return
+        youtube_api_key (Optional[str]): YouTube API key. If not provided, reads from env.
 
     Returns:
         list: List of video information dictionaries
     """
-    return search_youtube_videos_api(search_query, max_results)
+    return search_youtube_videos_api(search_query, max_results, youtube_api_key)
 
 
 def parse_arguments():
