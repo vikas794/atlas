@@ -1,28 +1,16 @@
 import * as Tabs from '@radix-ui/react-tabs'
-import { AnimatePresence, motion } from 'framer-motion'
-import {
-  ArrowUpRight,
-  CheckCheck,
-  Circle,
-  Layers3,
-} from 'lucide-react'
+import { Layers3 } from 'lucide-react'
 import { useMemo } from 'react'
 
-import { MarkdownBody } from '../../components/shared/markdown-body'
 import { SectionHeading } from '../../components/shared/section-heading'
-import { Badge } from '../../components/ui/badge'
 import { Card } from '../../components/ui/card'
 import type { RunBundle } from '../../lib/types'
-import { cn } from '../../lib/utils'
-import {
-  formatDate,
-  getAssignmentProgressItems,
-  getVideoThumbnail,
-  splitBreakdown,
-  trimText,
-} from './pipeline-utils'
 import { RunForm } from './run-form'
-import { useAssignmentProgress } from './use-assignment-progress'
+import { AssignmentsTab } from './tabs/assignments-tab'
+import { ComparisonTab } from './tabs/comparison-tab'
+import { SummariesTab } from './tabs/summaries-tab'
+import { TranscriptsTab } from './tabs/transcripts-tab'
+import { VideosTab } from './tabs/videos-tab'
 
 interface PipelineDashboardProps {
   activeRunId: string
@@ -62,7 +50,6 @@ export function PipelineDashboard({
   const summaries = bundle?.summaries.items ?? []
   const comparison = bundle?.comparison.rows ?? []
   const assignments = useMemo(() => bundle?.assignments.items ?? [], [bundle?.assignments.items])
-  const { assignmentProgress, toggleAssignmentItem } = useAssignmentProgress(assignments, activeRunId)
 
   return (
     <section id="pipeline" className="space-y-8">
@@ -123,392 +110,27 @@ export function PipelineDashboard({
             </Tabs.List>
 
             <Tabs.Content className="space-y-4" value="videos">
-              <div className="grid gap-5 xl:grid-cols-2">
-                {videos.map((video) => (
-                  <Card key={video.video_id} className="overflow-hidden p-0">
-                    <div className="grid gap-0 md:grid-cols-[280px,minmax(0,1fr)]">
-                      <div className="relative aspect-video bg-black/30 md:aspect-auto">
-                        <img
-                          alt={video.title}
-                          className="h-full w-full object-cover"
-                          src={getVideoThumbnail(video.video_id)}
-                        />
-                        <div className="absolute bottom-3 right-3 rounded-lg bg-black/70 px-2 py-1 text-xs text-white">
-                          {video.duration}
-                        </div>
-                      </div>
-                      <div className="p-5">
-                        <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-zinc-500">
-                          <span>{video.channel}</span>
-                          <span className="text-zinc-700">/</span>
-                          <span>{formatDate(video.published_at)}</span>
-                        </div>
-                        <h4 className="mt-3 text-xl font-semibold tracking-[-0.03em] text-white">
-                          {video.title}
-                        </h4>
-                        <p className="mt-3 text-sm leading-7 text-zinc-300">
-                          {trimText(video.description || 'No description available for this result.', 240)}
-                        </p>
-                        <div className="mt-5 flex items-center justify-between gap-3">
-                          <div className="flex flex-wrap gap-2">
-                            <Badge>{video.channel}</Badge>
-                            <Badge>{video.duration}</Badge>
-                          </div>
-                          <a
-                            className="inline-flex items-center gap-2 text-sm font-medium text-white"
-                            href={video.url}
-                            rel="noreferrer"
-                            target="_blank"
-                          >
-                            Watch
-                            <ArrowUpRight className="size-4" />
-                          </a>
-                        </div>
-                      </div>
-                    </div>
-                  </Card>
-                ))}
-              </div>
+              <VideosTab videos={videos} />
             </Tabs.Content>
 
             <Tabs.Content className="space-y-4" value="transcripts">
-              {transcripts.map((item) => (
-                <Card key={item.video_id} className="p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <h4 className="text-lg font-semibold text-white">{item.title}</h4>
-                      <p className="mt-1 text-sm text-zinc-400">{item.channel}</p>
-                    </div>
-                    <Badge>{item.available ? item.language : 'Missing'}</Badge>
-                  </div>
-                  <p className="mt-4 max-h-[420px] overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-zinc-300">
-                    {item.cleaned_text || 'No transcript available for this video yet.'}
-                  </p>
-                </Card>
-              ))}
+              <TranscriptsTab transcripts={transcripts} />
             </Tabs.Content>
 
             <Tabs.Content className="space-y-5" value="summaries">
-              {summaries.map((item) => {
-                const breakdown = splitBreakdown(item.technical_breakdown)
-
-                return (
-                  <Card key={item.video_id} className="overflow-hidden p-0">
-                    <div className="border-b border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] px-6 py-5">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <h4 className="text-xl font-semibold tracking-[-0.03em] text-white">{item.title}</h4>
-                        <Badge>{item.channel}</Badge>
-                      </div>
-                    </div>
-
-                    <div className="space-y-6 p-6">
-                      <div className="grid gap-6 xl:grid-cols-[1.2fr,0.8fr]">
-                        <div className="rounded-[28px] border border-white/8 bg-[linear-gradient(145deg,rgba(255,255,255,0.05),rgba(255,255,255,0.015))] p-6">
-                          <p className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">Overview</p>
-                          <p className="mt-5 max-w-3xl text-[15px] leading-8 text-zinc-200">
-                            {item.high_level_overview}
-                          </p>
-                        </div>
-
-                        <div className="rounded-[28px] border border-white/8 bg-black/15 p-6">
-                          <SectionHeading
-                            title="Architecture"
-                            description="System structure and orchestration patterns."
-                          />
-                          {breakdown.architecture.length > 0 ? (
-                            <div className="space-y-4">
-                              {breakdown.architecture.map((entry, index) => (
-                                <div
-                                  key={`${item.video_id}-architecture-${index}`}
-                                  className="rounded-[24px] border border-white/8 bg-white/[0.03] p-5"
-                                >
-                                  <p className="text-sm leading-7 text-zinc-300">
-                                    {String(entry.description ?? 'Architecture detail')}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="text-sm text-zinc-400">No explicit architecture notes were extracted.</p>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="grid gap-6 xl:grid-cols-[0.95fr,1.05fr]">
-                        <div className="rounded-[28px] border border-white/8 bg-black/15 p-6">
-                          <SectionHeading
-                            title="Process flow"
-                            description="The main implementation sequence broken into steps."
-                          />
-                          <div className="space-y-4">
-                            {breakdown.processes.map((entry, index) => (
-                              <div
-                                key={`${item.video_id}-process-${index}`}
-                                className="relative overflow-hidden rounded-[24px] border border-white/8 bg-white/[0.03] p-5"
-                              >
-                                <div className="absolute inset-y-0 left-0 w-px bg-white/10" />
-                                <div className="pl-4">
-                                  <p className="text-[11px] uppercase tracking-[0.22em] text-zinc-500">
-                                    Step {String(entry.step_number ?? index + 1)}
-                                  </p>
-                                  <p className="mt-3 text-sm leading-7 text-zinc-300">
-                                    {String(entry.description ?? '')}
-                                  </p>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="rounded-[28px] border border-white/8 bg-black/15 p-6">
-                          <SectionHeading
-                            title="Tools"
-                            description="Frameworks, models, and systems referenced in the walkthrough."
-                          />
-                          <div className="grid gap-4 md:grid-cols-2">
-                            {breakdown.tools.map((entry, index) => (
-                              <div
-                                key={`${item.video_id}-tool-${index}`}
-                                className="rounded-[24px] border border-white/8 bg-white/[0.03] p-5"
-                              >
-                                <p className="text-sm font-medium text-white">
-                                  {String(entry.name ?? 'Tool')}
-                                </p>
-                                <p className="mt-3 text-sm leading-7 text-zinc-300">
-                                  {String(entry.purpose ?? '')}
-                                </p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="grid gap-6 xl:grid-cols-3">
-                        <div className="rounded-[28px] border border-emerald-400/12 bg-emerald-400/[0.04] p-6">
-                          <SectionHeading title="Insights" description="Key takeaways and notable design decisions." />
-                          <ul className="space-y-3">
-                            {item.insights.map((insight, index) => (
-                              <li
-                                key={insight}
-                                className="rounded-[20px] border border-white/8 bg-black/10 px-4 py-4 text-sm leading-7 text-zinc-300"
-                              >
-                                <span className="mr-3 text-zinc-500">{String(index + 1).padStart(2, '0')}</span>
-                                {insight}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-
-                        <div className="rounded-[28px] border border-sky-400/12 bg-sky-400/[0.04] p-6">
-                          <SectionHeading title="Applications" description="How the concepts translate into practical use." />
-                          <ul className="space-y-3">
-                            {item.applications.map((application, index) => (
-                              <li
-                                key={application}
-                                className="rounded-[20px] border border-white/8 bg-black/10 px-4 py-4 text-sm leading-7 text-zinc-300"
-                              >
-                                <span className="mr-3 text-zinc-500">{String(index + 1).padStart(2, '0')}</span>
-                                {application}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-
-                        <div className="rounded-[28px] border border-amber-400/12 bg-amber-400/[0.04] p-6">
-                          <SectionHeading title="Limitations" description="Trade-offs, caveats, and implementation constraints." />
-                          <ul className="space-y-3">
-                            {item.limitations.map((limitation, index) => (
-                              <li
-                                key={limitation}
-                                className="rounded-[20px] border border-white/8 bg-black/10 px-4 py-4 text-sm leading-7 text-zinc-300"
-                              >
-                                <span className="mr-3 text-zinc-500">{String(index + 1).padStart(2, '0')}</span>
-                                {limitation}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      </div>
-                    </div>
-                  </Card>
-                )
-              })}
+              <SummariesTab summaries={summaries} />
             </Tabs.Content>
 
             <Tabs.Content className="space-y-4" value="comparison">
-              <Card className="overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-white/8 text-left text-sm">
-                    <thead className="bg-black/10 text-zinc-500">
-                      <tr>
-                        {[
-                          'Title',
-                          'Difficulty',
-                          'Teaching style',
-                          'Depth',
-                          'Practical value',
-                          'Audience',
-                          'Technologies',
-                        ].map((heading) => (
-                          <th key={heading} className="px-4 py-4 font-medium">
-                            {heading}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/6">
-                      {comparison.map((row) => (
-                        <tr key={row.video_id} className="align-top">
-                          <td className="px-4 py-4">
-                            <p className="font-medium text-white">{row.title}</p>
-                            <p className="mt-2 text-xs text-zinc-500">{row.channel}</p>
-                          </td>
-                          <td className="px-4 py-4 text-zinc-200">{row.difficulty}</td>
-                          <td className="px-4 py-4 text-zinc-200">{row.teaching_style}</td>
-                          <td className="px-4 py-4 text-zinc-200">{row.content_depth}</td>
-                          <td className="px-4 py-4 text-zinc-200">{row.practical_value}</td>
-                          <td className="px-4 py-4 text-zinc-200">{row.target_audience}</td>
-                          <td className="px-4 py-4 text-zinc-200">
-                            <div className="flex flex-wrap gap-2">
-                              {row.key_technologies.map((technology) => (
-                                <Badge key={technology}>{technology}</Badge>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </Card>
-
-              <div className="grid gap-4 lg:grid-cols-[0.72fr,1.28fr]">
-                <Card className="p-5">
-                  <SectionHeading title="Recommendations" />
-                  <ul className="space-y-3 text-sm leading-7 text-zinc-300">
-                    {bundle.comparison.recommendations.map((recommendation) => (
-                      <li key={recommendation}>• {recommendation}</li>
-                    ))}
-                  </ul>
-                </Card>
-                <Card className="p-5">
-                  <SectionHeading title="Insights report" />
-                  <pre className="whitespace-pre-wrap text-sm leading-7 text-zinc-300">
-                    {bundle.comparison.insights_report}
-                  </pre>
-                </Card>
-              </div>
+              <ComparisonTab
+                comparison={comparison}
+                insightsReport={bundle.comparison.insights_report}
+                recommendations={bundle.comparison.recommendations}
+              />
             </Tabs.Content>
 
             <Tabs.Content className="space-y-5" value="assignments">
-              <AnimatePresence mode="popLayout">
-                {assignments.map((item) => {
-                  const progressItems = getAssignmentProgressItems(item)
-                  const completedCount = progressItems.filter(
-                    (progressItem) => assignmentProgress[item.video_id]?.[progressItem.id],
-                  ).length
-                  const progressPercent =
-                    progressItems.length > 0
-                      ? Math.round((completedCount / progressItems.length) * 100)
-                      : 0
-
-                  return (
-                    <motion.div
-                      key={item.video_id}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -18 }}
-                      initial={{ opacity: 0, y: 18 }}
-                    >
-                      <Card className="p-6">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <h4 className="text-xl font-semibold tracking-[-0.03em] text-white">
-                            {item.title}
-                          </h4>
-                          <Badge>{item.channel}</Badge>
-                          <Badge>{item.available ? 'Ready' : 'Missing'}</Badge>
-                        </div>
-
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {Object.entries(item.display_metadata).map(([key, value]) => (
-                            <Badge key={key}>
-                              {key.replaceAll('_', ' ')}: {value}
-                            </Badge>
-                          ))}
-                        </div>
-
-                        <div className="mt-6 grid gap-6 xl:grid-cols-[340px,minmax(0,1fr)]">
-                          <Card className="h-fit p-5">
-                            <div className="flex items-center justify-between gap-4">
-                              <div>
-                                <p className="text-[11px] uppercase tracking-[0.22em] text-zinc-500">
-                                  Progress
-                                </p>
-                                <p className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-white">
-                                  {progressPercent}%
-                                </p>
-                              </div>
-                              <div className="rounded-2xl border border-white/8 bg-white/[0.04] p-3 text-white">
-                                <CheckCheck className="size-5" />
-                              </div>
-                            </div>
-
-                            <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/[0.06]">
-                              <div
-                                className="h-full rounded-full bg-white transition-[width]"
-                                style={{ width: `${progressPercent}%` }}
-                              />
-                            </div>
-
-                            <div className="mt-6 space-y-3">
-                              {progressItems.map((progressItem) => {
-                                const checked = Boolean(
-                                  assignmentProgress[item.video_id]?.[progressItem.id],
-                                )
-
-                                return (
-                                  <button
-                                    key={progressItem.id}
-                                    className="flex w-full items-start gap-3 rounded-2xl border border-white/8 bg-black/10 px-3 py-3 text-left transition hover:bg-white/[0.03]"
-                                    onClick={() => toggleAssignmentItem(item.video_id, progressItem.id)}
-                                    type="button"
-                                  >
-                                    <span className="pt-0.5 text-white">
-                                      {checked ? (
-                                        <CheckCheck className="size-4" />
-                                      ) : (
-                                        <Circle className="size-4" />
-                                      )}
-                                    </span>
-                                    <span className={cn('text-sm leading-6 text-zinc-300', checked && 'text-white')}>
-                                      {progressItem.label}
-                                    </span>
-                                  </button>
-                                )
-                              })}
-                            </div>
-                          </Card>
-
-                          <div className="space-y-4">
-                            {item.sections.length > 0 ? (
-                              item.sections.map((section) => (
-                                <Card key={section.id} className="p-5">
-                                  <SectionHeading title={section.title} />
-                                  <MarkdownBody markdown={section.markdown} />
-                                </Card>
-                              ))
-                            ) : (
-                              <Card className="p-5">
-                                <SectionHeading title="Assignment" />
-                                <MarkdownBody markdown={item.markdown || 'No assignment content available.'} />
-                              </Card>
-                            )}
-                          </div>
-                        </div>
-                      </Card>
-                    </motion.div>
-                  )
-                })}
-              </AnimatePresence>
+              <AssignmentsTab activeRunId={activeRunId} assignments={assignments} />
             </Tabs.Content>
           </Tabs.Root>
         ) : null}
