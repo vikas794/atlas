@@ -100,8 +100,8 @@ class GenerateSummariesUseCase:
                     channel=video.get("channel", ""),
                     transcript_text=transcript_text,
                     language=input.transcript_language,
-                    prompt_version=self._settings("prompts.summarizer.version", "v1"),
-                    model=self._settings("api.openai.model", "openai/gpt-5-mini"),
+                    prompt_version=self._settings("summarizer_prompt_version", "v1"),
+                    model=self._settings("openai_model", "openai/gpt-5-mini"),
                 ))
 
             results = await summarizer.summarize_batch(contexts)
@@ -147,7 +147,7 @@ class GenerateSummariesUseCase:
         return {
             "transcript_language": input.transcript_language,
             "num_workers": input.num_workers if input.num_workers is not None else "default",
-            "model": self._settings("api.openai.model", "openai/gpt-5-mini"),
+            "model": self._settings("openai_model", "openai/gpt-5-mini"),
         }
 
     def _settings_hash(self, input: SummaryGenerationInput) -> str:

@@ -86,8 +86,8 @@ class GenerateAssignmentsUseCase:
             results = await assignment_generator.generate_assignments_batch(
                 video_dicts,
                 summaries,
-                prompt_version=self._settings("prompts.assignment.version", "v1"),
-                model=self._settings("api.openai.model", "openai/gpt-5-mini"),
+                prompt_version=self._settings("assignment_prompt_version", "v1"),
+                model=self._settings("openai_model", "openai/gpt-5-mini"),
             )
 
             assignment_records = []
@@ -133,7 +133,7 @@ class GenerateAssignmentsUseCase:
     def _assignment_settings(self, input: AssignmentGenerationInput) -> dict:
         return {
             "num_workers": self._get_worker_count(input.num_workers),
-            "model": self._settings("api.openai.model", "openai/gpt-5-mini"),
+            "model": self._settings("openai_model", "openai/gpt-5-mini"),
         }
 
     def _settings_hash(self, settings: dict) -> str:
@@ -146,14 +146,14 @@ class GenerateAssignmentsUseCase:
         if num_workers is not None:
             return max(0, num_workers)
 
-        workers_config = self._settings("processing.workers", {})
-        if not workers_config.get("auto_detect", True):
-            return workers_config.get("min_workers", 2)
+        auto_detect = self._settings("workers_auto_detect", True)
+        min_workers = self._settings("workers_min_workers", 2)
+        if not auto_detect:
+            return min_workers
 
         import os
         cpu_count = os.cpu_count() or 1
-        cpu_ratio = workers_config.get("cpu_ratio", 0.5)
-        min_workers = workers_config.get("min_workers", 2)
-        max_workers = workers_config.get("max_workers", 16)
+        cpu_ratio = self._settings("workers_cpu_ratio", 0.5)
+        max_workers = self._settings("workers_max_workers", 16)
 
         return max(min_workers, min(max_workers, int(cpu_count * cpu_ratio)))

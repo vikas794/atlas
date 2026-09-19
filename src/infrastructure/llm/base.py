@@ -45,8 +45,8 @@ class LLMResponse(NamedTuple):
 class SettingsLoader(Protocol):
     """Minimal surface area that providers need from the application config.
 
-    The default implementation is :func:`src.utils.get_config`, but
-    adapters accept any object that satisfies this protocol so they
+    The default implementation is :meth:`src.config.settings.AtlasSettings.to_loader`,
+    but adapters accept any object that satisfies this protocol so they
     remain trivially testable.
     """
 

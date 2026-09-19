@@ -41,7 +41,9 @@ from src.infrastructure.llm.base import (
 )
 from src.infrastructure.llm.cost import calculate_cost
 from src.infrastructure.llm.openai.retry import OpenAIRetryableProvider
-from src.utils import get_config, get_prompt_path, sha256_text
+from src.config import load_settings
+from src.config.prompts import get_prompt_path
+from src.shared.text import sha256_text
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +63,7 @@ def _default_retry_policy_from_config(settings: SettingsLoader) -> RetryPolicy:
     so partial config drift does not break callers.
     """
     try:
-        max_retries = int(settings("api.openai.max_retries", 3))
+        max_retries = int(settings("openai_max_retries", 3))
     except (TypeError, ValueError):
         max_retries = 3
     return RetryPolicy(
@@ -109,9 +111,9 @@ def _resolve_api_credentials(settings: SettingsLoader) -> tuple[str | None, str 
     override via ``api.openai.base_url`` in config or by passing
     explicit values to the constructor.
     """
-    api_key_env = settings("environment.openrouter_api_key_env", "OPENROUTER_API_KEY")
+    api_key_env = settings("openrouter_api_key_env", "OPENROUTER_API_KEY")
     api_key = os.getenv(str(api_key_env)) if api_key_env else None
-    base_url = settings("api.openai.base_url", "https://openrouter.ai/api/v1")
+    base_url = settings("openai_base_url", "https://openrouter.ai/api/v1")
     return api_key, str(base_url) if base_url else None
 
 
@@ -192,15 +194,15 @@ class OpenAISummarizerAdapter(SummarizerPort):
         timeout: int | None = None,
         run_id: str | None = None,
     ) -> None:
-        self._settings = settings or get_config
+        self._settings = settings or load_settings().to_loader()
         api_key_resolved, base_url_resolved = _resolve_api_credentials(self._settings)
         self._run_id = run_id
         self._prompt_name = prompt_name
         self._model = model or str(
-            self._settings("api.openai.model", "openai/gpt-5-mini")
+            self._settings("openai_model", "openai/gpt-5-mini")
         )
         self._timeout = int(
-            timeout if timeout is not None else self._settings("api.openai.timeout", 180)
+            timeout if timeout is not None else self._settings("openai_timeout", 180)
         )
         policy = retry_policy or _default_retry_policy_from_config(self._settings)
         self._provider = OpenAIRetryableProvider(
@@ -307,7 +309,7 @@ class OpenAISummarizerAdapter(SummarizerPort):
         try:
             return json.loads(stripped)
         except json.JSONDecodeError:
-            from src.utils import load_json_with_recovery
+            from src.shared.text import load_json_with_recovery
 
             return load_json_with_recovery(content)
 
@@ -360,14 +362,14 @@ class OpenAIInsightsProvider(InsightsProviderPort):
         timeout: int | None = None,
         run_id: str | None = None,
     ) -> None:
-        self._settings = settings or get_config
+        self._settings = settings or load_settings().to_loader()
         api_key_resolved, base_url_resolved = _resolve_api_credentials(self._settings)
         self._run_id = run_id
         self._model = model or str(
-            self._settings("api.openai.model", "openai/gpt-5-mini")
+            self._settings("openai_model", "openai/gpt-5-mini")
         )
         self._timeout = int(
-            timeout if timeout is not None else self._settings("api.openai.timeout", 180)
+            timeout if timeout is not None else self._settings("openai_timeout", 180)
         )
         policy = retry_policy or _default_retry_policy_from_config(self._settings)
         self._provider = OpenAIRetryableProvider(
@@ -498,7 +500,7 @@ class OpenAIInsightsProvider(InsightsProviderPort):
             return json.loads(stripped)
         except json.JSONDecodeError:
             try:
-                from src.utils import load_json_with_recovery
+                from src.shared.text import load_json_with_recovery
 
                 return load_json_with_recovery(content)
             except (json.JSONDecodeError, ValueError):
@@ -541,15 +543,15 @@ class OpenAIAssignmentAdapter(AssignmentGeneratorPort):
         timeout: int | None = None,
         run_id: str | None = None,
     ) -> None:
-        self._settings = settings or get_config
+        self._settings = settings or load_settings().to_loader()
         api_key_resolved, base_url_resolved = _resolve_api_credentials(self._settings)
         self._run_id = run_id
         self._prompt_name = prompt_name
         self._model = model or str(
-            self._settings("api.openai.model", "openai/gpt-5-mini")
+            self._settings("openai_model", "openai/gpt-5-mini")
         )
         self._timeout = int(
-            timeout if timeout is not None else self._settings("api.openai.timeout", 180)
+            timeout if timeout is not None else self._settings("openai_timeout", 180)
         )
         policy = retry_policy or _default_retry_policy_from_config(self._settings)
         self._provider = OpenAIRetryableProvider(

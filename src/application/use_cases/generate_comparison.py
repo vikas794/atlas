@@ -87,8 +87,8 @@ class GenerateComparisonUseCase:
                     ai_insights = await insights_provider.generate_insights_batch(
                         video_meta_list,
                         summary_list,
-                        prompt_version=self._settings("prompts.insights.version", "v1"),
-                        model=self._settings("api.openai.model", "openai/gpt-5-mini"),
+                        prompt_version=self._settings("insights_prompt_version", "v1"),
+                        model=self._settings("openai_model", "openai/gpt-5-mini"),
                     )
                     for i, insight in enumerate(ai_insights):
                         if i < len(rows):

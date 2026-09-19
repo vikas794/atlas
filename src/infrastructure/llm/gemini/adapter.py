@@ -35,7 +35,7 @@ from src.infrastructure.llm.base import (
     UsageLedgerSink,
 )
 from src.infrastructure.llm.cost import calculate_cost
-from src.utils import get_prompt_path
+from src.config.prompts import get_prompt_path
 
 logger = logging.getLogger(__name__)
 
