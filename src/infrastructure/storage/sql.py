@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from backend.storage.database import connect, now_iso, transaction
+from src.infrastructure.storage.db import connect, now_iso, transaction
 from src.domain.interfaces.storage import RunRepositoryPort
 from src.domain.interfaces.usage_ledger import (
     CacheAggregate,
@@ -20,15 +20,17 @@ from src.domain.interfaces.usage_ledger import (
 
 
 class SqlRunRepository(RunRepositoryPort):
-    """Compatibility adapter wrapping backend.storage.repository.RunRepository.
+    """Async-facing adapter over the synchronous :class:`RunRepository`.
 
-    Delegates all methods to the existing implementation to avoid rewriting logic.
+    Delegates every method to the same-package ``RunRepository`` (a plain
+    sync SQLite implementation) so callers can await this port without the
+    concrete repository needing to know about asyncio.
     """
 
     def __init__(self, db_path: str | Path, artifact_root: str | Path) -> None:
-        from backend.storage.repository import RunRepository as BackendRunRepository
+        from src.infrastructure.storage.repository import RunRepository
 
-        self._repo = BackendRunRepository(db_path, artifact_root)
+        self._repo = RunRepository(db_path, artifact_root)
 
     def _conn(self):
         return self._repo._conn()

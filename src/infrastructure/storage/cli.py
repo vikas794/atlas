@@ -1,10 +1,10 @@
 """Admin CLI for the Atlas SQLite pipeline store.
 
 Usage:
-    python -m backend.storage.cli init
-    python -m backend.storage.cli status
-    python -m backend.storage.cli purge [--retention-days N]
-    python -m backend.storage.cli delete-legacy [--dry-run]
+    python -m src.infrastructure.storage.cli init
+    python -m src.infrastructure.storage.cli status
+    python -m src.infrastructure.storage.cli purge [--retention-days N]
+    python -m src.infrastructure.storage.cli delete-legacy [--dry-run]
 """
 
 from __future__ import annotations
@@ -15,20 +15,20 @@ import shutil
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
 def _settings() -> dict:
-    from backend.storage.settings import get_settings
+    from src.config import get_storage_settings, load_settings
 
-    return get_settings()
+    return get_storage_settings(load_settings())
 
 
 def _repository():
-    from backend.storage.repository import RunRepository
+    from src.infrastructure.storage.repository import RunRepository
 
     settings = _settings()
     return RunRepository(settings["database_path"], settings["artifact_root"])

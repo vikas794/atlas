@@ -123,7 +123,7 @@ class RunRepositoryPort(Protocol):
     ) -> None:
         ...
 
-    async def get_comparison(self, run_id: str) -> tuple[list[ComparisonRow], InsightsReport, Recommendations] | None:
+    async def get_comparison(self, run_id: str) -> dict | None:
         ...
 
     # Assignments
@@ -148,6 +148,24 @@ class RunRepositoryPort(Protocol):
         ...
 
     async def get_quiz_result(self, run_id: str) -> PlaylistResult | None:
+        ...
+
+    # Caching
+    async def find_cached_run(self, cache_key: str) -> dict | None:
+        ...
+
+    async def put_cache_entry(
+        self,
+        cache_key: str,
+        kind: str,
+        run_id: str,
+        normalized_query: str,
+        settings: dict,
+        ttl_days: int,
+    ) -> None:
+        ...
+
+    async def touch_cache_hit(self, cache_key: str) -> None:
         ...
 
     # Hash recomputation

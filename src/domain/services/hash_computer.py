@@ -8,8 +8,8 @@ from collections.abc import Iterable
 class RunHashComputer:
     """Pure domain logic for computing stable state hashes.
 
-    Logic is copied from backend/storage/repository.py:_state_hash
-    and related methods.
+    Logic is copied from src/infrastructure/storage/repository.py:_state_hash
+    and related methods (formerly backend's storage repository).
     """
 
     @staticmethod

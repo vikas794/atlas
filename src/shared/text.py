@@ -1,7 +1,8 @@
 """Small, dependency-free text/file helpers shared across layers.
 
 These were previously duplicated between ``src/utils.py`` (legacy config
-module) and ``backend/storage/artifacts.py``. This is the single canonical
+module) and the old backend artifacts helper (now
+``src/infrastructure/storage/hashing.py``). This is the single canonical
 home for the pieces that have nothing to do with configuration loading.
 """
 

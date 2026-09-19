@@ -13,7 +13,7 @@ from src.application.ports.provider_ports import (
 from src.domain.services.cache_key_builder import CacheKeyBuilder
 from src.domain.services.hash_computer import RunHashComputer
 from src.domain.exceptions import DomainError, ProviderError
-from backend.storage.cache import normalize_query
+from src.infrastructure.storage.hashing import normalize_query
 from src.infrastructure.youtube.search import YouTubeDataApiSearchProvider
 from src.infrastructure.llm.base import SettingsLoader
 

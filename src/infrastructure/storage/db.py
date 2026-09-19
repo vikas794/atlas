@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from backend.storage.migrations import MIGRATIONS
+from src.infrastructure.storage.migrations import MIGRATIONS
 
 
 def now_iso() -> str:

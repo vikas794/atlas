@@ -3,22 +3,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 
 from src.domain.interfaces.usage_ledger import UsageLedgerPort
+from src.transport.http.fastapi.dependencies import get_usage_ledger
 from src.transport.http.fastapi.schemas.usage import UsageAggregateResponse
 
 router = APIRouter(prefix="/api", tags=["usage"])
-
-
-def get_usage_ledger() -> UsageLedgerPort:
-    """Dependency injection for UsageLedgerPort.
-
-    In production, this would be wired to a concrete implementation.
-    """
-    from backend.storage.settings import get_settings
-    from src.infrastructure.storage.sql import SqlUsageLedger
-
-    settings = get_settings()
-    return SqlUsageLedger(settings["database_path"])
-
 
 usage_ledger_dependency = Depends(get_usage_ledger)
 

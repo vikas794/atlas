@@ -10,9 +10,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Iterator
 
-from backend.storage.artifacts import sha256_text
-from backend.storage.cache import settings_hash as make_settings_hash
-from backend.storage.database import connect, initialize, now_iso, transaction
+from src.infrastructure.storage.hashing import sha256_text
+from src.infrastructure.storage.hashing import settings_hash as make_settings_hash
+from src.infrastructure.storage.db import connect, initialize, now_iso, transaction
 
 STATUS_CREATED = "created"
 STATUS_RUNNING = "running"
@@ -30,9 +30,9 @@ def get_repository() -> RunRepository:
     """Return the process-wide shared repository (resolved from config)."""
     global _repository
     if _repository is None:
-        from backend.storage.settings import get_settings
+        from src.config import get_storage_settings, load_settings
 
-        settings = get_settings()
+        settings = get_storage_settings(load_settings())
         _repository = RunRepository(settings["database_path"], settings["artifact_root"])
     return _repository
 
@@ -465,7 +465,7 @@ class RunRepository:
             ).fetchone()
         return dict(row) if row else None
 
-    def touch_hit(self, cache_key: str) -> None:
+    def touch_cache_hit(self, cache_key: str) -> None:
         with self._tx() as conn:
             conn.execute(
                 "UPDATE cache_entries SET hit_count = hit_count + 1, last_hit_at = ?"

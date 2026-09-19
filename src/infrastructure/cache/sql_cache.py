@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from backend.storage.database import connect, now_iso, transaction
+from src.infrastructure.storage.db import connect, now_iso, transaction
 
 if TYPE_CHECKING:
     from src.domain.interfaces.cache import CacheKey
@@ -165,9 +165,6 @@ class SqlCacheAdapter:
                     key.params_hash,          # params_hash: from key
                     compressed,               # value: compressed cached data
                 )
-                print(f"DEBUG: About to execute INSERT with {len(params)} params")
-                for i, p in enumerate(params):
-                    print(f"  Param {i+1}: {repr(p)}")
 
                 sql = """
                     INSERT OR REPLACE INTO cache_entries
@@ -175,12 +172,8 @@ class SqlCacheAdapter:
                      created_at, expires_at, namespace, version, content_hash, params_hash, value)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
-                print(f"DEBUG: SQL length: {len(sql)} chars")
-                print(f"DEBUG: SQL count of '?': {sql.count('?')}")
-                print(f"DEBUG: SQL: {repr(sql)}")
 
                 conn.execute(sql, params)
-                print("DEBUG: INSERT executed successfully")
         except sqlite3.Error as e:
             logger.warning("Cache set error for key %s: %s", key, e)
 

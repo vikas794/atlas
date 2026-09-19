@@ -1,10 +1,13 @@
-"""Filesystem helpers for the managed artifact directory."""
+"""Filesystem helpers for the managed artifact directory, plus cache-key
+normalization and hashing helpers (merged from the former backend cache
+helper module)."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 
 
@@ -50,3 +53,24 @@ def file_size(path: str | Path) -> int | None:
 def json_dumps_stable(obj) -> str:
     """Deterministic JSON serialization used for content and state hashing."""
     return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+
+def normalize_query(query: str) -> str:
+    """Normalize a search query for cache identity."""
+    return re.sub(r"\s+", " ", query.strip().lower())
+
+
+def settings_hash(settings: dict) -> str:
+    """Stable hash of generation settings (cache identity for derived artifacts)."""
+    return hashlib.sha256(json_dumps_stable(settings).encode("utf-8")).hexdigest()
+
+
+def cache_key(
+    kind: str,
+    normalized_query: str,
+    max_videos: int | None = None,
+    transcript_language: str | None = None,
+) -> str:
+    """Search-cache identity: kind + normalized query + search-affecting inputs."""
+    payload = f"{kind}|{normalized_query}|{max_videos}|{transcript_language}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
