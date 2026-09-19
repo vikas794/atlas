@@ -13,7 +13,7 @@ from src.domain.interfaces.storage import ArtifactStorePort
 from src.domain.interfaces.transcript_provider import TranscriptProviderPort, TranscriptResult
 from src.domain.interfaces.usage_ledger import UsageLedgerPort, UsageRecord
 from src.infrastructure.llm.base import SettingsLoader
-from src.utils import ensure_output_folder, sha256_text
+from src.shared.text import ensure_output_folder, sha256_text
 
 if TYPE_CHECKING:
     pass
@@ -33,39 +33,41 @@ class YtDlpTranscriptProvider(TranscriptProviderPort):
         self._artifact_store = artifact_store
 
         self._output_folder = ensure_output_folder(
-            settings("processing.transcripts.output_folder", "transcripts")
+            settings("transcript_output_folder", "transcripts")
         )
-        self._language = settings("processing.transcripts.language", "en")
+        self._language = settings("transcript_language", "en")
         self._retry_wait_seconds = settings(
-            "playlist_quiz.transcript_retry_wait_seconds", [15, 30, 60, 120]
+            "transcript_retry_wait_seconds", [15, 30, 60, 120]
         )
         self._retry_jitter_seconds = float(
-            settings("playlist_quiz.transcript_retry_jitter_seconds", 5)
+            settings("transcript_retry_jitter_seconds", 5)
         )
         self._min_delay_between_videos = float(
-            settings("playlist_quiz.transcript_min_delay_between_videos", 15)
+            settings("transcript_min_delay_between_videos", 15)
         )
         self._rate_limit_cooldown_seconds = float(
-            settings("playlist_quiz.transcript_rate_limit_cooldown_seconds", 120)
+            settings("transcript_rate_limit_cooldown_seconds", 120)
         )
         self._max_retries = len(self._retry_wait_seconds)
         self._delay_between_downloads = settings(
-            "playlist_quiz.transcript_delay_between_requests", 4
+            "transcript_delay_between_requests", 4
         )
         self._cooldown_until: float = 0.0
 
     def _get_ydl_opts(self) -> dict:
-        """Get the yt-dlp options configuration."""
+        """Get the yt-dlp options configuration.
+
+        These yt-dlp mechanics (subtitle-only download, format, output template)
+        are not user-tunable settings, so they're fixed here rather than routed
+        through AtlasSettings.
+        """
         return {
-            "skip_download": self._settings("download.skip_download", True),
-            "writesubtitles": self._settings("download.write_subtitles", True),
-            "writeautomaticsub": self._settings("download.write_automatic_sub", True),
+            "skip_download": True,
+            "writesubtitles": True,
+            "writeautomaticsub": True,
             "subtitleslangs": [self._language],
-            "subtitlesformat": self._settings("download.subtitles_format", "srt"),
-            "outtmpl": os.path.join(
-                self._output_folder,
-                self._settings("download.output_template", "%(id)s.%(ext)s"),
-            ),
+            "subtitlesformat": "srt",
+            "outtmpl": os.path.join(self._output_folder, "%(id)s.%(ext)s"),
             "ignoreerrors": False,
             "retries": 0,
             "fragment_retries": 0,

@@ -96,7 +96,14 @@ def get_search_use_case(
     settings: SettingsLoader = Depends(get_settings_loader_dep),
     ledger: UsageLedgerPort = Depends(get_usage_ledger),
 ) -> SearchPipelineUseCase:
-    return SearchPipelineUseCase(run_repository=repo, cache=cache, settings=settings, usage_ledger=ledger)
+    cache_ttl_days = get_storage_settings()["cache_ttl_days"]
+    return SearchPipelineUseCase(
+        run_repository=repo,
+        cache=cache,
+        settings=settings,
+        usage_ledger=ledger,
+        cache_ttl_days=cache_ttl_days,
+    )
 
 
 def get_transcripts_use_case(

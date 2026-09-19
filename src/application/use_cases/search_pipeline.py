@@ -13,7 +13,6 @@ from src.application.ports.provider_ports import (
 from src.domain.services.cache_key_builder import CacheKeyBuilder
 from src.domain.services.hash_computer import RunHashComputer
 from src.domain.exceptions import DomainError, ProviderError
-from src.utils import get_config
 from backend.storage.cache import normalize_query
 from src.infrastructure.youtube.search import YouTubeDataApiSearchProvider
 from src.infrastructure.llm.base import SettingsLoader
@@ -32,11 +31,13 @@ class SearchPipelineUseCase:
         cache: CachePort,
         settings: SettingsLoader,
         usage_ledger: Optional[UsageLedgerPort] = None,
+        cache_ttl_days: int = 30,
     ) -> None:
         self._repo = run_repository
         self._cache = cache
         self._settings = settings
         self._usage = usage_ledger
+        self._cache_ttl_days = cache_ttl_days
         self._key_builder = CacheKeyBuilder()
 
     async def execute(self, input: SearchInput) -> SearchOutput:
@@ -94,6 +95,7 @@ class SearchPipelineUseCase:
 
         try:
             search_provider = YouTubeDataApiSearchProvider(
+                settings=self._settings,
                 usage_ledger=self._usage,
                 api_key=youtube_key,
             )
@@ -127,14 +129,13 @@ class SearchPipelineUseCase:
         await self._repo.finish_job(run_id, "search")
         await self._repo.set_run_status(run_id, "succeeded")
 
-        settings = self._get_storage_settings()
         await self._repo.put_cache_entry(
             str(cache_key),
             "search",
             run_id,
             normalized_query=normalized,
             settings={"max_videos": input.max_videos, "transcript_language": input.transcript_language},
-            ttl_days=settings["cache_ttl_days"],
+            ttl_days=self._cache_ttl_days,
         )
 
         run = await self._repo.get_run(run_id)
@@ -144,26 +145,3 @@ class SearchPipelineUseCase:
             status="created",
             detail=f"Created a new pipeline run with {len(videos)} videos.",
         )
-
-    def _get_storage_settings(self) -> dict:
-        """Get effective storage configuration (env overrides config.yaml)."""
-        import os
-        from pathlib import Path
-
-        REPO_ROOT = Path(__file__).resolve().parents[3]
-
-        db_path = os.getenv("ATLAS_DB_PATH") or self._settings("storage.database_path", "data/atlas.sqlite3")
-        artifact_root = os.getenv("ATLAS_ARTIFACT_ROOT") or self._settings("storage.artifact_root", "data/artifacts")
-        cache_ttl = os.getenv("ATLAS_CACHE_TTL_DAYS") or self._settings("storage.cache_ttl_days", 30)
-
-        if not os.path.isabs(db_path):
-            db_path = str(REPO_ROOT / db_path)
-        if not os.path.isabs(artifact_root):
-            artifact_root = str(REPO_ROOT / artifact_root)
-
-        return {
-            "database_path": db_path,
-            "artifact_root": artifact_root,
-            "cache_ttl_days": int(cache_ttl),
-            "cleanup_retention_days": int(self._settings("storage.cleanup_retention_days", 90)),
-        }

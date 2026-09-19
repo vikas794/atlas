@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 from src.domain.interfaces.storage import ArtifactStorePort
-from src.utils import atomic_write
+from src.shared.text import atomic_write
 
 
 class ArtifactFileStore(ArtifactStorePort):

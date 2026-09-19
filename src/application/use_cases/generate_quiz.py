@@ -16,7 +16,7 @@ from src.infrastructure.llm.gemini.adapter import GeminiQuizProvider
 from src.infrastructure.google.drive import GoogleDriveExporter
 from src.infrastructure.transcript.ytdlp.provider import YtDlpTranscriptProvider
 from src.infrastructure.llm.base import SettingsLoader
-from src.utils import get_config, get_worker_count, ensure_output_folder
+from src.shared.text import ensure_output_folder
 
 
 class GenerateQuizUseCase:
@@ -39,7 +39,7 @@ class GenerateQuizUseCase:
         self._usage = usage_ledger
 
     async def execute(self, input: QuizGenerationInput) -> QuizGenerationOutput:
-        gemini_key = input.gemini_api_key if not input.use_env_keys else self._settings("environment.gemini_api_key_env", "GEMINI_API_KEY")
+        gemini_key = input.gemini_api_key if not input.use_env_keys else self._settings("gemini_api_key_env", "GEMINI_API_KEY")
         if not gemini_key:
             raise DomainError("Gemini API Key is required.")
 
@@ -57,11 +57,11 @@ class GenerateQuizUseCase:
 
         drive_exporter = GoogleDriveExporter()
 
-        max_videos = input.max_videos or get_config("playlist_quiz.max_videos", 50)
+        max_videos = input.max_videos or self._settings("playlist_quiz_max_videos", 50)
         videos = await self._fetch_playlist_videos(playlist_id, max_videos)
         report("playlist", f"Found {len(videos)} video{'s' if len(videos) != 1 else ''} in {playlist_title}.", total=len(videos))
 
-        transcript_folder = ensure_output_folder(get_config("playlist_quiz.output_folder", "quiz_output"))
+        transcript_folder = ensure_output_folder(self._settings("playlist_quiz_output_folder", "quiz_output"))
         report("transcripts", "Fetching transcripts for the playlist videos.", total=len(videos))
 
         transcript_provider = YtDlpTranscriptProvider(
@@ -140,7 +140,7 @@ class GenerateQuizUseCase:
                     playlist_url=input.playlist_url,
                     gemini_api_key=gemini_key,
                     max_videos=input.max_videos,
-                    model=self._settings("api.gemini.model", "gemini-3.6-flash"),
+                    model=self._settings("gemini_model", "gemini-3.6-flash"),
                 )
 
                 quiz_result = await quiz_provider.generate_quiz(transcript_ref, video["title"], quiz_context)
@@ -167,7 +167,7 @@ class GenerateQuizUseCase:
             report("generating", f"Finished quiz {pos} of {len(videos)}.", current=pos, total=len(videos), completed=pos)
 
             if i < len(videos) - 1:
-                delay = get_config("playlist_quiz.delay_between_requests", 2)
+                delay = self._settings("playlist_quiz_delay_between_requests", 2)
                 import asyncio
                 await asyncio.sleep(delay)
 
@@ -194,7 +194,7 @@ class GenerateQuizUseCase:
                 "GEMINI_API_KEY must be a Google AI Studio API key (normally starting with 'AIza')."
             )
 
-        model_name = self._settings("api.gemini.model", "gemini-3.6-flash")
+        model_name = self._settings("gemini_model", "gemini-3.6-flash")
         try:
             client = genai.Client(api_key=api_key)
             client.models.get(model=model_name)

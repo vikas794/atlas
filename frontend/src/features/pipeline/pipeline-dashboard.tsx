@@ -13,6 +13,7 @@ import {
   type FormEvent,
   type ReactNode,
   useEffect,
+  useMemo,
   useState,
 } from 'react'
 import ReactMarkdown from 'react-markdown'
@@ -186,32 +187,32 @@ export function PipelineDashboard({
   const transcripts = bundle?.transcripts.items ?? []
   const summaries = bundle?.summaries.items ?? []
   const comparison = bundle?.comparison.rows ?? []
-  const assignments = bundle?.assignments.items ?? []
+  const assignments = useMemo(() => bundle?.assignments.items ?? [], [bundle?.assignments.items])
   const [assignmentProgress, setAssignmentProgress] = useState<Record<string, ProgressMap>>({})
 
   useEffect(() => {
-    if (!activeRunId) {
-      setAssignmentProgress({})
-      return
-    }
-
     const nextState: Record<string, ProgressMap> = {}
-    for (const item of assignments) {
-      const saved = localStorage.getItem(getAssignmentStorageKey(activeRunId, item.video_id))
-      if (!saved) {
-        nextState[item.video_id] = {}
-        continue
-      }
+    if (activeRunId) {
+      for (const item of assignments) {
+        const saved = localStorage.getItem(getAssignmentStorageKey(activeRunId, item.video_id))
+        if (!saved) {
+          nextState[item.video_id] = {}
+          continue
+        }
 
-      try {
-        nextState[item.video_id] = JSON.parse(saved) as ProgressMap
-      } catch {
-        nextState[item.video_id] = {}
+        try {
+          nextState[item.video_id] = JSON.parse(saved) as ProgressMap
+        } catch {
+          nextState[item.video_id] = {}
+        }
       }
     }
 
-    setAssignmentProgress(nextState)
-  }, [activeRunId, bundle?.assignments.items])
+    // Defer the state update so changing runs does not synchronously trigger a
+    // second render while React is processing this synchronization effect.
+    const timeoutId = window.setTimeout(() => setAssignmentProgress(nextState), 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [activeRunId, assignments])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()

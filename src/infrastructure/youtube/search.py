@@ -12,7 +12,7 @@ from googleapiclient.discovery import build
 from src.domain.exceptions import ProviderError
 from src.domain.interfaces.usage_ledger import UsageLedgerPort, UsageRecord
 from src.domain.models.video import VideoId, VideoMetadata
-from src.utils import get_config
+from src.infrastructure.llm.base import SettingsLoader
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +47,12 @@ class YouTubeDataApiSearchProvider:
 
     def __init__(
         self,
+        settings: SettingsLoader,
         usage_ledger: UsageLedgerPort | None = None,
         api_key: str | None = None,
     ) -> None:
         self.usage_ledger = usage_ledger
+        self._settings = settings
         self.api_key = api_key or os.getenv("YOUTUBE_API_KEY")
         if not self.api_key:
             raise ProviderError(
@@ -58,11 +60,10 @@ class YouTubeDataApiSearchProvider:
                 provider="youtube",
             )
 
-        youtube_config = get_config("api.youtube", {})
-        self.api_version = youtube_config.get("api_version", "v3")
-        self.timeout = youtube_config.get("timeout", 30)
-        self.default_type = youtube_config.get("type", "video")
-        self.default_order = youtube_config.get("order", "relevance")
+        self.api_version = settings("youtube_api_version", "v3")
+        self.timeout = settings("youtube_timeout", 30)
+        self.default_type = settings("youtube_type", "video")
+        self.default_order = settings("youtube_order", "relevance")
 
         self._youtube = build("youtube", self.api_version, developerKey=self.api_key)
 
@@ -82,9 +83,9 @@ class YouTubeDataApiSearchProvider:
             ProviderError: If the API call fails
         """
         if max_results is None:
-            max_results = get_config("search.default_max_results", 10)
+            max_results = self._settings("search_default_max_results", 10)
 
-        description_max_length = get_config("search.description_max_length", 200)
+        description_max_length = self._settings("search_description_max_length", 200)
 
         try:
             socket.setdefaulttimeout(self.timeout)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -67,6 +67,7 @@ class AtlasSettings:
     playlist_quiz_max_videos: int = 50
     playlist_quiz_max_retries: int = 3
     playlist_quiz_delay_between_requests: float = 2.0
+    playlist_quiz_output_folder: str = "quiz_output"
 
     summarizer_prompt_version: str = "v1"
     summarizer_default_model: str = "openai/gpt-5-mini"
@@ -150,13 +151,21 @@ class _AtlasSettingsLoader:
             return default
 
 
+# Environment variable names that predate the AtlasSettings field names and
+# must keep working for existing deployments (e.g. ATLAS_DB_PATH -> database_path).
+_LEGACY_ENV_ALIASES = {
+    "db_path": "database_path",
+    "retention_days": "cleanup_retention_days",
+}
+
+
 def load_settings(config_path: str | Path | None = None) -> AtlasSettings:
     """Load settings from config.yaml with environment variable overrides.
 
     If config_path is None, looks for config.yaml in project root.
     """
     if config_path is None:
-        repo_root = Path(__file__).resolve().parents[3]
+        repo_root = Path(__file__).resolve().parents[2]
         config_path = repo_root / "config.yaml"
 
     if Path(config_path).exists():
@@ -164,16 +173,22 @@ def load_settings(config_path: str | Path | None = None) -> AtlasSettings:
     else:
         settings = AtlasSettings()
 
-    # Apply environment variable overrides
-    env_overrides = {}
+    # Apply environment variable overrides. Only known AtlasSettings fields are
+    # accepted; unrecognized ATLAS_* variables are ignored rather than raising.
+    valid_keys = {f.name for f in fields(AtlasSettings)}
+    env_overrides: dict[str, Any] = {}
     for key, value in os.environ.items():
-        if key.startswith("ATLAS_"):
-            setting_key = key[6:].lower()
-            try:
-                import json
-                env_overrides[setting_key] = json.loads(value)
-            except (json.JSONDecodeError, ValueError):
-                env_overrides[setting_key] = value
+        if not key.startswith("ATLAS_"):
+            continue
+        setting_key = key[6:].lower()
+        setting_key = _LEGACY_ENV_ALIASES.get(setting_key, setting_key)
+        if setting_key not in valid_keys:
+            continue
+        try:
+            import json
+            env_overrides[setting_key] = json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            env_overrides[setting_key] = value
 
     if env_overrides:
         # Merge env overrides into settings
@@ -189,7 +204,7 @@ def get_storage_settings(settings: AtlasSettings | None = None) -> dict[str, Any
     if settings is None:
         settings = load_settings()
 
-    repo_root = Path(__file__).resolve().parents[3]
+    repo_root = Path(__file__).resolve().parents[2]
 
     db_path = settings.database_path
     artifact_root = settings.artifact_root

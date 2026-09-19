@@ -15,7 +15,7 @@ from src.domain.services.hash_computer import RunHashComputer
 from src.domain.exceptions import DomainError, ProviderError
 from src.infrastructure.transcript.ytdlp.provider import YtDlpTranscriptProvider
 from src.infrastructure.llm.base import SettingsLoader
-from src.utils import sha256_text
+from src.shared.text import sha256_text
 
 
 class GenerateTranscriptsUseCase:

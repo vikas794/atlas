@@ -29,7 +29,7 @@ class PromptRegistry:
     def _get_default_summarizer(self) -> str:
         """Get default summarizer prompt from settings or fallback."""
         if self._settings:
-            return self._settings("prompts.default_summarizer", "summarizer_youtube_v2.yaml")
+            return self._settings("summarizer_prompt_name", "summarizer_youtube_v2.yaml")
         return "summarizer_youtube_v2.yaml"
 
     def load(self, prompt_name: str | None = None) -> dict[str, Any]:

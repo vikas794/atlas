@@ -124,13 +124,15 @@ class SqlRunRepository(RunRepositoryPort):
         }
         self._repo.set_comparison(run_id, payload, settings, status, error)
 
-    async def get_comparison(
-        self, run_id: str
-    ) -> tuple[list[dict], dict, dict] | None:
-        result = self._repo.get_comparison(run_id)
-        if result is None:
-            return None
-        return result.get("rows", []), result.get("insights_report", {}), result.get("recommendations", {})
+    async def get_comparison(self, run_id: str) -> dict | None:
+        """Return the persisted comparison row used by the comparison flow.
+
+        The legacy repository stores metadata such as ``status``, ``data``,
+        and the input/settings hashes alongside the generated payload.  The
+        application and HTTP layers both need those fields to decide whether
+        a result can be reused or returned directly.
+        """
+        return self._repo.get_comparison(run_id)
 
     async def upsert_assignments(
         self,
