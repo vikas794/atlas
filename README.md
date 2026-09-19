@@ -267,10 +267,6 @@ Each pipeline run writes files under a `pipeline_output_<timestamp>` folder:
 - `summaries/*_summary.json`
 - `assignments/*_assignment.md`
 
-## Legacy Interface
-
-The original Gradio application still exists in `app.py` as a legacy interface, but the primary development path is now the FastAPI backend plus the React frontend.
-
 ## License
 
 MIT License. See `LICENSE` for details.
