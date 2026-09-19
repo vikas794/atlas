@@ -21,8 +21,16 @@ import { SectionHeading } from '../../components/shared/section-heading'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card } from '../../components/ui/card'
-import type { AssignmentArtifact, RunBundle } from '../../lib/types'
+import type { RunBundle } from '../../lib/types'
 import { cn } from '../../lib/utils'
+import {
+  formatDate,
+  getAssignmentProgressItems,
+  getAssignmentStorageKey,
+  getVideoThumbnail,
+  splitBreakdown,
+  trimText,
+} from './pipeline-utils'
 
 interface PipelineDashboardProps {
   activeRunId: string
@@ -42,59 +50,6 @@ interface PipelineDashboardProps {
 }
 
 type ProgressMap = Record<string, boolean>
-
-function formatDate(value: string) {
-  if (!value) return 'Unavailable'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
-}
-
-function getVideoThumbnail(videoId: string) {
-  return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
-}
-
-function trimText(value: string, maxLength: number) {
-  if (value.length <= maxLength) return value
-  return `${value.slice(0, maxLength - 1).trimEnd()}...`
-}
-
-function splitBreakdown(entries: Array<Record<string, unknown>>) {
-  const tools = entries.filter((entry) => entry.type === 'tool')
-  const processes = entries.filter((entry) => entry.type === 'process')
-  const architecture = entries.filter((entry) => entry.type !== 'tool' && entry.type !== 'process')
-  return { tools, processes, architecture }
-}
-
-function getAssignmentStorageKey(runId: string, videoId: string) {
-  return `atlas-assignment-progress:${runId}:${videoId}`
-}
-
-function getAssignmentProgressItems(item: AssignmentArtifact) {
-  if (item.checklist.length > 0) {
-    return item.checklist
-  }
-
-  if (item.sections.length > 0) {
-    return item.sections.map((section) => ({
-      id: section.id,
-      label: section.title,
-    }))
-  }
-
-  return item.markdown
-    ? [
-        {
-          id: 'review-assignment',
-          label: 'Review assignment',
-        },
-      ]
-    : []
-}
 
 export function PipelineDashboard({
   activeRunId,
