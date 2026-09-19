@@ -343,10 +343,6 @@ def _infer_worth_time(practical_value: str, content_depth: str) -> str:
 async def build_comparison_artifact(
     repository: RunRepositoryPort, run_id: str
 ) -> tuple[list[dict[str, Any]], str, list[str]]:
-    # Import here to avoid circular imports
-    from src.infrastructure.llm.openai.adapter import OpenAIInsightsProvider
-    from src.config.settings import AtlasSettings
-    
     comparator = YouTubeOutputComparator(
         repository=repository,
         run_id=run_id,

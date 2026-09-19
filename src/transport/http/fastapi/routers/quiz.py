@@ -11,6 +11,7 @@ from pathlib import Path
 
 from src.application.dto.quiz import QuizGenerationInput, QuizGenerationOutput, VideoQuizResult
 from src.application.use_cases import GenerateQuizUseCase
+from src.infrastructure.google.drive import GoogleDriveExporter
 from src.transport.http.fastapi.dependencies import get_quiz_use_case
 from src.transport.http.fastapi.schemas.quiz import PlaylistQuizRequest, PlaylistQuizStatusResponse, DriveStatusResponse
 
@@ -122,7 +123,6 @@ async def upload_credentials(file: UploadFile = File(...)):
 @router.post("/auth")
 async def authenticate_drive():
     try:
-        from src.infrastructure.google.drive import GoogleDriveExporter
         GoogleDriveExporter()  # Trigger the auth flow
         return {"status": "success", "message": "Authenticated successfully."}
     except Exception as e:

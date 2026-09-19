@@ -134,11 +134,9 @@ async def get_run_comparison(run_id: str, repository: RunRepositoryPort = Depend
             data = json.loads(stored["data"])
             rows = data.get("rows", [])
             if rows:
-                from src.application.dto.comparison import ComparisonRow
-                comparison_rows = [ComparisonRow(**row) for row in rows]
                 return ComparisonArtifactResponse(
                     run=run,
-                    rows=comparison_rows,
+                    rows=rows,
                     insights_report=data.get("insights_report", ""),
                     recommendations=data.get("recommendations", []),
                     used_ai_insights=bool(data.get("used_ai_insights", False)),
