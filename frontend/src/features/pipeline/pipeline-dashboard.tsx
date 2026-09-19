@@ -11,14 +11,13 @@ import {
 import {
   type ChangeEvent,
   type FormEvent,
-  type ReactNode,
   useEffect,
   useMemo,
   useState,
 } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 
+import { MarkdownBody } from '../../components/shared/markdown-body'
+import { SectionHeading } from '../../components/shared/section-heading'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card } from '../../components/ui/card'
@@ -43,76 +42,6 @@ interface PipelineDashboardProps {
 }
 
 type ProgressMap = Record<string, boolean>
-
-function SectionHeading({
-  title,
-  description,
-  action,
-}: {
-  title: string
-  description?: string
-  action?: ReactNode
-}) {
-  return (
-    <div className="mb-5 flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
-      <div>
-        <h3 className="text-lg font-semibold tracking-[-0.03em] text-white">{title}</h3>
-        {description ? <p className="mt-1 text-sm text-zinc-400">{description}</p> : null}
-      </div>
-      {action}
-    </div>
-  )
-}
-
-function MarkdownBody({ markdown }: { markdown: string }) {
-  return (
-    <div className="space-y-4 text-sm leading-7 text-zinc-300">
-      <ReactMarkdown
-        components={{
-          a: ({ className, ...props }) => (
-            <a
-              className={cn('font-medium text-white underline decoration-white/20 underline-offset-4', className)}
-              rel="noreferrer"
-              target="_blank"
-              {...props}
-            />
-          ),
-          h1: ({ className, ...props }) => (
-            <h1 className={cn('text-2xl font-semibold tracking-[-0.04em] text-white', className)} {...props} />
-          ),
-          h2: ({ className, ...props }) => (
-            <h2 className={cn('text-xl font-semibold tracking-[-0.03em] text-white', className)} {...props} />
-          ),
-          h3: ({ className, ...props }) => (
-            <h3 className={cn('text-base font-semibold text-white', className)} {...props} />
-          ),
-          p: ({ className, ...props }) => <p className={cn('text-zinc-300', className)} {...props} />,
-          ul: ({ className, ...props }) => <ul className={cn('space-y-2 pl-5', className)} {...props} />,
-          ol: ({ className, ...props }) => <ol className={cn('space-y-2 pl-5', className)} {...props} />,
-          li: ({ className, ...props }) => <li className={cn('text-zinc-300', className)} {...props} />,
-          pre: ({ className, ...props }) => (
-            <pre
-              className={cn(
-                'overflow-x-auto rounded-2xl border border-white/8 bg-black/20 p-4 text-[13px] leading-6 text-zinc-100',
-                className,
-              )}
-              {...props}
-            />
-          ),
-          code: ({ className, ...props }) => (
-            <code
-              className={cn('rounded-md bg-white/[0.05] px-1.5 py-0.5 text-[0.92em] text-zinc-100', className)}
-              {...props}
-            />
-          ),
-        }}
-        remarkPlugins={[remarkGfm]}
-      >
-        {markdown}
-      </ReactMarkdown>
-    </div>
-  )
-}
 
 function formatDate(value: string) {
   if (!value) return 'Unavailable'
