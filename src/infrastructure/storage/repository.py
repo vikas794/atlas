@@ -118,13 +118,22 @@ class RunRepository:
 
     def list_runs(self) -> list[dict]:
         with self._conn() as conn:
-            rows = conn.execute("SELECT * FROM runs ORDER BY created_at DESC, run_id").fetchall()
+            rows = conn.execute(
+                "SELECT * FROM runs WHERE run_id != ? ORDER BY created_at DESC, run_id",
+                ("global-cache",),
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def latest_run(self) -> dict | None:
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT * FROM runs ORDER BY created_at DESC, updated_at DESC, run_id LIMIT 1"
+                """
+                SELECT * FROM runs
+                WHERE run_id != ?
+                ORDER BY created_at DESC, updated_at DESC, run_id
+                LIMIT 1
+                """,
+                ("global-cache",),
             ).fetchone()
         return dict(row) if row else None
 
@@ -561,7 +570,7 @@ class RunRepository:
             if folder.exists():
                 shutil.rmtree(folder, ignore_errors=True)
 
-        known = {run["run_id"] for run in self.list_runs()}
+        known = {"global-cache", *(run["run_id"] for run in self.list_runs())}
         removed_orphans: list[str] = []
         if self.artifact_root.exists():
             for folder in self.artifact_root.iterdir():
