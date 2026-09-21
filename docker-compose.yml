@@ -1,0 +1,17 @@
+services:
+  atlas:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: atlas:latest
+    container_name: atlas
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./transcripts:/app/transcripts
+      - ./credentials.json:/app/credentials.json:ro
+      - ./token.json:/app/token.json:ro
+    restart: unless-stopped

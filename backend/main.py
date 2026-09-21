@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse
 
 from src.config import load_settings
 from src.transport.http.fastapi.dependencies import (
@@ -38,14 +41,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+_cors_origins_env = os.getenv("ATLAS_CORS_ORIGINS", "")
+_cors_origins = [origin.strip() for origin in _cors_origins_env.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:4173",
-        "http://127.0.0.1:4173",
-    ],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -83,3 +84,19 @@ def shutdown_development_server(
 
     background_tasks.add_task(os._exit, 0)
     return {"status": "stopping"}
+
+
+# Serve the built frontend SPA, if present (e.g. in the Docker image). Registered
+# last so it never shadows the /api/* routers above.
+_frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if _frontend_dist.exists():
+    app.mount("/assets", StaticFiles(directory=_frontend_dist / "assets"), name="frontend-assets")
+
+    @app.get("/{full_path:path}")
+    def serve_frontend(full_path: str) -> FileResponse:
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        candidate = _frontend_dist / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(_frontend_dist / "index.html")
