@@ -244,29 +244,29 @@ export function UsageDashboard({ className }: UsageDashboardProps) {
               <div className="flex items-center gap-2">
                 <label className="text-xs text-zinc-500">Provider</label>
                 <select
-                  className="h-10 w-40 rounded-xl border border-white/8 bg-white/[0.04] px-3 text-sm text-white outline-none focus:border-white/15"
+                  className="h-10 w-40 rounded-xl border border-white/8 bg-white/[0.04] px-3 text-sm text-white outline-none focus:border-white/15 [&>option]:bg-zinc-900 [&>option]:text-white"
                   value={params.provider ?? ''}
                   onChange={(e) => setParams({ ...params, provider: e.target.value || undefined })}
                 >
-                  <option value="">All providers</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="gemini">Gemini</option>
-                  <option value="anthropic">Anthropic</option>
+                  <option value="" className="bg-zinc-900 text-white">All providers</option>
+                  <option value="openai" className="bg-zinc-900 text-white">OpenAI</option>
+                  <option value="gemini" className="bg-zinc-900 text-white">Gemini</option>
+                  <option value="anthropic" className="bg-zinc-900 text-white">Anthropic</option>
                 </select>
               </div>
               <div className="flex items-center gap-2">
                 <label className="text-xs text-zinc-500">Operation</label>
                 <select
-                  className="h-10 w-40 rounded-xl border border-white/8 bg-white/[0.04] px-3 text-sm text-white outline-none focus:border-white/15"
+                  className="h-10 w-40 rounded-xl border border-white/8 bg-white/[0.04] px-3 text-sm text-white outline-none focus:border-white/15 [&>option]:bg-zinc-900 [&>option]:text-white"
                   value={params.operation ?? ''}
                   onChange={(e) => setParams({ ...params, operation: e.target.value || undefined })}
                 >
-                  <option value="">All operations</option>
-                  <option value="summarization">Summarization</option>
-                  <option value="transcription">Transcription</option>
-                  <option value="quiz_generation">Quiz generation</option>
-                  <option value="comparison">Comparison</option>
-                  <option value="assignment">Assignment</option>
+                  <option value="" className="bg-zinc-900 text-white">All operations</option>
+                  <option value="summarization" className="bg-zinc-900 text-white">Summarization</option>
+                  <option value="transcription" className="bg-zinc-900 text-white">Transcription</option>
+                  <option value="quiz_generation" className="bg-zinc-900 text-white">Quiz generation</option>
+                  <option value="comparison" className="bg-zinc-900 text-white">Comparison</option>
+                  <option value="assignment" className="bg-zinc-900 text-white">Assignment</option>
                 </select>
               </div>
               <Button className="gap-2" onClick={handleRefresh} disabled={isLoading} variant="secondary">
