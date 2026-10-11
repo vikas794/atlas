@@ -2,7 +2,7 @@
 
 > Describes the code **as it exists at commit `cc6af15`**. [`ARCHITECTURE.md`](ARCHITECTURE.md) is the original target design / migration plan; this document is the current-state reference.
 >
-> Interactive diagram: open [`atlas-architecture.html`](atlas-architecture.html) in a browser (generated with [Archify](https://github.com/tt-a1i/archify); source JSON in `.archify/architecture-atlas-overview/candidate.json`).
+> Interactive diagram: open [`atlas-architecture.html`](../.archify/architecture-atlas-overview/atlas-architecture.html) in a browser (generated with [Archify](https://github.com/tt-a1i/archify); source JSON in `.archify/architecture-atlas-overview/candidate.json`).
 
 ## 1. What Atlas is
 
@@ -101,7 +101,6 @@ node .claude/skills/archify/bin/archify.mjs finalize architecture \
   .archify/architecture-atlas-overview/candidate.json \
   .archify/architecture-atlas-overview/atlas-architecture.html \
   --repo-root . --quality showcase --json
-cp .archify/architecture-atlas-overview/atlas-architecture.html docs/atlas-architecture.html
 ```
 
 Archify was installed with `npx skills add tt-a1i/archify --skill archify --agent claude-code --copy` (project-scoped, `.claude/skills/archify`). Ask Claude to "use archify" for workflow, sequence, data-flow or lifecycle diagrams.

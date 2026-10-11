@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import { Card } from './components/ui/card'
+import { NotesDemoPanel } from './features/notes/notes-demo-panel'
 import { PipelineDashboard } from './features/pipeline/pipeline-dashboard'
 import { GoogleAuthPanel } from './features/quiz/google-auth-panel'
 import { QuizPanel } from './features/quiz/quiz-panel'
@@ -131,6 +132,8 @@ function App() {
             searchQuery={searchQuery}
             transcriptLanguage={transcriptLanguage}
           />
+
+          <NotesDemoPanel />
 
           <UsageDashboard />
 
