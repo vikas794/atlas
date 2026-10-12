@@ -688,3 +688,26 @@ async def test_a_stale_task_cannot_schedule_a_retry_after_a_manual_retry(
     with pytest.raises(StaleRunError):
         await repo.increment_retry(video.id, next_retry_at="2030-01-01T00:00:00+00:00", token=0)
     assert (await repo.get_video(video.id)).retry_count == 0
+
+
+@pytest.mark.parametrize("reason", ["rateLimitExceeded", "userRateLimitExceeded"])
+async def test_youtube_api_throttling_is_a_transient_rate_limit(
+    repo: PlaylistRepository, reason: str
+) -> None:
+    stub = StubYouTube(pages_of(["a"]))
+    stub.error = http_error(403, reason)
+    provider, _ = make_provider(stub)
+    with pytest.raises(PipelineError) as excinfo:
+        await IngestPlaylistUseCase(repo, provider).ingest(URL)
+    assert excinfo.value.failure_type is FailureType.RATE_LIMITED
+
+
+async def test_youtube_api_server_error_is_a_provider_error_not_unavailable(
+    repo: PlaylistRepository,
+) -> None:
+    stub = StubYouTube(pages_of(["a"]))
+    stub.error = http_error(503, "backendError")
+    provider, _ = make_provider(stub)
+    with pytest.raises(ProviderError):
+        await IngestPlaylistUseCase(repo, provider).ingest(URL)
+    assert await repo.count_playlists() == 0

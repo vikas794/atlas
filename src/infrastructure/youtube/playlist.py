@@ -48,7 +48,9 @@ _PLAYLIST_UNAVAILABLE_REASONS = frozenset(
 )
 #: Reasons that mean Atlas' own key is wrong or not enabled for the Data API.
 _KEY_REJECTED_REASONS = frozenset({"keyInvalid", "accessNotConfigured", "ipRefererBlocked"})
-_QUOTA_REASONS = frozenset({"quotaExceeded", "rateLimitExceeded", "dailyLimitExceeded"})
+_QUOTA_REASONS = frozenset(
+    {"quotaExceeded", "rateLimitExceeded", "userRateLimitExceeded", "dailyLimitExceeded"}
+)
 
 
 def _error_reasons(exc: HttpError) -> set[str]:
