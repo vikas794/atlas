@@ -314,3 +314,13 @@ async def test_gemini_usage_counts_thinking_tokens_and_prices_the_default_model(
     assert record.output_tokens == 1000  # 200 answer + 800 thinking, both billed as output
     assert record.cost_usd > 0
     assert CostCalculator.calculate_cost("gemini", "gemini-2.5-flash-lite", 10**6, 0) == 0.10
+
+
+def test_a_placeholder_inside_the_title_is_not_substituted() -> None:
+    from src.infrastructure.llm.notes_base import render_prompt
+
+    rendered = render_prompt(
+        "T={{Title}} X={{Transcript}}", title="Hack {{Transcript}}", transcript="BODY"
+    )
+    assert rendered == "T=Hack {{Transcript}} X=BODY"
+    assert rendered.count("BODY") == 1

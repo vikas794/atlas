@@ -54,6 +54,9 @@ logger = logging.getLogger(__name__)
 #: The only two placeholders the prompt file is allowed to carry.
 TITLE_PLACEHOLDER = "{{Title}}"
 TRANSCRIPT_PLACEHOLDER = "{{Transcript}}"
+_PLACEHOLDER_PATTERN = re.compile(
+    "|".join(re.escape(p) for p in (TITLE_PLACEHOLDER, TRANSCRIPT_PLACEHOLDER))
+)
 
 #: Shortest output that could plausibly be notes. The prompt asks for a Content
 #: section and an Instruction section with several bullets each, so anything
@@ -107,7 +110,11 @@ def render_prompt(template: str, *, title: str, transcript: str) -> str:
                 f"{TITLE_PLACEHOLDER} and {TRANSCRIPT_PLACEHOLDER}."
             )
 
-    return template.replace(TITLE_PLACEHOLDER, title).replace(TRANSCRIPT_PLACEHOLDER, transcript)
+    # One pass over the template only: chained str.replace would also substitute a
+    # placeholder that appears *inside* the (untrusted) title, e.g. a YouTube title
+    # containing "{{Transcript}}" would paste the whole transcript into the prompt twice.
+    values = {TITLE_PLACEHOLDER: title, TRANSCRIPT_PLACEHOLDER: transcript}
+    return _PLACEHOLDER_PATTERN.sub(lambda match: values[match.group(0)], template)
 
 
 def estimate_tokens(text: str) -> int:
