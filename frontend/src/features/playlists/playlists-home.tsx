@@ -54,7 +54,13 @@ export function PlaylistsHome() {
     onSuccess: (playlist) => {
       setUrl('')
       setUrlError(null)
-      toast(`Added "${playlist.title}" with ${pluralize(playlist.video_count, 'video')}.`)
+      // A known link is re-synced by the backend (HTTP 200), not added again.
+      const known = playlistsQuery.data?.playlists.find((item) => item.id === playlist.id)
+      toast(
+        known
+          ? `"${playlist.title}" is already tracked: synced, ${pluralize(Math.max(0, playlist.video_count - known.video_count), 'new video')}.`
+          : `Added "${playlist.title}" with ${pluralize(playlist.video_count, 'video')}.`,
+      )
       void invalidateLists()
     },
     onError: (err) => {

@@ -70,6 +70,24 @@ describe('PlaylistsHome', () => {
     expect(messages.length).toBeGreaterThan(0)
   })
 
+  it('says "already tracked" (not "Added") when the link is a known playlist', async () => {
+    mockApi()
+      .on('GET', '/api/playlists', { playlists: [makePlaylist({ video_count: 3 })], total: 1 })
+      .on('POST', '/api/playlists', { status: 200, body: makePlaylist({ video_count: 5 }) })
+    const user = userEvent.setup()
+    renderRoute('/')
+
+    await screen.findByText('Complete Java')
+    await user.click(screen.getByRole('textbox', { name: 'Paste a YouTube playlist link' }))
+    await user.paste(VALID_URL)
+    await user.click(screen.getByRole('button', { name: 'Add playlist' }))
+
+    expect(
+      await screen.findByText('"Complete Java" is already tracked: synced, 2 new videos.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/^Added/)).not.toBeInTheDocument()
+  })
+
   it('lists playlists with sentence-case headings, last synced and a row actions menu', async () => {
     mockApi().on('GET', '/api/playlists', {
       playlists: [makePlaylist({ stage_counts: { pending_review: 2, failed: 1 } as never })],
