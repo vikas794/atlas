@@ -110,7 +110,7 @@ def test_kitchen_sink_lands_every_style_on_the_right_text_after_bullets_remove_t
     assert paragraphs[0][1]["namedStyleType"] == "HEADING_2"
     assert runs_with(doc, "bold") == ["Generics \U0001F680 in Java", "bold \U0001F600 text", "after"]
     assert runs_with(doc, "italic") == ["italic"]
-    assert runs_with(doc, "backgroundColor")[-1] == "code"
+    assert runs_with(doc, "backgroundColor") == ["List<String>", "code"]
     nesting = {text: bullet for text, _style, bullet in paragraphs if bullet is not None}
     assert nesting == {
         "First step": 0,

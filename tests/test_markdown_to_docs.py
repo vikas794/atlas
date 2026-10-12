@@ -489,10 +489,54 @@ def test_an_unclosed_backtick_span_stays_literal() -> None:
     assert "`" in inserted_text(requests)
 
 
-def test_a_markdown_table_is_skipped_rather_than_rendered() -> None:
-    requests = markdown_to_docs("| a | b |\n| --- | --- |\n| 1 | 2 |")
+def test_a_markdown_table_keeps_its_content_as_one_paragraph_per_row() -> None:
+    """Dropping a table silently lost content (users paste tables into edited notes)."""
+    requests = markdown_to_docs("Intro\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nAfter")
 
-    assert "| a | b |" not in inserted_text(requests)
+    assert inserted_text(requests) == "Intro\na | b\n1 | 2\nAfter\n"
+    bold = [s for s in text_style_requests(requests) if s["textStyle"].get("bold")]
+    assert len(bold) == 1  # the header row
+    assert text_at(requests, bold[0]["range"]["startIndex"]) == "a"
+
+
+def test_generics_survive_in_text_and_inline_code() -> None:
+    """``<String>`` used to be stripped as an HTML tag -- fatal for Java notes."""
+    requests = markdown_to_docs("A `List<String>` is a List<T> and Map<K, V> too")
+
+    assert inserted_text(requests) == "A List<String> is a List<T> and Map<K, V> too\n"
+
+
+def test_real_html_tags_are_still_stripped() -> None:
+    requests = markdown_to_docs("line<br>next <span class='x'>kept</span>")
+
+    assert inserted_text(requests) == "line next kept\n"
+
+
+def test_link_syntax_inside_inline_code_is_literal() -> None:
+    requests = markdown_to_docs("Index with `arr[i](x)` here")
+
+    assert "arr[i](x)" in inserted_text(requests)
+
+
+def test_snake_case_and_arithmetic_are_not_emphasis() -> None:
+    requests = markdown_to_docs("Call my_var_name and compute 2 * 3 * 4")
+
+    assert inserted_text(requests) == "Call my_var_name and compute 2 * 3 * 4\n"
+    assert text_style_requests(requests) == []
+
+
+def test_a_fence_indented_under_a_list_item_is_still_a_code_block() -> None:
+    markdown = "- Step one:\n    ```java\n    int x = 1;\n      nested();\n    ```\n- Step two"
+    requests = markdown_to_docs(markdown)
+
+    assert inserted_text(requests) == "Step one:\njava\nint x = 1;\n  nested();\nStep two\n"
+    assert any(is_boxed(style) for style in paragraph_style_requests(requests))
+
+
+def test_a_fence_with_an_info_string_is_still_a_code_block() -> None:
+    requests = markdown_to_docs('```java title="Main.java"\nclass Main {}\n```')
+
+    assert inserted_text(requests) == "java\nclass Main {}\n"
 
 
 def test_a_horizontal_rule_is_skipped() -> None:

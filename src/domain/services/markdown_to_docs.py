@@ -212,7 +212,9 @@ class Block:
 # Markdown parsing
 # ---------------------------------------------------------------------------
 
-_FENCE_RE = re.compile(r"^\s{0,3}(?P<fence>`{3,}|~{3,})\s*(?P<lang>\S*)\s*$")
+#: Any indentation is accepted (a fence nested under a list item is usually indented
+#: by 2-4 spaces) and an info string after the language (```java title="x") is ignored.
+_FENCE_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<fence>`{3,}|~{3,})[ \t]*(?P<lang>[^\s`]*)[^`]*$")
 _HEADING_RE = re.compile(r"^\s{0,3}(?P<hashes>#{1,})(?:\s+|$)(?P<text>.*)$")
 _HR_RE = re.compile(r"^\s{0,3}(?P<char>[-*_])(?:\s*\1){2,}\s*$")
 _BULLET_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<marker>[-*+])\s+(?P<text>\S.*)$")
@@ -221,14 +223,29 @@ _QUOTE_RE = re.compile(r"^\s{0,3}>\s?(?P<text>.*)$")
 _TABLE_DELIM_RE = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*\|[\s:|-]*$")
 _IMAGE_RE = re.compile(r"!\[(?P<alt>[^\]]*)\]\([^)]*\)")
 _LINK_RE = re.compile(r"\[(?P<text>[^\]]*)\]\((?P<url>[^)]*)\)")
-_HTML_RE = re.compile(r"<[^<>]{0,400}>")
+#: Only real HTML tags are stripped. A generic ``<[^<>]>`` pattern ate Java/C++/TS
+#: generics (``List<String>``, ``Map<K, V>``) -- the bread and butter of the notes.
+_HTML_RE = re.compile(
+    r"</?(?:a|abbr|b|br|center|code|del|details|div|em|font|h[1-6]|hr|i|img|ins|kbd|li|"
+    r"mark|ol|p|pre|s|small|span|strong|sub|summary|sup|table|tbody|td|th|thead|tr|u|ul)"
+    r"(?:\s[^<>]{0,400})?/?>",
+    re.IGNORECASE,
+)
+#: Inline code spans, which are literal: nothing inside them is ever stripped.
+_CODE_SPAN_RE = re.compile(r"(`+)(?:.+?)\1", re.DOTALL)
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _WHITESPACE_RE = re.compile(r"[ \t]+")
 
+#: Emphasis follows CommonMark's flanking rules closely enough for notes: the opening
+#: marker must be followed, and the closing marker preceded, by a non-space (so
+#: ``2 * 3 * 4`` stays arithmetic), and ``_`` never opens or closes inside a word (so
+#: ``snake_case_name`` keeps its underscores).
 _INLINE_RE = re.compile(
     r"(?P<code>`+)(?P<code_text>.+?)(?P=code)"
-    r"|(?P<strong>\*\*|__)(?P<strong_text>.+?)(?P=strong)"
-    r"|(?P<em>[*_])(?P<em_text>[^*_\n]+?)(?P=em)",
+    r"|\*\*(?=\S)(?P<strong_s>.+?)(?<=\S)\*\*"
+    r"|(?<!\w)__(?=\S)(?P<strong_u>.+?)(?<=\S)__(?!\w)"
+    r"|\*(?=[^\s*])(?P<em_s>[^*\n]+?)(?<=[^\s*])\*"
+    r"|(?<!\w)_(?=[^\s_])(?P<em_u>[^_\n]+?)(?<=[^\s_])_(?!\w)",
     re.DOTALL,
 )
 
@@ -261,9 +278,20 @@ def _strip_noise(text: str) -> str:
         logger.debug("markdown: dropped raw HTML tag %r", match.group(0))
         return " "
 
-    text = _IMAGE_RE.sub(_image, text)
-    text = _LINK_RE.sub(_link, text)
-    return _HTML_RE.sub(_html, text)
+    def _clean(segment: str) -> str:
+        segment = _IMAGE_RE.sub(_image, segment)
+        segment = _LINK_RE.sub(_link, segment)
+        return _HTML_RE.sub(_html, segment)
+
+    # Code spans are literal, so only the text between them is cleaned.
+    pieces: list[str] = []
+    cursor = 0
+    for match in _CODE_SPAN_RE.finditer(text):
+        pieces.append(_clean(text[cursor : match.start()]))
+        pieces.append(match.group(0))
+        cursor = match.end()
+    pieces.append(_clean(text[cursor:]))
+    return "".join(pieces)
 
 
 def _parse_inline(text: str, *, depth: int = 0) -> tuple[str, tuple[InlineSpan, ...]]:
@@ -292,10 +320,10 @@ def _parse_inline(text: str, *, depth: int = 0) -> tuple[str, tuple[InlineSpan, 
 
         if match.group("code") is not None:
             inner, kind = match.group("code_text"), "code"
-        elif match.group("strong") is not None:
-            inner, kind = match.group("strong_text"), "bold"
+        elif match.group("strong_s") is not None or match.group("strong_u") is not None:
+            inner, kind = match.group("strong_s") or match.group("strong_u"), "bold"
         else:
-            inner, kind = match.group("em_text"), "italic"
+            inner, kind = match.group("em_s") or match.group("em_u"), "italic"
 
         inner = inner or ""
         start = length
@@ -387,13 +415,25 @@ def _code_label(language: str) -> str:
     return label[:24] or NEUTRAL_CODE_LABEL
 
 
+def _append_table_row(blocks: list[Block], line: str, *, header: bool) -> None:
+    """Append one Markdown table row as a paragraph: cells joined by `` | ``."""
+    cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+    block = _inline_block("paragraph", " | ".join(cell for cell in cells))
+    if block is None:
+        return
+    if header:
+        block = replace(block, spans=(InlineSpan(0, len(block.text), bold=True),))
+    blocks.append(block)
+
+
 def extract_blocks(markdown: str) -> list[Block]:
     """Parse Markdown into :class:`Block` objects, one per Docs paragraph.
 
     Lazy continuation lines (two non-blank lines in a row) join into a single
     paragraph, as CommonMark specifies. Constructs the notes prompt explicitly
-    rules out — tables, horizontal rules, images, raw HTML — are skipped with a
-    debug log rather than rendered as noise.
+    rules out are degraded rather than rendered as noise: horizontal rules are
+    skipped, images keep their alt text, known HTML tags are stripped, and table
+    rows become plain paragraphs (cells joined by `` | ``) so no content is lost.
     """
     if not isinstance(markdown, str) or not markdown.strip():
         return []
@@ -403,6 +443,7 @@ def extract_blocks(markdown: str) -> list[Block]:
     previous_had_pipe = False
     fence = ""
     fence_lang = ""
+    fence_indent = 0
     fence_lines: list[str] = []
 
     def flush_pending() -> None:
@@ -444,7 +485,14 @@ def extract_blocks(markdown: str) -> list[Block]:
             ):
                 close_fence()
             else:
-                fence_lines.append(line)
+                # Drop the fence's own indentation (a fence nested in a list item),
+                # but never more than the line's leading whitespace.
+                if fence_indent:
+                    expanded = line.expandtabs(4)
+                    strip = min(fence_indent, len(expanded) - len(expanded.lstrip(" ")))
+                    fence_lines.append(expanded[strip:])
+                else:
+                    fence_lines.append(line)
             continue
 
         opening = _FENCE_RE.match(line)
@@ -452,6 +500,7 @@ def extract_blocks(markdown: str) -> list[Block]:
             flush_pending()
             fence = opening.group("fence")
             fence_lang = opening.group("lang")
+            fence_indent = len(opening.group("indent").expandtabs(4))
             fence_lines = []
             previous_had_pipe = False
             continue
@@ -462,15 +511,21 @@ def extract_blocks(markdown: str) -> list[Block]:
             continue
 
         if _TABLE_DELIM_RE.match(line) and "|" in line:
-            logger.debug("markdown: dropped unsupported table")
-            if pending and "|" in pending[-1]:
-                pending.pop()
+            # Docs tables need a structural insert whose index math is far riskier
+            # than plain text, so a table becomes one paragraph per row with the
+            # cells joined by " | " (the header row bold). Its content is kept,
+            # never silently dropped -- users may paste tables into edited notes.
+            logger.debug("markdown: rendering table rows as text")
+            header = pending.pop() if pending and "|" in pending[-1] else None
+            flush_pending()
+            if header is not None:
+                _append_table_row(blocks, header, header=True)
             previous_had_pipe = True
             continue
 
         if previous_had_pipe:
             if "|" in line:
-                logger.debug("markdown: dropped table row %r", line)
+                _append_table_row(blocks, line, header=False)
                 continue
             previous_had_pipe = False
 
