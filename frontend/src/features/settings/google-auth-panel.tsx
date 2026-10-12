@@ -121,7 +121,7 @@ export function GoogleAuthPanel() {
         ) : null}
 
         <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <div className="rounded border border-border bg-surface-muted p-4">
+          <div className="rounded border border-border bg-surface p-4">
             <h3 className="text-body font-medium text-text">Step 1: Upload credentials</h3>
             <p className="mt-1 text-label text-text-muted">
               Upload the OAuth client JSON file (for example{' '}
@@ -161,7 +161,7 @@ export function GoogleAuthPanel() {
             ) : null}
           </div>
 
-          <div className="rounded border border-border bg-surface-muted p-4">
+          <div className="rounded border border-border bg-surface p-4">
             <h3 className="text-body font-medium text-text">Step 2: Authenticate</h3>
             <p className="mt-1 text-label text-text-muted">
               Opens the Google consent screen in your local browser and stores a token for

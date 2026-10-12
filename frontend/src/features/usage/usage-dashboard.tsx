@@ -78,7 +78,7 @@ function TableShell({ empty, children }: { empty?: string; children?: React.Reac
 
 function Head({ columns }: { columns: string[] }) {
   return (
-    <thead className="bg-surface-muted text-label text-text-muted">
+    <thead className="bg-surface-muted text-label text-text">
       <tr className="h-row">
         {columns.map((heading) => (
           <th key={heading} scope="col" className="px-3">

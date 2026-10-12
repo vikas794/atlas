@@ -29,7 +29,7 @@ export function MarkdownBody({ markdown, className }: { markdown: string; classN
         '[&_h3]:text-body [&_h3]:font-semibold [&_h3]:text-text',
         '[&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-5',
         '[&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-5',
-        '[&_table]:w-full [&_table]:text-body [&_table]:font-ui [&_th]:border-b [&_th]:border-border [&_th]:bg-surface-muted [&_th]:text-left [&_th]:font-medium [&_th]:text-text-muted [&_td]:border-b [&_td]:border-border [&_td]:align-top',
+        '[&_table]:w-full [&_table]:text-body [&_table]:font-ui [&_th]:border-b [&_th]:border-border [&_th]:bg-surface-muted [&_th]:text-left [&_th]:font-medium [&_th]:text-text [&_td]:border-b [&_td]:border-border [&_td]:align-top',
         '[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-text-muted',
         '[&_hr]:border-border',
         className,
@@ -50,7 +50,7 @@ export function MarkdownBody({ markdown, className }: { markdown: string; classN
             return (
               <div className="relative">
                 {language ? (
-                  <span className="absolute right-2 top-1 select-none text-label text-text-muted">
+                  <span className="absolute right-2 top-1 select-none text-label text-text">
                     {language}
                   </span>
                 ) : null}

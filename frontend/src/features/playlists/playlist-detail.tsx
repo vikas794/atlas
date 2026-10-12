@@ -467,7 +467,7 @@ export function PlaylistDetail() {
           )}
         >
           <table className="w-full text-left text-body">
-            <thead className="text-label text-text-muted">
+            <thead className="text-label text-text">
               <tr className="h-row">
                 {[
                   ['#', 'w-16 text-right'],

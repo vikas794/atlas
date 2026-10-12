@@ -200,7 +200,7 @@ export function PlaylistsHome() {
         ) : (
           <div className="overflow-x-auto rounded border border-border bg-surface">
             <table className="w-full text-left text-body">
-              <thead className="border-b border-border bg-surface-muted text-label text-text-muted">
+              <thead className="border-b border-border bg-surface-muted text-label text-text">
                 <tr className="h-row">
                   <th scope="col" className="px-3">
                     Title

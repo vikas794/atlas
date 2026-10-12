@@ -334,7 +334,7 @@ export function ReviewScreen() {
                       video.stage === 'pending_review'
                         ? 'border-l-st-review-fg'
                         : 'border-l-transparent',
-                      isActive ? 'bg-accent-soft text-accent' : 'text-text hover:bg-surface-muted',
+                      isActive ? 'bg-accent-soft text-text' : 'text-text hover:bg-surface-muted',
                     )}
                   >
                     <StageDot spec={badge} />
