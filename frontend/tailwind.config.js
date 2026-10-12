@@ -22,33 +22,43 @@ const color = (token) =>
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
-    extend: {
-      colors: {
-        // 3.1 Neutrals and accent
-        bg: color('bg'),
-        surface: color('surface'),
-        'surface-muted': color('surface-muted'),
-        border: color('border'),
-        text: color('text'),
-        'text-muted': color('text-muted'),
-        accent: color('accent'),
-        'accent-soft': color('accent-soft'),
-        'on-accent': color('on-accent'),
+    // Not under `extend`: Tailwind's default palette (red-500, slate-100...) is
+    // unavailable, so a component cannot bypass the design tokens.
+    colors: {
+      transparent: 'transparent',
+      current: 'currentColor',
+      inherit: 'inherit',
 
-        // 3.2 Status colors: `<status>-fg` for text/icon, `<status>-bg` for badges
-        'st-neutral-fg': color('st-neutral-fg'),
-        'st-neutral-bg': color('st-neutral-bg'),
-        'st-progress-fg': color('st-progress-fg'),
-        'st-progress-bg': color('st-progress-bg'),
-        'st-review-fg': color('st-review-fg'),
-        'st-review-bg': color('st-review-bg'),
-        'st-success-fg': color('st-success-fg'),
-        'st-success-bg': color('st-success-bg'),
-        'st-error-fg': color('st-error-fg'),
-        'st-error-bg': color('st-error-bg'),
-        'st-warn-fg': color('st-warn-fg'),
-        'st-warn-bg': color('st-warn-bg'),
-      },
+      // 3.1 Neutrals and accent
+      bg: color('bg'),
+      surface: color('surface'),
+      'surface-muted': color('surface-muted'),
+      border: color('border'),
+      text: color('text'),
+      'text-muted': color('text-muted'),
+      accent: color('accent'),
+      'accent-soft': color('accent-soft'),
+      'on-accent': color('on-accent'),
+
+      // 3.2 Status colors: `<status>-fg` for text/icon, `<status>-bg` for badges
+      'st-neutral-fg': color('st-neutral-fg'),
+      'st-neutral-bg': color('st-neutral-bg'),
+      'st-progress-fg': color('st-progress-fg'),
+      'st-progress-bg': color('st-progress-bg'),
+      'st-review-fg': color('st-review-fg'),
+      'st-review-bg': color('st-review-bg'),
+      'st-success-fg': color('st-success-fg'),
+      'st-success-bg': color('st-success-bg'),
+      'st-error-fg': color('st-error-fg'),
+      'st-error-bg': color('st-error-bg'),
+      'st-warn-fg': color('st-warn-fg'),
+      'st-warn-bg': color('st-warn-bg'),
+    },
+
+    extend: {
+      // Defaults that Tailwind would otherwise take from its (removed) gray/blue palette.
+      borderColor: { DEFAULT: color('border') },
+      ringColor: { DEFAULT: color('accent') },
 
       fontFamily: {
         // Section 4: UI chrome, notes reading pane, code — never mixed.
@@ -121,8 +131,8 @@ export default {
 
       boxShadow: {
         // Section 2: almost no shadows — popovers and modals only.
-        popover: '0 8px 24px rgb(15 23 42 / 0.12)',
-        modal: '0 16px 48px rgb(15 23 42 / 0.18)',
+        popover: 'var(--shadow-popover)',
+        modal: 'var(--shadow-modal)',
       },
 
       transitionDuration: {

@@ -6,43 +6,46 @@
  * matching Tailwind utilities in `tailwind.config.js`). Never hardcode a hex
  * value, font stack or spacing value inside a component.
  *
- * Light is the default theme (design.md section 2). Dark is a tuned override,
- * not an inversion: dark navy surfaces, soft off-white text, and status colors
- * brightened so they do not wash out on a dark surface.
+ * Every colour token is defined exactly once as `light-dark(<light>, <dark>)`
+ * (design.md 3.1 / 3.2 columns). Which value applies follows `color-scheme`:
+ * the OS preference by default, or the manual toggle via `data-theme`. Dark is
+ * a tuned palette, not an inversion: dark navy surfaces, soft off-white text,
+ * status colours brightened so they do not wash out on a dark surface.
  */
 
 :root {
-  color-scheme: light;
+  /* Follow the OS by default; the manual toggle pins one scheme below. */
+  color-scheme: light dark;
 
   /* ---------------------------------------------------------------------
    * 3.1 Neutrals and accent
    * ------------------------------------------------------------------ */
-  --bg: #f8fafc;
-  --surface: #ffffff;
-  --surface-muted: #f1f5f9;
-  --border: #e2e8f0;
-  --text: #0f172a;
-  --text-muted: #64748b;
-  --accent: #4f46e5;
-  --accent-soft: #eef2ff;
-  --on-accent: #ffffff;
+  --bg: light-dark(#f8fafc, #0f172a);
+  --surface: light-dark(#ffffff, #1e293b);
+  --surface-muted: light-dark(#f1f5f9, #273449);
+  --border: light-dark(#e2e8f0, #334155);
+  --text: light-dark(#0f172a, #e2e8f0);
+  --text-muted: light-dark(#64748b, #94a3b8);
+  --accent: light-dark(#4f46e5, #818cf8);
+  --accent-soft: light-dark(#eef2ff, #2a2f5c);
+  --on-accent: light-dark(#ffffff, #0f172a);
 
   /* ---------------------------------------------------------------------
    * 3.2 Status colors (semantic) — one foreground and one soft background
    *     per meaning. Amber ("review") always means "this needs you".
    * ------------------------------------------------------------------ */
-  --st-neutral-fg: #475569;
-  --st-neutral-bg: #f1f5f9;
-  --st-progress-fg: #2563eb;
-  --st-progress-bg: #eff6ff;
-  --st-review-fg: #b45309;
-  --st-review-bg: #fffbeb;
-  --st-success-fg: #15803d;
-  --st-success-bg: #f0fdf4;
-  --st-error-fg: #b91c1c;
-  --st-error-bg: #fef2f2;
-  --st-warn-fg: #c2410c;
-  --st-warn-bg: #fff7ed;
+  --st-neutral-fg: light-dark(#475569, #cbd5e1);
+  --st-neutral-bg: light-dark(#f1f5f9, #334155);
+  --st-progress-fg: light-dark(#2563eb, #60a5fa);
+  --st-progress-bg: light-dark(#eff6ff, #1e3a5f);
+  --st-review-fg: light-dark(#b45309, #fbbf24);
+  --st-review-bg: light-dark(#fffbeb, #4a3a12);
+  --st-success-fg: light-dark(#15803d, #4ade80);
+  --st-success-bg: light-dark(#f0fdf4, #14392a);
+  --st-error-fg: light-dark(#b91c1c, #f87171);
+  --st-error-bg: light-dark(#fef2f2, #4a1d1d);
+  --st-warn-fg: light-dark(#c2410c, #fb923c);
+  --st-warn-bg: light-dark(#fff7ed, #4a2a12);
 
   /* ---------------------------------------------------------------------
    * 4. Typography — three fonts, each with exactly one job.
@@ -95,64 +98,17 @@
   --focus-ring-width: 2px;
   --focus-ring-offset: 1px;
   --transition-duration: 120ms;
+
+  /* Section 2: shadows only on popovers and modals. */
+  --shadow-popover: 0 8px 24px rgb(15 23 42 / 0.12);
+  --shadow-modal: 0 16px 48px rgb(15 23 42 / 0.18);
 }
 
-/* -----------------------------------------------------------------------
- * Dark theme — applied when the user picks dark explicitly, or when the OS
- * asks for dark and the user has not pinned light via the manual toggle.
- * --------------------------------------------------------------------- */
+/* Manual theme toggle (lib/theme.ts): pin one scheme; no attribute = follow the OS. */
+[data-theme='light'] {
+  color-scheme: light;
+}
+
 [data-theme='dark'] {
   color-scheme: dark;
-
-  --bg: #0f172a;
-  --surface: #1e293b;
-  --surface-muted: #273449;
-  --border: #334155;
-  --text: #e2e8f0;
-  --text-muted: #94a3b8;
-  --accent: #818cf8;
-  --accent-soft: #2a2f5c;
-  --on-accent: #0f172a;
-
-  --st-neutral-fg: #cbd5e1;
-  --st-neutral-bg: #334155;
-  --st-progress-fg: #60a5fa;
-  --st-progress-bg: #1e3a5f;
-  --st-review-fg: #fbbf24;
-  --st-review-bg: #4a3a12;
-  --st-success-fg: #4ade80;
-  --st-success-bg: #14392a;
-  --st-error-fg: #f87171;
-  --st-error-bg: #4a1d1d;
-  --st-warn-fg: #fb923c;
-  --st-warn-bg: #4a2a12;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    color-scheme: dark;
-
-    --bg: #0f172a;
-    --surface: #1e293b;
-    --surface-muted: #273449;
-    --border: #334155;
-    --text: #e2e8f0;
-    --text-muted: #94a3b8;
-    --accent: #818cf8;
-    --accent-soft: #2a2f5c;
-    --on-accent: #0f172a;
-
-    --st-neutral-fg: #cbd5e1;
-    --st-neutral-bg: #334155;
-    --st-progress-fg: #60a5fa;
-    --st-progress-bg: #1e3a5f;
-    --st-review-fg: #fbbf24;
-    --st-review-bg: #4a3a12;
-    --st-success-fg: #4ade80;
-    --st-success-bg: #14392a;
-    --st-error-fg: #f87171;
-    --st-error-bg: #4a1d1d;
-    --st-warn-fg: #fb923c;
-    --st-warn-bg: #4a2a12;
-  }
 }
