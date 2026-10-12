@@ -45,14 +45,24 @@ See [`docs/SYSTEM_ARCHITECTURE.md`](docs/SYSTEM_ARCHITECTURE.md) and the product
 
 ## One-time setup
 
-Prerequisites: Python 3.13 with [`uv`](https://docs.astral.sh/uv/), Node.js 18+, and the keys
-below.
+Prerequisites: [`uv`](https://docs.astral.sh/uv/) (it installs Python 3.13 itself), Node.js
+20.19+ or 22.12+ (only to install and build the frontend), and the keys below. No Docker needed.
+
+```powershell
+.\scripts\setup.ps1           # Windows: uv sync, npm ci, creates .env from .env.example
+```
 
 ```bash
-git clone <this repo> && cd atlas
-uv sync                       # backend dependencies
-cp .env.example .env          # then fill in the keys (below); empty values mean "default"
+./scripts/setup.sh            # macOS / Linux: the same
 ```
+
+(If PowerShell refuses to run scripts, use
+`powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1`, and the same for the others.)
+
+Configuration lives in two places only: **secrets in `.env`**, **everything else in
+`src/configs/config.yaml`** (AI provider and model, concurrency, retries, database path, host,
+port, log level, ...). Both are validated at startup; an invalid value stops Atlas with a list of
+the problems. Any config key can be overridden for one run with `ATLAS_<KEY>`.
 
 Edit `.env`:
 
@@ -62,9 +72,9 @@ Edit `.env`:
 | `GEMINI_API_KEY` | Required when `NOTES_PROVIDER=gemini` (the default) |
 | `OPENROUTER_API_KEY` | Required when `NOTES_PROVIDER=openrouter` (OpenRouter, not OpenAI) |
 
-Everything else in `.env.example` is optional and documented there (`NOTES_PROVIDER`,
-`NOTES_MODEL`, `GEMINI_MODEL`, `OPENROUTER_MODEL`, concurrency, retry limits, log level, ...).
-A key that is missing is reported with a clear message naming the variable (HTTP 503
+A missing key does not stop Atlas from starting: `GET /api/diagnostics` (and the Diagnostics
+page) lists what is missing. Using a feature without its key is reported with a clear message
+naming the variable (HTTP 503
 `CONFIG_MISSING` for the YouTube key, a permanent `config_error` failure on the video for an LLM
 key) - it never retries forever.
 
@@ -90,25 +100,30 @@ gitignored; never commit them.
 
 ---
 
-## Start it (one command)
+## Run it
 
-On Windows, from the repository root:
+**Single-app mode** (normal use): one process, one port. Build the UI once (and after each
+frontend change), then start:
 
-```powershell
-.\scripts\start-dev.ps1          # installs what is missing, starts backend + frontend, waits for both
-.\scripts\stop-dev.ps1           # stops them
-```
+| | Windows (PowerShell) | macOS / Linux |
+|---|---|---|
+| Build the UI | `.\scripts\build.ps1` | `./scripts/build.sh` |
+| Start | `.\scripts\start.ps1` | `./scripts/start.sh` |
 
-Then open <http://127.0.0.1:5173> (API health: <http://127.0.0.1:8000/api/health>). See
-[`SETUP_SOP.md`](SETUP_SOP.md) for details. On other systems:
+Open <http://127.0.0.1:8000>. `start` is just `uv run python -m backend`: the API, the
+background worker and the built UI (`frontend/dist`, with SPA fallback) on the `host`/`port`
+from `config.yaml`. Nothing is built at runtime; without a build the page says how to build.
+Ctrl+C stops it gracefully (the worker stops with the API process).
 
-```bash
-uv run uvicorn backend.main:app --host 127.0.0.1 --port 8000     # API + background worker
-cd frontend && npm install && npm run dev                         # UI on http://127.0.0.1:5173
-```
+**Dev mode** (hot reload): `.\scripts\dev.ps1` or `./scripts/dev.sh` runs the backend with
+auto-reload plus the Vite dev server, which proxies `/api` to the backend. Open
+<http://127.0.0.1:5173>; Ctrl+C stops both.
 
-The worker starts and stops with the API process (the FastAPI lifespan); there is no separate
-worker to launch.
+If the port is taken (for example by the Docker container), Atlas says so and exits; stop the
+other server or change `port` in `config.yaml`.
+
+Health: `GET /api/health` (liveness) and `GET /api/diagnostics` (config, database, keys, Drive,
+frontend build and the last 50 warnings/errors, never secret values).
 
 ---
 
@@ -160,11 +175,8 @@ Atlas now copies it to `data/atlas.sqlite3.pre-<migration>.bak` (e.g. `...pre-00
 
 ## Quality checks
 
-```bash
-uv run ruff check .          # lint
-uv run pytest                # backend tests (temp SQLite; no network, no real keys)
-cd frontend && npm run lint && npm test && npm run build
-```
+`.\scripts\test.ps1` or `./scripts/test.sh` runs everything: ruff, pytest (temp SQLite; no
+network, no real keys), eslint, `tsc -b` and vitest.
 
 ---
 
