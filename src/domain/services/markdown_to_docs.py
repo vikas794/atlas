@@ -45,8 +45,10 @@ The module sidesteps the problem instead of simulating it:
    is a pure arithmetic offset into it — no guessing, no re-walking.
 3. Every subsequent request is a *styling* request. Styling never changes a
    length, so all indices stay valid for the remainder of the batch.
-4. Requests are emitted in ascending index order, with the insertion first
-   because it sits at ``start_index``, the lowest index in the document.
+4. Styling requests are emitted in ascending index order after the insertion;
+   ``createParagraphBullets`` requests come last, bottom-up, because they remove
+   the leading nesting tabs and so shift every later index. Indices are UTF-16
+   code units (:func:`utf16_len`), not Python characters.
 
 :func:`render_plain_text` exposes the exact string that gets inserted so a
 caller — or a test — can recompute the growing document extent independently.
@@ -127,7 +129,7 @@ CODE_BORDER_PADDING_PT = 8.0
 BULLET_PRESET_DISC = "BULLET_DISC_CIRCLE_SQUARE"
 BULLET_PRESET_NUMBERED = "NUMBERED_DECIMAL_ALPHA_ROMAN"
 
-#: Docs accepts ``indentLevel`` 0-8; deeper indentation is clamped anyway.
+#: Docs supports nesting levels 0-8 (one leading tab each); deeper nesting is clamped.
 MAX_INDENT_LEVEL = 8
 
 #: Label for a fence with no language tag — the tag is optional, never assumed.
@@ -163,13 +165,12 @@ def _pt(magnitude: float) -> dict[str, object]:
 
 def _code_border() -> dict[str, object]:
     """A 1px solid ``--border`` box edge with padding inside it."""
-    padding = {
-        side: _pt(CODE_BORDER_PADDING_PT) for side in ("top", "bottom", "left", "right")
-    }
+    # ``ParagraphBorder.padding`` is a single ``Dimension`` (the padding on the side the
+    # border is drawn), not a per-side map; a map is rejected by the Docs API with HTTP 400.
     return {
         "color": _optional_color(CODE_BORDER_HEX),
         "width": _pt(CODE_BORDER_WIDTH_PT),
-        "padding": padding,
+        "padding": _pt(CODE_BORDER_PADDING_PT),
         "dashStyle": "SOLID",
     }
 
@@ -235,7 +236,7 @@ _MAX_INLINE_DEPTH = 4
 
 
 def _indent_level(indent: str) -> int:
-    """Turn leading whitespace into a Docs ``indentLevel`` (2 spaces == 1 level)."""
+    """Turn leading whitespace into a list nesting level (2 spaces == 1 level)."""
     spaces = len(indent.expandtabs(SPACES_PER_INDENT_LEVEL))
     return min(spaces // SPACES_PER_INDENT_LEVEL, MAX_INDENT_LEVEL)
 
@@ -531,14 +532,43 @@ def extract_blocks(markdown: str) -> list[Block]:
 # ---------------------------------------------------------------------------
 
 
+def utf16_len(text: str) -> int:
+    """Length of ``text`` in UTF-16 code units -- the unit of every Docs API index.
+
+    Python's ``len`` counts code points, so any character outside the Basic
+    Multilingual Plane (emoji, mathematical alphanumerics, some CJK) is one
+    Python character but **two** Docs index units. Using ``len`` would shift every
+    later range by one per such character: styling lands on the wrong text and
+    a range can run past the end of the document, which rejects the whole batch.
+    """
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _is_list(block: Block) -> bool:
+    return block.kind in ("bullet", "ordered")
+
+
+def _inserted(block: Block) -> str:
+    """The paragraph text actually inserted for ``block`` (without its newline).
+
+    List items carry one leading tab per nesting level: ``createParagraphBullets``
+    derives the nesting level from leading tabs and then removes them (it has no
+    ``indentLevel`` field).
+    """
+    if _is_list(block):
+        return "\t" * block.level + block.text
+    return block.text
+
+
 def render_plain_text(markdown: str) -> str:
     """Return the exact string :func:`markdown_to_docs` inserts.
 
-    Every block contributes its text plus one ``\\n``. Exposed so callers and
-    tests can recompute paragraph offsets — and therefore the document extent —
-    without duplicating the parser.
+    Every block contributes its text plus one ``\\n`` (list items are prefixed by
+    one tab per nesting level, which Docs removes when it creates the bullets).
+    Exposed so callers and tests can recompute paragraph offsets without
+    duplicating the parser. Offsets must be measured with :func:`utf16_len`.
     """
-    return "".join(f"{block.text}\n" for block in extract_blocks(markdown))
+    return "".join(f"{_inserted(block)}\n" for block in extract_blocks(markdown))
 
 
 def _span_requests(block: Block, base: int) -> Iterator[dict]:
@@ -555,16 +585,20 @@ def _span_requests(block: Block, base: int) -> Iterator[dict]:
         if span.code:
             style["weightedFontFamily"] = {
                 "fontFamily": CODE_FONT_FAMILY,
-                "fontWeight": CODE_FONT_WEIGHT,
+                "weight": CODE_FONT_WEIGHT,
             }
             style["fontSize"] = _pt(CODE_FONT_SIZE_PT)
-            style["shading"] = {"backgroundColor": _optional_color(INLINE_CODE_BACKGROUND_HEX)}
-            fields.extend(("weightedFontFamily", "fontSize", "shading"))
+            # ``TextStyle`` has no ``shading``; text highlight is ``backgroundColor``.
+            style["backgroundColor"] = _optional_color(INLINE_CODE_BACKGROUND_HEX)
+            fields.extend(("weightedFontFamily", "fontSize", "backgroundColor"))
         if not fields:
             continue
         yield {
             "updateTextStyle": {
-                "range": {"startIndex": base + span.start, "endIndex": base + span.end},
+                "range": {
+                    "startIndex": base + utf16_len(block.text[: span.start]),
+                    "endIndex": base + utf16_len(block.text[: span.end]),
+                },
                 "textStyle": style,
                 "fields": ",".join(fields),
             }
@@ -573,7 +607,7 @@ def _span_requests(block: Block, base: int) -> Iterator[dict]:
 
 def _block_requests(block: Block, base: int) -> Iterator[dict]:
     """Emit the styling requests for one non-list block."""
-    full_range = {"startIndex": base, "endIndex": base + len(block.text)}
+    full_range = {"startIndex": base, "endIndex": base + utf16_len(block.text)}
 
     if block.kind == "heading":
         yield {
@@ -651,7 +685,7 @@ def _block_requests(block: Block, base: int) -> Iterator[dict]:
                 "textStyle": {
                     "weightedFontFamily": {
                         "fontFamily": CODE_FONT_FAMILY,
-                        "fontWeight": CODE_FONT_WEIGHT,
+                        "weight": CODE_FONT_WEIGHT,
                     },
                     "fontSize": _pt(CODE_FONT_SIZE_PT),
                     # Neutralise inherited emphasis: a code block right after a
@@ -670,15 +704,16 @@ def _block_requests(block: Block, base: int) -> Iterator[dict]:
 def _list_run_end(blocks: Sequence[Block], start: int) -> int:
     """Return the index of the last block in the list run beginning at ``start``.
 
-    Contiguous items of the same kind *and* nesting level share one
-    ``createParagraphBullets`` request, which is what makes an ordered list
-    number continuously rather than restarting at 1 on every item.
+    A run is every contiguous list item, nested ones included, so that one
+    ``createParagraphBullets`` request covers it: Docs then numbers an ordered
+    list continuously across its nested items instead of restarting at 1. A
+    top-level item of the other list kind (bullets <-> numbers) starts a new run.
     """
-    head = blocks[start]
+    head_kind = blocks[start].kind
     end = start
     while end + 1 < len(blocks):
         nxt = blocks[end + 1]
-        if nxt.kind != head.kind or nxt.level != head.level:
+        if not _is_list(nxt) or (nxt.level == 0 and nxt.kind != head_kind):
             break
         end += 1
     return end
@@ -687,9 +722,14 @@ def _list_run_end(blocks: Sequence[Block], start: int) -> int:
 def markdown_to_docs(markdown: str, *, start_index: int = DEFAULT_START_INDEX) -> list[dict]:
     """Convert Markdown into Google Docs ``batchUpdate`` requests.
 
-    The returned list is ordered by ascending document index and begins with
-    the single ``insertText`` that creates the content, so it can be handed
-    straight to ``documents().batchUpdate``.
+    Order: the single ``insertText`` first, then every styling request in
+    ascending index order (styling never changes a length), then the
+    ``createParagraphBullets`` requests in **descending** index order. Bullet
+    creation removes the leading nesting tabs, which shifts every later index;
+    applying the bottom-most list first means no request ever refers to an
+    index that an earlier request has already moved.
+
+    All indices are UTF-16 code units (see :func:`utf16_len`).
 
     Returns ``[]`` for input that produces no text at all (empty string,
     whitespace only, or a fence with no body) rather than an invalid empty
@@ -699,46 +739,50 @@ def markdown_to_docs(markdown: str, *, start_index: int = DEFAULT_START_INDEX) -
     if not blocks:
         return []
 
-    text = "".join(f"{block.text}\n" for block in blocks)
+    text = "".join(f"{_inserted(block)}\n" for block in blocks)
     requests: list[dict] = [
         {"insertText": {"location": {"index": start_index}, "text": text}}
     ]
 
-    # Pure arithmetic: each paragraph starts where the previous one ended,
-    # plus the newline that terminates it.
+    # Pure arithmetic: each paragraph starts where the previous one ended, plus
+    # the newline that terminates it.
     offsets: list[int] = []
     cursor = start_index
     for block in blocks:
         offsets.append(cursor)
-        cursor += len(block.text) + 1
+        cursor += utf16_len(_inserted(block)) + 1
 
+    bullets: list[dict] = []
     index = 0
     while index < len(blocks):
         block = blocks[index]
-        base = offsets[index]
 
-        if block.kind in ("bullet", "ordered"):
+        if _is_list(block):
             run_end = _list_run_end(blocks, index)
-            bullet: dict[str, object] = {
-                "range": {
-                    "startIndex": base,
-                    "endIndex": offsets[run_end] + len(blocks[run_end].text),
-                },
-                "bulletPreset": (
-                    BULLET_PRESET_DISC if block.kind == "bullet" else BULLET_PRESET_NUMBERED
-                ),
-            }
-            if block.level:
-                bullet["indentLevel"] = block.level
-            requests.append({"createParagraphBullets": bullet})
-            for cursor_index in range(index, run_end + 1):
-                requests.extend(_span_requests(blocks[cursor_index], offsets[cursor_index]))
+            bullets.append(
+                {
+                    "createParagraphBullets": {
+                        "range": {
+                            "startIndex": offsets[index],
+                            "endIndex": offsets[run_end] + utf16_len(_inserted(blocks[run_end])),
+                        },
+                        "bulletPreset": (
+                            BULLET_PRESET_DISC if block.kind == "bullet" else BULLET_PRESET_NUMBERED
+                        ),
+                    }
+                }
+            )
+            for item in range(index, run_end + 1):
+                # Inline styles are applied before the bullets remove the tabs, so
+                # they are anchored after the tabs and move with the text.
+                requests.extend(_span_requests(blocks[item], offsets[item] + blocks[item].level))
             index = run_end + 1
             continue
 
-        requests.extend(_block_requests(block, base))
+        requests.extend(_block_requests(block, offsets[index]))
         index += 1
 
+    requests.extend(reversed(bullets))
     return requests
 
 
@@ -776,7 +820,10 @@ def render_index_doc(
         {"insertText": {"location": {"index": start_index}, "text": text}},
         {
             "createParagraphBullets": {
-                "range": {"startIndex": start_index, "endIndex": start_index + len(text) - 1},
+                "range": {
+                    "startIndex": start_index,
+                    "endIndex": start_index + utf16_len(text) - 1,
+                },
                 "bulletPreset": BULLET_PRESET_NUMBERED,
             }
         },
@@ -797,5 +844,6 @@ __all__ = [
     "render_index_doc",
     "render_plain_text",
     "sanitize_drive_filename",
+    "utf16_len",
     "sanitize_title",
 ]

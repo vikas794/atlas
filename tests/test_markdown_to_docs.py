@@ -305,25 +305,27 @@ def test_contiguous_list_items_share_one_bullets_request() -> None:
     assert len(bullet_requests(requests)) == 1
 
 
-def test_nesting_by_two_spaces_becomes_an_indent_level() -> None:
+def test_nesting_by_two_spaces_becomes_one_leading_tab() -> None:
+    """``createParagraphBullets`` has no ``indentLevel`` field (an unknown field is an
+    HTTP 400 for the whole batch): Docs reads the nesting level from leading tabs."""
     requests = markdown_to_docs("- outer\n  - inner")
 
     bullets = bullet_requests(requests)
-    assert len(bullets) == 2
-    assert "indentLevel" not in bullets[0]
-    assert bullets[1]["indentLevel"] == 1
+    assert len(bullets) == 1  # one list, so nesting and numbering stay together
+    assert all("indentLevel" not in bullet for bullet in bullets)
+    assert inserted_text(requests) == "outer\n\tinner\n"
 
 
 def test_nesting_by_four_spaces_becomes_two_levels() -> None:
     requests = markdown_to_docs("- outer\n    - inner")
 
-    assert bullet_requests(requests)[1]["indentLevel"] == 2
+    assert inserted_text(requests) == "outer\n\t\tinner\n"
 
 
 def test_deep_nesting_is_clamped_to_what_docs_accepts() -> None:
     requests = markdown_to_docs("- outer\n" + " " * 40 + "- inner")
 
-    assert bullet_requests(requests)[1]["indentLevel"] == 8
+    assert inserted_text(requests) == "outer\n" + "\t" * 8 + "inner\n"
 
 
 def test_a_list_interrupted_by_a_paragraph_starts_a_new_bullets_request() -> None:
@@ -386,10 +388,11 @@ def test_inline_italic_emits_italic_over_the_right_range() -> None:
 def test_inline_code_is_monospaced_and_shaded() -> None:
     requests = markdown_to_docs("Call `render()` first")
 
+    # TextStyle has no "shading" field: the highlight is TextStyle.backgroundColor.
     code = [
         style
         for style in text_style_requests(requests)
-        if style["textStyle"].get("shading", {}).get("backgroundColor")
+        if style["textStyle"].get("backgroundColor")
     ]
     assert len(code) == 1
     assert is_monospaced(code[0])
@@ -557,12 +560,20 @@ def test_content_is_inserted_with_exactly_one_request() -> None:
     assert len(of_kind(requests, "insertText")) == 1
 
 
+def assert_styling_ascends_then_bullets_descend(requests: list[Request]) -> None:
+    """Styling never changes lengths, so it ascends; bullet creation removes nesting tabs
+    (shifting later indices), so bullets come last and bottom-up."""
+    styling = [request_index(r) for r in requests if "createParagraphBullets" not in r]
+    bullets = [request_index(r) for r in requests if "createParagraphBullets" in r]
+    assert styling == sorted(styling)
+    assert bullets == sorted(bullets, reverse=True)
+    first_bullet = next((i for i, r in enumerate(requests) if "createParagraphBullets" in r), None)
+    if first_bullet is not None:
+        assert all("createParagraphBullets" in r for r in requests[first_bullet:])
+
+
 def test_every_request_index_is_non_decreasing() -> None:
-    requests = markdown_to_docs(SAMPLE_NOTES)
-
-    indices = [request_index(request) for request in requests]
-
-    assert indices == sorted(indices)
+    assert_styling_ascends_then_bullets_descend(markdown_to_docs(SAMPLE_NOTES))
 
 
 def test_every_request_lands_inside_the_growing_document_extent() -> None:
@@ -629,10 +640,7 @@ def test_render_plain_text_matches_the_inserted_text() -> None:
 def test_a_large_document_stays_monotonic() -> None:
     big = "\n\n".join(f"## Section {n}\n\n- item **one**\n- item two" for n in range(50))
 
-    requests = markdown_to_docs(big)
-    indices = [request_index(request) for request in requests]
-
-    assert indices == sorted(indices)
+    assert_styling_ascends_then_bullets_descend(markdown_to_docs(big))
 
 
 # ---------------------------------------------------------------------------
