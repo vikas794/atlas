@@ -13,6 +13,7 @@ from dotenv import dotenv_values
 from src.config.settings import (
     ENV_ALIASES,
     AtlasSettings,
+    SettingsError,
     load_settings,
     repo_root,
 )
@@ -126,19 +127,37 @@ def test_whitespace_only_values_are_also_unset(monkeypatch: pytest.MonkeyPatch) 
     assert settings.notes_provider == "gemini"
 
 
-def test_numeric_values_are_coerced_and_malformed_ones_are_ignored_with_a_warning(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_numeric_values_are_coerced(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ATLAS_MAX_CONCURRENT_VIDEOS", "4")
     monkeypatch.setenv("ATLAS_BACKOFF_BASE_SECONDS", "0.5")
-    monkeypatch.setenv("ATLAS_MAX_AUTO_RETRIES", "lots")  # not a number
 
-    with caplog.at_level(logging.WARNING):
-        settings = load_settings()
+    settings = load_settings()
 
     assert settings.max_concurrent_videos == 4 and isinstance(settings.max_concurrent_videos, int)
     assert settings.backoff_base_seconds == 0.5
-    assert settings.max_auto_retries == AtlasSettings().max_auto_retries  # kept the default
+
+
+def test_a_malformed_number_fails_startup_naming_the_variable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """It used to be ignored with a warning, silently running with a different value."""
+    monkeypatch.setenv("ATLAS_MAX_AUTO_RETRIES", "lots")
+
+    with pytest.raises(SettingsError) as excinfo:
+        load_settings()
+
+    assert "ATLAS_MAX_AUTO_RETRIES='lots'" in str(excinfo.value)
+
+
+def test_the_runtime_loader_still_only_warns_on_a_malformed_number(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    loader = load_settings().to_loader()
+    monkeypatch.setenv("ATLAS_MAX_AUTO_RETRIES", "lots")
+
+    with caplog.at_level(logging.WARNING):
+        assert loader("max_auto_retries") == AtlasSettings().max_auto_retries
+
     assert "ATLAS_MAX_AUTO_RETRIES" in caplog.text
 
 
@@ -175,7 +194,6 @@ def test_every_key_in_env_example_is_actually_read() -> None:
         | set(ENV_ALIASES)
         | {"ATLAS_DB_PATH"}  # legacy alias of ATLAS_DATABASE_PATH
         | {"GEMINI_API_KEY", "OPENROUTER_API_KEY", "YOUTUBE_API_KEY"}  # secrets, read by name
-        | {"ATLAS_CORS_ORIGINS"}  # read directly by backend/main.py
     )
 
     unknown = [key for key in dotenv_values(repo_root() / ".env.example") if key not in recognised]

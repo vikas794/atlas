@@ -1,16 +1,19 @@
-# Atlas configuration
+# Atlas configuration: every setting that is not a secret. Secrets (API keys) go in .env.
 #
-# THIS FILE MUST STAY FLAT. Every top-level key must be an AtlasSettings dataclass
-# field name (see src/config/settings.py) written in snake_case, e.g. `database_path`.
+# The file is FLAT: every key is an AtlasSettings field name (src/config/settings.py).
+# It is validated at startup: an unknown key, a wrong type or an out-of-range value
+# stops Atlas with a message listing each problem.
 #
-# AtlasSettings.from_dict() drops any key it does not recognise, so a nested layout
-# such as `api: {openai: {model: ...}}` is discarded wholesale and every setting
-# silently falls back to its dataclass default. Nested keys are NOT unpacked.
-#
-# Keys not listed below fall back to the dataclass defaults. Any field can be
-# overridden at runtime with ATLAS_<FIELD_NAME_IN_UPPERCASE>, and the notes/LLM
-# fields also with the unprefixed names documented in .env.example (NOTES_PROVIDER,
-# GEMINI_MODEL, OPENROUTER_MODEL, ...). Empty values count as unset.
+# Relative paths resolve against the repository root. Any key can be overridden for one
+# run with ATLAS_<KEY_IN_UPPERCASE> in the environment or .env (empty values count as
+# unset); the notes keys also accept the short names listed in .env.example.
+
+# --- HTTP server -----------------------------------------------------------------
+host: "127.0.0.1"  # keep local: Atlas has no authentication
+port: 8000
+# Comma-separated browser origins allowed to call the API cross-origin. Leave empty:
+# single-app mode is same-origin and the Vite dev server proxies /api.
+cors_origins: ""
 
 # --- Storage -------------------------------------------------------------------
 database_path: "data/atlas.sqlite3"
@@ -57,5 +60,5 @@ prompts_base_dir: "src/prompts"
 # --- Logging -------------------------------------------------------------------
 log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
 log_format: "%(asctime)s %(levelname)s %(name)s: %(message)s"
-log_file_logging: false
+log_file_logging: true  # rotating file (5 MB, 3 backups), secrets redacted
 log_file: "logs/atlas.log"

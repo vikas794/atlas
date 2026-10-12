@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -16,7 +15,10 @@ from src.transport.http.fastapi.routers import drive_auth, playlists, usage, vid
 
 # Under uvicorn only uvicorn's own loggers are configured; without this, every src.* log line
 # (including all pipeline events) is dropped. Honours log_level / log_file_logging / log_file.
-configure_logging(load_settings())
+# load_settings() validates the configuration and raises SettingsError (a readable list of
+# problems) when it is invalid, so a bad config stops startup here.
+_settings = load_settings()
+configure_logging(_settings)
 
 
 @asynccontextmanager
@@ -42,16 +44,25 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-_cors_origins_env = os.getenv("ATLAS_CORS_ORIGINS", "")
-_cors_origins = [origin.strip() for origin in _cors_origins_env.split(",") if origin.strip()]
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+def install_cors(target: FastAPI, origins: list[str]) -> None:
+    """Allow cross-origin calls only from the configured origins (none by default).
+
+    Single-app mode is same-origin and the Vite dev server proxies /api, so CORS is only for
+    an unusual setup (e.g. the UI served from another port without the proxy).
+    """
+    if not origins:
+        return
+    target.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=["Content-Type", "X-Correlation-ID"],
+    )
+
+
+install_cors(app, _settings.cors_origin_list)
 
 # Add custom middleware
 app.add_middleware(RequestLoggingMiddleware)
