@@ -13,7 +13,11 @@ from pathlib import Path
 
 import pytest
 
-from src.infrastructure.storage import db
+# Tests never append to the developer's real logs/atlas.log (backend.main configures logging
+# at import, and file logging is on by default). Set before anything imports the app.
+os.environ.setdefault("ATLAS_LOG_FILE_LOGGING", "false")
+
+from src.infrastructure.storage import db  # noqa: E402
 
 
 @pytest.fixture

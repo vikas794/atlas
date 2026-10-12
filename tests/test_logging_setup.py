@@ -36,7 +36,7 @@ def stream() -> Iterator[io.StringIO]:
 
 
 def test_src_info_logs_reach_the_configured_stream_with_extras(stream: io.StringIO) -> None:
-    configure_logging(AtlasSettings(log_level="INFO"), stream=stream)
+    configure_logging(AtlasSettings(log_level="INFO", log_file_logging=False), stream=stream)
 
     logging.getLogger("src.application.demo").info(
         "Fetching transcript", extra={"playlist_id": 3, "video_id": 17}
@@ -48,7 +48,7 @@ def test_src_info_logs_reach_the_configured_stream_with_extras(stream: io.String
 
 
 def test_the_log_level_setting_is_honoured(stream: io.StringIO) -> None:
-    configure_logging(AtlasSettings(log_level="WARNING"), stream=stream)
+    configure_logging(AtlasSettings(log_level="WARNING", log_file_logging=False), stream=stream)
 
     logging.getLogger("src.demo").info("quiet")
     logging.getLogger("src.demo").warning("loud")
@@ -57,14 +57,14 @@ def test_the_log_level_setting_is_honoured(stream: io.StringIO) -> None:
 
 
 def test_an_invalid_level_falls_back_to_info(stream: io.StringIO) -> None:
-    configure_logging(AtlasSettings(log_level="BANANA"), stream=stream)
+    configure_logging(AtlasSettings(log_level="BANANA", log_file_logging=False), stream=stream)
 
     assert logging.getLogger().level == logging.INFO
 
 
 def test_configuring_twice_does_not_duplicate_lines(stream: io.StringIO) -> None:
-    configure_logging(AtlasSettings(), stream=stream)
-    configure_logging(AtlasSettings(), stream=stream)
+    configure_logging(AtlasSettings(log_file_logging=False), stream=stream)
+    configure_logging(AtlasSettings(log_file_logging=False), stream=stream)
 
     logging.getLogger("src.demo").info("once")
 
@@ -86,7 +86,7 @@ def test_log_file_logging_writes_a_file(tmp_path: Path, stream: io.StringIO) -> 
 
 
 def test_secrets_are_redacted_from_messages_and_tracebacks(stream: io.StringIO) -> None:
-    configure_logging(AtlasSettings(), stream=stream)
+    configure_logging(AtlasSettings(log_file_logging=False), stream=stream)
     key = "AIzaSyLEAKYLEAKYLEAKY0123456789"
     log = logging.getLogger("src.demo")
 
@@ -112,7 +112,7 @@ def test_values_with_spaces_are_quoted() -> None:
 async def test_every_pipeline_event_carries_playlist_id_and_video_id(
     tmp_path: Path, stream: io.StringIO
 ) -> None:
-    configure_logging(AtlasSettings(log_level="INFO"), stream=stream)
+    configure_logging(AtlasSettings(log_level="INFO", log_file_logging=False), stream=stream)
     db.initialize(tmp_path / "log.sqlite3")
     repo = PlaylistRepository(tmp_path / "log.sqlite3")
     playlist = await repo.create_playlist("PL1", "u")

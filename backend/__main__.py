@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import socket
 import sys
+from dataclasses import replace
 
 
 def port_problem(host: str, port: int) -> str | None:
@@ -75,7 +76,10 @@ def main(argv: list[str] | None = None) -> int:
 
     from src.shared.logging_setup import configure_logging
 
-    configure_logging(settings)
+    # With --reload this process only supervises; the server child configures its own logging
+    # (backend.main). Two processes rotating one log file fails on Windows, so the supervisor
+    # logs to the console only.
+    configure_logging(replace(settings, log_file_logging=False) if args.reload else settings)
     root = repo_root()
     uvicorn.run(
         "backend.main:app",
