@@ -711,3 +711,24 @@ async def test_youtube_api_server_error_is_a_provider_error_not_unavailable(
     with pytest.raises(ProviderError):
         await IngestPlaylistUseCase(repo, provider).ingest(URL)
     assert await repo.count_playlists() == 0
+
+
+async def test_invalid_youtube_key_as_the_live_api_reports_it_is_a_config_error(
+    repo: PlaylistRepository,
+) -> None:
+    """Observed against the real API: a bad key is HTTP 400 reason ``badRequest``."""
+    import httplib2
+    from googleapiclient.errors import HttpError
+
+    from src.domain.exceptions import ConfigurationError
+
+    body = (
+        b'{"error": {"code": 400, "message": "API key not valid. Please pass a valid API key.",'
+        b' "errors": [{"message": "API key not valid. Please pass a valid API key.",'
+        b' "domain": "global", "reason": "badRequest"}], "status": "INVALID_ARGUMENT"}}'
+    )
+    stub = StubYouTube(pages_of(["a"]))
+    stub.error = HttpError(httplib2.Response({"status": "400"}), body, uri="https://x?key=abc")
+    provider, _ = make_provider(stub)
+    with pytest.raises(ConfigurationError, match="YOUTUBE_API_KEY"):
+        await IngestPlaylistUseCase(repo, provider).ingest(URL)

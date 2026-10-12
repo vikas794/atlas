@@ -47,7 +47,12 @@ _PLAYLIST_UNAVAILABLE_REASONS = frozenset(
     {"playlistNotFound", "playlistItemsNotAccessible", "playlistForbidden", "forbidden", "invalid"}
 )
 #: Reasons that mean Atlas' own key is wrong or not enabled for the Data API.
-_KEY_REJECTED_REASONS = frozenset({"keyInvalid", "accessNotConfigured", "ipRefererBlocked"})
+_KEY_REJECTED_REASONS = frozenset(
+    {"keyInvalid", "keyExpired", "accessNotConfigured", "ipRefererBlocked"}
+)
+#: The live API answers a bad key with HTTP 400 reason ``badRequest`` (not ``keyInvalid``),
+#: so the message is what identifies it.
+_KEY_REJECTED_MESSAGES = ("api key not valid", "api key expired")
 _QUOTA_REASONS = frozenset(
     {"quotaExceeded", "rateLimitExceeded", "userRateLimitExceeded", "dailyLimitExceeded"}
 )
@@ -104,7 +109,9 @@ class YouTubePlaylistProvider:
         if isinstance(exc, HttpError):
             status = int(getattr(exc.resp, "status", 0) or 0)
             reasons = _error_reasons(exc)
-            if reasons & _KEY_REJECTED_REASONS:
+            if reasons & _KEY_REJECTED_REASONS or any(
+                message in detail.lower() for message in _KEY_REJECTED_MESSAGES
+            ):
                 return ConfigurationError(
                     "The YouTube API rejected the configured key (YOUTUBE_API_KEY). Check that it "
                     "is valid and that the YouTube Data API v3 is enabled for its project."
