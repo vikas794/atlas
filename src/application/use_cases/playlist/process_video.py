@@ -209,7 +209,11 @@ class ProcessVideoUseCase:
                 artifact_path=result.artifact_path or None,
                 token=token if source_pk == video_pk else None,
             )
-            await self.repo.update_stage(video_pk, Stage.TRANSCRIPT_READY, token=token)
+            # The transcript phase is done: notes generation gets its own full retry
+            # budget instead of inheriting what YouTube throttling used up.
+            await self.repo.update_stage(
+                video_pk, Stage.TRANSCRIPT_READY, token=token, reset_retries=True
+            )
             stage = Stage.TRANSCRIPT_READY
             transcript_text = result.cleaned_text
 
@@ -277,7 +281,7 @@ class ProcessVideoUseCase:
                     next_retry_at=next_retry_at,
                     token=token,
                 )
-                await self.repo.increment_retry(video_pk, next_retry_at=next_retry_at)
+                await self.repo.increment_retry(video_pk, next_retry_at=next_retry_at, token=token)
                 logger.info(
                     "Scheduled automatic retry %d/%d in %.1fs",
                     next_attempt,

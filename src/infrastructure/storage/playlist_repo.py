@@ -602,6 +602,7 @@ class PlaylistRepository:
         failure_reason: str | None = None,
         next_retry_at: str | None = None,
         token: int | None = None,
+        reset_retries: bool = False,
     ) -> Video | None:
         """Persist a stage move (PRD section 15: before *and* after the side effect).
 
@@ -612,6 +613,8 @@ class PlaylistRepository:
             token: The video's ``run_token`` when the caller started. If the video
                 was reset, retried or deleted since, nothing is written and
                 :class:`~src.domain.exceptions.StaleRunError` is raised.
+            reset_retries: Also reset ``retry_count`` to 0 -- a phase completed, so the
+                next phase starts with the full automatic-retry budget.
         """
         return await asyncio.to_thread(
             self._update_stage,
@@ -622,6 +625,7 @@ class PlaylistRepository:
             failure_reason,
             next_retry_at,
             token,
+            reset_retries,
         )
 
     def _update_stage(
@@ -633,10 +637,13 @@ class PlaylistRepository:
         failure_reason: str | None,
         next_retry_at: str | None,
         token: int | None,
+        reset_retries: bool = False,
     ) -> Video | None:
         sql = (
             "UPDATE videos SET stage = ?, failure_type = ?, failure_kind = ?,"
-            " failure_reason = ?, next_retry_at = ?, updated_at = ? WHERE id = ?"
+            " failure_reason = ?, next_retry_at = ?,"
+            + (" retry_count = 0," if reset_retries else "")
+            + " updated_at = ? WHERE id = ?"
         )
         params: list[object] = [
             Stage(stage).value,
@@ -670,12 +677,19 @@ class PlaylistRepository:
                 (now_iso(), video_pk),
             )
 
-    async def increment_retry(self, video_pk: int, *, next_retry_at: str | None = None) -> int:
-        """Bump ``retry_count``, schedule the next attempt, return the new count."""
-        return await asyncio.to_thread(self._increment_retry, video_pk, next_retry_at)
+    async def increment_retry(
+        self, video_pk: int, *, next_retry_at: str | None = None, token: int | None = None
+    ) -> int:
+        """Bump ``retry_count``, schedule the next attempt, return the new count.
 
-    def _increment_retry(self, video_pk: int, next_retry_at: str | None) -> int:
+        ``token`` is the stale-run guard described on :meth:`update_stage`: a manual
+        retry or reprocess that happened meanwhile must not get a stale schedule.
+        """
+        return await asyncio.to_thread(self._increment_retry, video_pk, next_retry_at, token)
+
+    def _increment_retry(self, video_pk: int, next_retry_at: str | None, token: int | None) -> int:
         with self._tx() as conn:
+            self._check_token(conn, video_pk, token)
             conn.execute(
                 "UPDATE videos SET retry_count = retry_count + 1, next_retry_at = ?,"
                 " updated_at = ? WHERE id = ?",
