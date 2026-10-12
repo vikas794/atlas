@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.services.diagnostics import diagnostics_report
 from backend.spa import SpaFallback, default_dist_dir
 from src.config import load_settings
 from src.shared.logging_setup import configure_logging
@@ -12,6 +14,7 @@ from src.transport.http.fastapi.dependencies import get_usage_ledger, get_worker
 from src.transport.http.fastapi.errors import register_error_handlers
 from src.transport.http.fastapi.middleware import RequestLoggingMiddleware
 from src.transport.http.fastapi.routers import drive_auth, playlists, usage, videos
+from src.transport.http.fastapi.schemas.diagnostics import DiagnosticsResponse
 
 # Under uvicorn only uvicorn's own loggers are configured; without this, every src.* log line
 # (including all pipeline events) is dropped. Honours log_level / log_file_logging / log_file.
@@ -79,7 +82,16 @@ app.include_router(videos.router)
 
 @app.get("/api/health")
 def health_check() -> dict[str, str]:
+    """Cheap liveness probe: the process is up. Readiness details live in /api/diagnostics."""
     return {"status": "ok", "service": "atlas-api"}
+
+
+@app.get("/api/diagnostics", response_model=DiagnosticsResponse)
+async def diagnostics() -> DiagnosticsResponse:
+    """First-run health: config, database, keys (set / not set), Drive files, frontend build,
+    plus the last 50 warnings/errors from the log (redacted). Never returns secret values."""
+    report = await asyncio.to_thread(diagnostics_report, default_dist_dir())
+    return DiagnosticsResponse.model_validate(report)
 
 
 # Single-app mode: when no API route matches, serve the built frontend (frontend/dist) with

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import os
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, UploadFile
 
 from src.infrastructure.google.drive import GoogleDriveExporter
+from src.shared.oauth_client import client_secrets_problem
 from src.shared.text import atomic_write
 from src.transport.http.fastapi.dependencies import get_drive_exporter
 from src.transport.http.fastapi.errors import HTTPError
@@ -41,30 +41,6 @@ def _invalid_credentials(message: str) -> HTTPError:
     return HTTPError(status_code=400, detail=message, error_code="DRIVE_INVALID_CREDENTIALS_FILE")
 
 
-def parse_client_secrets(raw: bytes) -> dict:
-    """Validate an uploaded OAuth client file; return the parsed JSON or raise ``HTTPError``.
-
-    Google's "Desktop app" download is ``{"installed": {...}}`` (``{"web": {...}}`` for a web
-    client); both must carry ``client_id`` and ``client_secret``.
-    """
-    try:
-        data = json.loads(raw.decode("utf-8-sig"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        raise _invalid_credentials("The file is not valid JSON.") from None
-    section = None
-    if isinstance(data, dict):
-        section = data.get("installed") or data.get("web")
-    if not isinstance(section, dict):
-        raise _invalid_credentials(
-            "This is not a Google OAuth client file: expected an 'installed' (Desktop app) "
-            "or 'web' section. Download it from Google Cloud > APIs & Services > Credentials."
-        )
-    missing = [key for key in ("client_id", "client_secret") if not section.get(key)]
-    if missing:
-        raise _invalid_credentials(f"The OAuth client file is missing: {', '.join(missing)}.")
-    return data
-
-
 @router.post("/credentials", response_model=DriveActionResponse)
 async def upload_credentials(
     file: Annotated[UploadFile, File(...)],
@@ -87,7 +63,9 @@ async def upload_credentials(
             "a Google OAuth client file is much smaller.",
             error_code="DRIVE_CREDENTIALS_TOO_LARGE",
         )
-    parse_client_secrets(raw)
+    problem = client_secrets_problem(raw)
+    if problem:
+        raise _invalid_credentials(problem)
 
     target = exporter.creds_path
     await asyncio.to_thread(atomic_write, target, raw)
