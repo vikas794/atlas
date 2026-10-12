@@ -1,5 +1,6 @@
 import type {
   ActionResponse,
+  DiagnosticsResponse,
   DriveActionResponse,
   DriveStatusResponse,
   Playlist,
@@ -187,6 +188,13 @@ export function authenticateDrive() {
   return request<DriveActionResponse>('/api/drive/auth', {
     method: 'POST',
   })
+}
+
+/* ------------------------------------------------------------- Diagnostics */
+
+/** Readiness checks plus the most recent backend errors (Diagnostics screen). */
+export function getDiagnostics() {
+  return request<DiagnosticsResponse>('/api/diagnostics')
 }
 
 /* ------------------------------------------------------------------ Usage */

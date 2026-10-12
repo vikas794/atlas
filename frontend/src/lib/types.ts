@@ -222,3 +222,29 @@ export interface UsageAggregateResponse {
   cache_stats: UsageCacheAggregate | null
   time_range: UsageTimeRange | null
 }
+
+/* ------------------------------------------------------------- Diagnostics */
+
+export type DiagnosticStatus = 'ok' | 'warning' | 'error'
+
+/** One readiness check (configuration, database, worker, Drive...). */
+export interface DiagnosticCheck {
+  id: string
+  label: string
+  status: DiagnosticStatus
+  message: string
+}
+
+/** A recent warning/error log record kept by the backend. */
+export interface DiagnosticLogEntry {
+  timestamp: string
+  level: string
+  logger: string
+  message: string
+}
+
+/** GET /api/diagnostics */
+export interface DiagnosticsResponse {
+  checks: DiagnosticCheck[]
+  recent_errors: DiagnosticLogEntry[]
+}

@@ -43,6 +43,13 @@ export const routes: RouteObject[] = [
               Component: (await import('./features/settings/settings-screen')).SettingsScreen,
             }),
           },
+          {
+            path: '/diagnostics',
+            lazy: async () => ({
+              Component: (await import('./features/diagnostics/diagnostics-screen'))
+                .DiagnosticsScreen,
+            }),
+          },
           { path: '*', element: <NotFound /> },
         ],
       },

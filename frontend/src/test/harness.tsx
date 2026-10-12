@@ -13,6 +13,7 @@ import '../features/playlists/playlists-home'
 import '../features/playlists/playlist-detail'
 import '../features/playlists/review-screen'
 import '../features/settings/settings-screen'
+import '../features/diagnostics/diagnostics-screen'
 
 /* ------------------------------------------------------------------ fetch mock */
 
