@@ -11,6 +11,7 @@ Two layers are tested on purpose:
 from __future__ import annotations
 
 import asyncio
+import re
 import threading
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
@@ -39,6 +40,7 @@ from src.infrastructure.google.publisher import GoogleDrivePublisher
 from src.infrastructure.storage import db
 from src.infrastructure.storage.playlist_repo import PlaylistRepository
 from src.shared.text import sha256_text
+from tests.docs_api_schema import validate_requests
 
 # --------------------------------------------------------------------------- fixtures
 
@@ -605,6 +607,11 @@ class StubGoogle:
         #: (kind, predicate over the call kwargs, queue of errors) -- fail only matching calls
         self.conditional: list[tuple[str, Callable[[dict[str, Any]], bool], list[Exception]]] = []
         self.thread_ids: set[int] = set()
+        #: kind -> errors raised *after* the call took effect (the response was lost)
+        self.lost_responses: dict[str, list[Exception]] = {}
+        self.trashed: set[str] = set()  # file ids in the Drive trash
+        self.deleted: set[str] = set()  # file ids permanently deleted (404)
+        self.calls: list[str] = []  # every executed call kind, in order
 
     # resources
     def files(self) -> Any:
@@ -615,6 +622,8 @@ class StubGoogle:
             {
                 "create": lambda _s, **kw: _Call(stub, "files.create", kw),
                 "update": lambda _s, **kw: _Call(stub, "files.update", kw),
+                "list": lambda _s, **kw: _Call(stub, "files.list", kw),
+                "get": lambda _s, **kw: _Call(stub, "files.get", kw),
             },
         )()
 
@@ -632,6 +641,27 @@ class StubGoogle:
     def fail(self, kind: str, *errors: Exception) -> None:
         self.failures.setdefault(kind, []).extend(errors)
 
+    def lose_response(self, kind: str, *errors: Exception) -> None:
+        """The next ``kind`` calls succeed in Drive but the client sees ``errors``."""
+        self.lost_responses.setdefault(kind, []).extend(errors)
+
+    def live(self) -> list[dict[str, Any]]:
+        """Created files that are neither trashed nor deleted."""
+        return [c for c in self.created if c["id"] not in self.trashed | self.deleted]
+
+    def _list(self, q: str) -> dict[str, Any]:
+        parents = re.findall(r"'([^']+)' in parents", q)
+        mime = re.search(r"mimeType = '([^']+)'", q)
+        props = dict(re.findall(r"key='([^']*)' and value='([^']*)'", q))
+        hits = [
+            c
+            for c in self.live()
+            if (not parents or parents[0] in c.get("parents", []))
+            and (not mime or c["mimeType"] == mime.group(1))
+            and all(c.get("appProperties", {}).get(k) == v for k, v in props.items())
+        ]
+        return {"files": [{"id": c["id"]} for c in hits]}
+
     def fail_if(
         self, kind: str, predicate: Callable[[dict[str, Any]], bool], *errors: Exception
     ) -> list[Exception]:
@@ -648,29 +678,45 @@ class StubGoogle:
             queue = self.failures.get(kind)
             if queue:
                 raise queue.pop(0)
-            if kind == "files.create":
-                new_id = f"id{self.next_id}"
-                self.next_id += 1
-                self.created.append({"id": new_id, **kw["body"]})
-                self.end_index[new_id] = 2
-                return {"id": new_id}
-            if kind == "files.update":
-                self.updates.append({"fileId": kw["fileId"], **kw["body"]})
-                return {}
-            if kind == "documents.get":
-                end = self.end_index.get(kw["documentId"], 2)
-                return {"body": {"content": [{"endIndex": end}]}}
-            if kind == "documents.batchUpdate":
-                doc = kw["documentId"]
-                requests = kw["body"]["requests"]
-                self.batches.append((doc, requests))
-                for request in requests:
-                    if "insertText" in request:
-                        self.end_index[doc] += len(request["insertText"]["text"])
-                    if "deleteContentRange" in request:
-                        rng = request["deleteContentRange"]["range"]
-                        self.end_index[doc] -= rng["endIndex"] - rng["startIndex"]
-                return {}
+            self.calls.append(kind)
+            result = self._apply(kind, kw)
+            lost = self.lost_responses.get(kind)
+            if lost:
+                raise lost.pop(0)
+            return result
+
+    def _apply(self, kind: str, kw: dict[str, Any]) -> Any:
+        target = kw.get("fileId") or kw.get("documentId")
+        if target is not None and target in self.deleted:
+            raise http_error(404, "notFound")
+        if kind == "files.list":
+            return self._list(kw["q"])
+        if kind == "files.get":
+            return {"id": target, "trashed": target in self.trashed}
+        if kind == "files.create":
+            new_id = f"id{self.next_id}"
+            self.next_id += 1
+            self.created.append({"id": new_id, **kw["body"]})
+            self.end_index[new_id] = 2
+            return {"id": new_id}
+        if kind == "files.update":
+            self.updates.append({"fileId": kw["fileId"], **kw["body"]})
+            return {}
+        if kind == "documents.get":
+            end = self.end_index.get(kw["documentId"], 2)
+            return {"body": {"content": [{"endIndex": end}]}}
+        if kind == "documents.batchUpdate":
+            doc = kw["documentId"]
+            requests = kw["body"]["requests"]
+            validate_requests(requests)  # the real Docs API rejects unknown fields
+            self.batches.append((doc, requests))
+            for request in requests:
+                if "insertText" in request:
+                    self.end_index[doc] += len(request["insertText"]["text"])
+                if "deleteContentRange" in request:
+                    rng = request["deleteContentRange"]["range"]
+                    self.end_index[doc] -= rng["endIndex"] - rng["startIndex"]
+            return {}
         raise AssertionError(kind)
 
     # helpers for assertions

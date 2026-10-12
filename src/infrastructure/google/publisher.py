@@ -27,8 +27,10 @@ from typing import Any
 import httplib2
 from googleapiclient.errors import HttpError
 
+from google.auth.exceptions import RefreshError, TransportError
 from src.domain.interfaces.drive_publisher import (
     DriveAuthorizationRequired,
+    DriveFolderMissing,
     DrivePublisherPort,
     PublishEntry,
     PublishProgress,
@@ -44,8 +46,12 @@ from src.domain.services.doc_naming import (
 )
 from src.domain.services.markdown_to_docs import markdown_to_docs, render_index_doc
 from src.infrastructure.google.drive import (
+    DOC_MIME_TYPE,
+    FILE_OK,
+    FOLDER_MIME_TYPE,
     GoogleDriveAuthorizationRequired,
     GoogleDriveExporter,
+    is_permanent_refresh_error,
 )
 from src.shared.redaction import redact_text
 
@@ -73,8 +79,9 @@ def is_transient_http_error(exc: HttpError) -> bool:
     return status == 403 and bool(_http_reasons(exc) & _RATE_LIMIT_REASONS)
 
 
-#: Network-level failures: connection resets, timeouts, TLS errors, DNS (httplib2).
-_NETWORK_ERRORS = (OSError, httplib2.HttpLib2Error)
+#: Network-level failures: connection resets, timeouts, TLS errors, DNS (httplib2), and a
+#: token refresh that could not reach Google (google-auth ``TransportError``).
+_NETWORK_ERRORS = (OSError, httplib2.HttpLib2Error, TransportError)
 
 
 class _NoProgress:
@@ -112,11 +119,21 @@ class GoogleDrivePublisher(DrivePublisherPort):
         self.backoff_cap = backoff_cap
 
     async def ensure_authorized(self) -> None:
-        """Fail fast (no Drive call) unless a usable Google token exists."""
+        """Fail fast (no Drive call) unless a usable Google token exists.
+
+        A token that needs refreshing is refreshed here; if Google cannot be reached
+        right now, the publish is still accepted -- the background job retries the
+        refresh with backoff like any other transient Drive failure.
+        """
         try:
             await asyncio.to_thread(self.exporter.ensure_authorized)
         except GoogleDriveAuthorizationRequired as exc:
             raise DriveAuthorizationRequired(str(exc)) from exc
+        except (RefreshError, *_NETWORK_ERRORS) as exc:
+            logger.warning(
+                "Could not refresh the Google token now (%s); the publish job will retry",
+                type(exc).__name__,
+            )
 
     async def _retry_call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Run a blocking Google API call in a thread, retrying transient failures."""
@@ -126,6 +143,21 @@ class GoogleDrivePublisher(DrivePublisherPort):
                 return await asyncio.to_thread(func, *args, **kwargs)
             except GoogleDriveAuthorizationRequired as exc:
                 raise DriveAuthorizationRequired(str(exc)) from exc
+            except RefreshError as exc:
+                # Raised mid-call when the access token expires and its refresh fails.
+                if is_permanent_refresh_error(exc):
+                    # invalid_grant: revoked/expired consent. Retrying cannot help.
+                    raise DriveAuthorizationRequired(
+                        str(self.exporter.mark_token_revoked(exc))
+                    ) from None
+                if attempt <= self.max_retries:
+                    await self._backoff(attempt, "token refresh")
+                    attempt += 1
+                    continue
+                raise PipelineError(
+                    failure_type=FailureType.DRIVE_ERROR,
+                    reason=f"Google token refresh kept failing: {redact_text(str(exc))}",
+                ) from None
             except HttpError as exc:
                 status_code = int(getattr(exc.resp, "status", 500) or 500)
                 if is_transient_http_error(exc) and attempt <= self.max_retries:
@@ -156,6 +188,35 @@ class GoogleDrivePublisher(DrivePublisherPort):
                     reason=f"Google Drive error: {redact_text(str(exc))}",
                 ) from None
 
+    async def _create_once(
+        self,
+        create: Callable[[], str],
+        find: Callable[[], str | None],
+        *,
+        find_first: bool,
+    ) -> str:
+        """Create a Drive object at most once, even across ambiguous failures.
+
+        A create can succeed on Google's side while its response is lost (timeout,
+        connection reset, 5xx after commit). Retrying it blindly would leave a duplicate
+        Doc or folder in Drive, so every *retry* first looks for the object by its private
+        ``appProperties`` tag and adopts it. With ``find_first`` the very first attempt
+        looks too, which also covers a crash between Drive creating the object and the
+        database storing its id.
+        """
+        state = {"attempted": False}
+
+        def attempt() -> str:
+            if find_first or state["attempted"]:
+                found = find()
+                if found:
+                    logger.info("Adopted an existing Drive object (id=%s) instead of re-creating it", found)
+                    return found
+            state["attempted"] = True
+            return create()
+
+        return await self._retry_call(attempt)
+
     async def _backoff(self, attempt: int, what: str) -> None:
         delay = compute_delay(attempt, self.backoff_base, self.backoff_cap)
         logger.warning(
@@ -184,11 +245,24 @@ class GoogleDrivePublisher(DrivePublisherPort):
         sink: PublishProgress = progress or _NoProgress()
         ctx = {"playlist_id": playlist_pk}
 
-        # 1. Folder: create once, persist its id right away.
+        # 1. Folder: create once, persist its id right away. A stored folder that the user
+        # deleted or trashed in Drive is reported, so the caller can start a fresh one
+        # instead of failing every publish with a 404 (or writing Docs into the trash).
         folder_id = existing_folder_id
+        if folder_id:
+            state = await self._retry_call(self.exporter.file_state, folder_id)
+            if state != FILE_OK:
+                raise DriveFolderMissing(folder_id, state)
         if not folder_id:
             folder_name = playlist_folder_name(playlist_title)
-            folder_id = await self._retry_call(self.exporter.create_folder, folder_name)
+            folder_tag = {"atlasKind": "playlist-folder", "atlasPlaylist": str(playlist_pk)}
+            # Only retries search: a first-time search could adopt the folder of an older,
+            # deleted playlist that happened to have the same database id.
+            folder_id = await self._create_once(
+                lambda: self.exporter.create_folder(folder_name, folder_tag),
+                lambda: self.exporter.find_tagged_file(folder_tag, mime_type=FOLDER_MIME_TYPE),
+                find_first=False,
+            )
             await sink.folder_created(folder_id)
             logger.info("Created Drive folder (id=%s)", folder_id, extra=ctx)
 
@@ -196,8 +270,13 @@ class GoogleDrivePublisher(DrivePublisherPort):
         index_doc_id = existing_index_doc_id
         idx_name = index_doc_name(playlist_title)
         if not index_doc_id:
-            index_doc_id = await self._retry_call(
-                self.exporter.create_empty_doc, idx_name, folder_id
+            index_tag = {"atlasKind": "index", "atlasPlaylist": str(playlist_pk)}
+            index_doc_id = await self._create_once(
+                lambda: self.exporter.create_empty_doc(idx_name, folder_id, index_tag),
+                lambda: self.exporter.find_tagged_file(
+                    index_tag, mime_type=DOC_MIME_TYPE, parent_id=folder_id
+                ),
+                find_first=True,
             )
             await sink.index_doc_created(index_doc_id)
             update_index = True
@@ -222,19 +301,33 @@ class GoogleDrivePublisher(DrivePublisherPort):
             name = doc_name(entry.position, entry.title, width=pad_width)
             vctx = {**ctx, "video_id": entry.video_pk}
 
-            if entry.rename_only and entry.existing_doc_id:
-                await self._retry_call(self.exporter.rename_doc, entry.existing_doc_id, name)
-                doc_ids[entry.video_pk] = entry.existing_doc_id
+            existing_doc_id = entry.existing_doc_id
+            if existing_doc_id:
+                # A Doc the user deleted or trashed in Drive is re-created (and its new
+                # id stored) rather than failing every publish or editing a trashed Doc.
+                state = await self._retry_call(self.exporter.file_state, existing_doc_id)
+                if state != FILE_OK:
+                    logger.warning(
+                        "Stored Doc %s is %s in Drive; creating a new one",
+                        existing_doc_id,
+                        state,
+                        extra=vctx,
+                    )
+                    existing_doc_id = None
+
+            if entry.rename_only and existing_doc_id:
+                await self._retry_call(self.exporter.rename_doc, existing_doc_id, name)
+                doc_ids[entry.video_pk] = existing_doc_id
                 updated_count += 1
-                logger.info("Renamed Doc %s to '%s'", entry.existing_doc_id, name, extra=vctx)
+                logger.info("Renamed Doc %s to '%s'", existing_doc_id, name, extra=vctx)
                 continue
 
             markdown = render_doc_markdown(
                 entry.position, entry.title, entry.markdown, width=pad_width
             )
-            if entry.existing_doc_id:
+            if existing_doc_id:
                 # Update the existing Doc in place (a retried or resumed publish lands here).
-                doc_id = entry.existing_doc_id
+                doc_id = existing_doc_id
                 await self._retry_call(
                     self.exporter.replace_doc_body,
                     doc_id,
@@ -247,13 +340,26 @@ class GoogleDrivePublisher(DrivePublisherPort):
             else:
                 # Create, persist the id, THEN format: a failure while formatting leaves a
                 # Doc whose id is already stored, so the retry updates it instead of
-                # creating a duplicate.
-                doc_id = await self._retry_call(self.exporter.create_empty_doc, name, folder_id)
+                # creating a duplicate. A Doc created earlier whose id never reached the
+                # database (lost response, crash) is found by its tag and adopted.
+                doc_tag = {"atlasKind": "video", "atlasVideo": str(entry.video_pk)}
+                doc_id = await self._create_once(
+                    lambda name=name, tag=doc_tag: self.exporter.create_empty_doc(
+                        name, folder_id, tag
+                    ),
+                    lambda tag=doc_tag: self.exporter.find_tagged_file(
+                        tag, mime_type=DOC_MIME_TYPE, parent_id=folder_id
+                    ),
+                    find_first=True,
+                )
                 await sink.doc_created(entry.video_pk, doc_id)
+                # Written as a full-body replace (read the end index, clear, insert), not a
+                # bare insert: if a write succeeds but its response is lost, the retry
+                # rewrites the body instead of inserting the notes a second time.
                 await self._retry_call(
-                    self.exporter.apply_requests,
+                    self.exporter.replace_doc_body,
                     doc_id,
-                    markdown_to_docs(markdown, start_index=1),
+                    lambda start, md=markdown: markdown_to_docs(md, start_index=start),
                 )
                 created_count += 1
                 created = True

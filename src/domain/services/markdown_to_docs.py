@@ -45,8 +45,10 @@ The module sidesteps the problem instead of simulating it:
    is a pure arithmetic offset into it — no guessing, no re-walking.
 3. Every subsequent request is a *styling* request. Styling never changes a
    length, so all indices stay valid for the remainder of the batch.
-4. Requests are emitted in ascending index order, with the insertion first
-   because it sits at ``start_index``, the lowest index in the document.
+4. Styling requests are emitted in ascending index order after the insertion;
+   ``createParagraphBullets`` requests come last, bottom-up, because they remove
+   the leading nesting tabs and so shift every later index. Indices are UTF-16
+   code units (:func:`utf16_len`), not Python characters.
 
 :func:`render_plain_text` exposes the exact string that gets inserted so a
 caller — or a test — can recompute the growing document extent independently.
@@ -76,8 +78,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 #: Index at which generated content is inserted. Matches Google's own
-#: "insert at 1 into an empty document" convention and the index already used
-#: by ``GoogleDriveExporter.create_doc_in_folder``.
+#: "insert at 1 into an empty document" convention and the index
+#: ``GoogleDriveExporter.replace_doc_body`` rebuilds the body at.
 DEFAULT_START_INDEX = 1
 
 #: Docs' own named heading styles. Levels deeper than 6 reuse ``HEADING_6``
@@ -127,7 +129,7 @@ CODE_BORDER_PADDING_PT = 8.0
 BULLET_PRESET_DISC = "BULLET_DISC_CIRCLE_SQUARE"
 BULLET_PRESET_NUMBERED = "NUMBERED_DECIMAL_ALPHA_ROMAN"
 
-#: Docs accepts ``indentLevel`` 0-8; deeper indentation is clamped anyway.
+#: Docs supports nesting levels 0-8 (one leading tab each); deeper nesting is clamped.
 MAX_INDENT_LEVEL = 8
 
 #: Label for a fence with no language tag — the tag is optional, never assumed.
@@ -163,13 +165,12 @@ def _pt(magnitude: float) -> dict[str, object]:
 
 def _code_border() -> dict[str, object]:
     """A 1px solid ``--border`` box edge with padding inside it."""
-    padding = {
-        side: _pt(CODE_BORDER_PADDING_PT) for side in ("top", "bottom", "left", "right")
-    }
+    # ``ParagraphBorder.padding`` is a single ``Dimension`` (the padding on the side the
+    # border is drawn), not a per-side map; a map is rejected by the Docs API with HTTP 400.
     return {
         "color": _optional_color(CODE_BORDER_HEX),
         "width": _pt(CODE_BORDER_WIDTH_PT),
-        "padding": padding,
+        "padding": _pt(CODE_BORDER_PADDING_PT),
         "dashStyle": "SOLID",
     }
 
@@ -211,7 +212,9 @@ class Block:
 # Markdown parsing
 # ---------------------------------------------------------------------------
 
-_FENCE_RE = re.compile(r"^\s{0,3}(?P<fence>`{3,}|~{3,})\s*(?P<lang>\S*)\s*$")
+#: Any indentation is accepted (a fence nested under a list item is usually indented
+#: by 2-4 spaces) and an info string after the language (```java title="x") is ignored.
+_FENCE_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<fence>`{3,}|~{3,})[ \t]*(?P<lang>[^\s`]*)[^`]*$")
 _HEADING_RE = re.compile(r"^\s{0,3}(?P<hashes>#{1,})(?:\s+|$)(?P<text>.*)$")
 _HR_RE = re.compile(r"^\s{0,3}(?P<char>[-*_])(?:\s*\1){2,}\s*$")
 _BULLET_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<marker>[-*+])\s+(?P<text>\S.*)$")
@@ -220,14 +223,29 @@ _QUOTE_RE = re.compile(r"^\s{0,3}>\s?(?P<text>.*)$")
 _TABLE_DELIM_RE = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*\|[\s:|-]*$")
 _IMAGE_RE = re.compile(r"!\[(?P<alt>[^\]]*)\]\([^)]*\)")
 _LINK_RE = re.compile(r"\[(?P<text>[^\]]*)\]\((?P<url>[^)]*)\)")
-_HTML_RE = re.compile(r"<[^<>]{0,400}>")
+#: Only real HTML tags are stripped. A generic ``<[^<>]>`` pattern ate Java/C++/TS
+#: generics (``List<String>``, ``Map<K, V>``) -- the bread and butter of the notes.
+_HTML_RE = re.compile(
+    r"</?(?:a|abbr|b|br|center|code|del|details|div|em|font|h[1-6]|hr|i|img|ins|kbd|li|"
+    r"mark|ol|p|pre|s|small|span|strong|sub|summary|sup|table|tbody|td|th|thead|tr|u|ul)"
+    r"(?:\s[^<>]{0,400})?/?>",
+    re.IGNORECASE,
+)
+#: Inline code spans, which are literal: nothing inside them is ever stripped.
+_CODE_SPAN_RE = re.compile(r"(`+)(?:.+?)\1", re.DOTALL)
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _WHITESPACE_RE = re.compile(r"[ \t]+")
 
+#: Emphasis follows CommonMark's flanking rules closely enough for notes: the opening
+#: marker must be followed, and the closing marker preceded, by a non-space (so
+#: ``2 * 3 * 4`` stays arithmetic), and ``_`` never opens or closes inside a word (so
+#: ``snake_case_name`` keeps its underscores).
 _INLINE_RE = re.compile(
     r"(?P<code>`+)(?P<code_text>.+?)(?P=code)"
-    r"|(?P<strong>\*\*|__)(?P<strong_text>.+?)(?P=strong)"
-    r"|(?P<em>[*_])(?P<em_text>[^*_\n]+?)(?P=em)",
+    r"|\*\*(?=\S)(?P<strong_s>.+?)(?<=\S)\*\*"
+    r"|(?<!\w)__(?=\S)(?P<strong_u>.+?)(?<=\S)__(?!\w)"
+    r"|\*(?=[^\s*])(?P<em_s>[^*\n]+?)(?<=[^\s*])\*"
+    r"|(?<!\w)_(?=[^\s_])(?P<em_u>[^_\n]+?)(?<=[^\s_])_(?!\w)",
     re.DOTALL,
 )
 
@@ -235,7 +253,7 @@ _MAX_INLINE_DEPTH = 4
 
 
 def _indent_level(indent: str) -> int:
-    """Turn leading whitespace into a Docs ``indentLevel`` (2 spaces == 1 level)."""
+    """Turn leading whitespace into a list nesting level (2 spaces == 1 level)."""
     spaces = len(indent.expandtabs(SPACES_PER_INDENT_LEVEL))
     return min(spaces // SPACES_PER_INDENT_LEVEL, MAX_INDENT_LEVEL)
 
@@ -260,9 +278,20 @@ def _strip_noise(text: str) -> str:
         logger.debug("markdown: dropped raw HTML tag %r", match.group(0))
         return " "
 
-    text = _IMAGE_RE.sub(_image, text)
-    text = _LINK_RE.sub(_link, text)
-    return _HTML_RE.sub(_html, text)
+    def _clean(segment: str) -> str:
+        segment = _IMAGE_RE.sub(_image, segment)
+        segment = _LINK_RE.sub(_link, segment)
+        return _HTML_RE.sub(_html, segment)
+
+    # Code spans are literal, so only the text between them is cleaned.
+    pieces: list[str] = []
+    cursor = 0
+    for match in _CODE_SPAN_RE.finditer(text):
+        pieces.append(_clean(text[cursor : match.start()]))
+        pieces.append(match.group(0))
+        cursor = match.end()
+    pieces.append(_clean(text[cursor:]))
+    return "".join(pieces)
 
 
 def _parse_inline(text: str, *, depth: int = 0) -> tuple[str, tuple[InlineSpan, ...]]:
@@ -291,10 +320,10 @@ def _parse_inline(text: str, *, depth: int = 0) -> tuple[str, tuple[InlineSpan, 
 
         if match.group("code") is not None:
             inner, kind = match.group("code_text"), "code"
-        elif match.group("strong") is not None:
-            inner, kind = match.group("strong_text"), "bold"
+        elif match.group("strong_s") is not None or match.group("strong_u") is not None:
+            inner, kind = match.group("strong_s") or match.group("strong_u"), "bold"
         else:
-            inner, kind = match.group("em_text"), "italic"
+            inner, kind = match.group("em_s") or match.group("em_u"), "italic"
 
         inner = inner or ""
         start = length
@@ -386,13 +415,25 @@ def _code_label(language: str) -> str:
     return label[:24] or NEUTRAL_CODE_LABEL
 
 
+def _append_table_row(blocks: list[Block], line: str, *, header: bool) -> None:
+    """Append one Markdown table row as a paragraph: cells joined by `` | ``."""
+    cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+    block = _inline_block("paragraph", " | ".join(cell for cell in cells))
+    if block is None:
+        return
+    if header:
+        block = replace(block, spans=(InlineSpan(0, len(block.text), bold=True),))
+    blocks.append(block)
+
+
 def extract_blocks(markdown: str) -> list[Block]:
     """Parse Markdown into :class:`Block` objects, one per Docs paragraph.
 
     Lazy continuation lines (two non-blank lines in a row) join into a single
     paragraph, as CommonMark specifies. Constructs the notes prompt explicitly
-    rules out — tables, horizontal rules, images, raw HTML — are skipped with a
-    debug log rather than rendered as noise.
+    rules out are degraded rather than rendered as noise: horizontal rules are
+    skipped, images keep their alt text, known HTML tags are stripped, and table
+    rows become plain paragraphs (cells joined by `` | ``) so no content is lost.
     """
     if not isinstance(markdown, str) or not markdown.strip():
         return []
@@ -402,6 +443,7 @@ def extract_blocks(markdown: str) -> list[Block]:
     previous_had_pipe = False
     fence = ""
     fence_lang = ""
+    fence_indent = 0
     fence_lines: list[str] = []
 
     def flush_pending() -> None:
@@ -443,7 +485,14 @@ def extract_blocks(markdown: str) -> list[Block]:
             ):
                 close_fence()
             else:
-                fence_lines.append(line)
+                # Drop the fence's own indentation (a fence nested in a list item),
+                # but never more than the line's leading whitespace.
+                if fence_indent:
+                    expanded = line.expandtabs(4)
+                    strip = min(fence_indent, len(expanded) - len(expanded.lstrip(" ")))
+                    fence_lines.append(expanded[strip:])
+                else:
+                    fence_lines.append(line)
             continue
 
         opening = _FENCE_RE.match(line)
@@ -451,6 +500,7 @@ def extract_blocks(markdown: str) -> list[Block]:
             flush_pending()
             fence = opening.group("fence")
             fence_lang = opening.group("lang")
+            fence_indent = len(opening.group("indent").expandtabs(4))
             fence_lines = []
             previous_had_pipe = False
             continue
@@ -461,15 +511,21 @@ def extract_blocks(markdown: str) -> list[Block]:
             continue
 
         if _TABLE_DELIM_RE.match(line) and "|" in line:
-            logger.debug("markdown: dropped unsupported table")
-            if pending and "|" in pending[-1]:
-                pending.pop()
+            # Docs tables need a structural insert whose index math is far riskier
+            # than plain text, so a table becomes one paragraph per row with the
+            # cells joined by " | " (the header row bold). Its content is kept,
+            # never silently dropped -- users may paste tables into edited notes.
+            logger.debug("markdown: rendering table rows as text")
+            header = pending.pop() if pending and "|" in pending[-1] else None
+            flush_pending()
+            if header is not None:
+                _append_table_row(blocks, header, header=True)
             previous_had_pipe = True
             continue
 
         if previous_had_pipe:
             if "|" in line:
-                logger.debug("markdown: dropped table row %r", line)
+                _append_table_row(blocks, line, header=False)
                 continue
             previous_had_pipe = False
 
@@ -531,14 +587,43 @@ def extract_blocks(markdown: str) -> list[Block]:
 # ---------------------------------------------------------------------------
 
 
+def utf16_len(text: str) -> int:
+    """Length of ``text`` in UTF-16 code units -- the unit of every Docs API index.
+
+    Python's ``len`` counts code points, so any character outside the Basic
+    Multilingual Plane (emoji, mathematical alphanumerics, some CJK) is one
+    Python character but **two** Docs index units. Using ``len`` would shift every
+    later range by one per such character: styling lands on the wrong text and
+    a range can run past the end of the document, which rejects the whole batch.
+    """
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _is_list(block: Block) -> bool:
+    return block.kind in ("bullet", "ordered")
+
+
+def _inserted(block: Block) -> str:
+    """The paragraph text actually inserted for ``block`` (without its newline).
+
+    List items carry one leading tab per nesting level: ``createParagraphBullets``
+    derives the nesting level from leading tabs and then removes them (it has no
+    ``indentLevel`` field).
+    """
+    if _is_list(block):
+        return "\t" * block.level + block.text
+    return block.text
+
+
 def render_plain_text(markdown: str) -> str:
     """Return the exact string :func:`markdown_to_docs` inserts.
 
-    Every block contributes its text plus one ``\\n``. Exposed so callers and
-    tests can recompute paragraph offsets — and therefore the document extent —
-    without duplicating the parser.
+    Every block contributes its text plus one ``\\n`` (list items are prefixed by
+    one tab per nesting level, which Docs removes when it creates the bullets).
+    Exposed so callers and tests can recompute paragraph offsets without
+    duplicating the parser. Offsets must be measured with :func:`utf16_len`.
     """
-    return "".join(f"{block.text}\n" for block in extract_blocks(markdown))
+    return "".join(f"{_inserted(block)}\n" for block in extract_blocks(markdown))
 
 
 def _span_requests(block: Block, base: int) -> Iterator[dict]:
@@ -555,16 +640,20 @@ def _span_requests(block: Block, base: int) -> Iterator[dict]:
         if span.code:
             style["weightedFontFamily"] = {
                 "fontFamily": CODE_FONT_FAMILY,
-                "fontWeight": CODE_FONT_WEIGHT,
+                "weight": CODE_FONT_WEIGHT,
             }
             style["fontSize"] = _pt(CODE_FONT_SIZE_PT)
-            style["shading"] = {"backgroundColor": _optional_color(INLINE_CODE_BACKGROUND_HEX)}
-            fields.extend(("weightedFontFamily", "fontSize", "shading"))
+            # ``TextStyle`` has no ``shading``; text highlight is ``backgroundColor``.
+            style["backgroundColor"] = _optional_color(INLINE_CODE_BACKGROUND_HEX)
+            fields.extend(("weightedFontFamily", "fontSize", "backgroundColor"))
         if not fields:
             continue
         yield {
             "updateTextStyle": {
-                "range": {"startIndex": base + span.start, "endIndex": base + span.end},
+                "range": {
+                    "startIndex": base + utf16_len(block.text[: span.start]),
+                    "endIndex": base + utf16_len(block.text[: span.end]),
+                },
                 "textStyle": style,
                 "fields": ",".join(fields),
             }
@@ -573,7 +662,7 @@ def _span_requests(block: Block, base: int) -> Iterator[dict]:
 
 def _block_requests(block: Block, base: int) -> Iterator[dict]:
     """Emit the styling requests for one non-list block."""
-    full_range = {"startIndex": base, "endIndex": base + len(block.text)}
+    full_range = {"startIndex": base, "endIndex": base + utf16_len(block.text)}
 
     if block.kind == "heading":
         yield {
@@ -651,7 +740,7 @@ def _block_requests(block: Block, base: int) -> Iterator[dict]:
                 "textStyle": {
                     "weightedFontFamily": {
                         "fontFamily": CODE_FONT_FAMILY,
-                        "fontWeight": CODE_FONT_WEIGHT,
+                        "weight": CODE_FONT_WEIGHT,
                     },
                     "fontSize": _pt(CODE_FONT_SIZE_PT),
                     # Neutralise inherited emphasis: a code block right after a
@@ -670,15 +759,16 @@ def _block_requests(block: Block, base: int) -> Iterator[dict]:
 def _list_run_end(blocks: Sequence[Block], start: int) -> int:
     """Return the index of the last block in the list run beginning at ``start``.
 
-    Contiguous items of the same kind *and* nesting level share one
-    ``createParagraphBullets`` request, which is what makes an ordered list
-    number continuously rather than restarting at 1 on every item.
+    A run is every contiguous list item, nested ones included, so that one
+    ``createParagraphBullets`` request covers it: Docs then numbers an ordered
+    list continuously across its nested items instead of restarting at 1. A
+    top-level item of the other list kind (bullets <-> numbers) starts a new run.
     """
-    head = blocks[start]
+    head_kind = blocks[start].kind
     end = start
     while end + 1 < len(blocks):
         nxt = blocks[end + 1]
-        if nxt.kind != head.kind or nxt.level != head.level:
+        if not _is_list(nxt) or (nxt.level == 0 and nxt.kind != head_kind):
             break
         end += 1
     return end
@@ -687,9 +777,14 @@ def _list_run_end(blocks: Sequence[Block], start: int) -> int:
 def markdown_to_docs(markdown: str, *, start_index: int = DEFAULT_START_INDEX) -> list[dict]:
     """Convert Markdown into Google Docs ``batchUpdate`` requests.
 
-    The returned list is ordered by ascending document index and begins with
-    the single ``insertText`` that creates the content, so it can be handed
-    straight to ``documents().batchUpdate``.
+    Order: the single ``insertText`` first, then every styling request in
+    ascending index order (styling never changes a length), then the
+    ``createParagraphBullets`` requests in **descending** index order. Bullet
+    creation removes the leading nesting tabs, which shifts every later index;
+    applying the bottom-most list first means no request ever refers to an
+    index that an earlier request has already moved.
+
+    All indices are UTF-16 code units (see :func:`utf16_len`).
 
     Returns ``[]`` for input that produces no text at all (empty string,
     whitespace only, or a fence with no body) rather than an invalid empty
@@ -699,46 +794,50 @@ def markdown_to_docs(markdown: str, *, start_index: int = DEFAULT_START_INDEX) -
     if not blocks:
         return []
 
-    text = "".join(f"{block.text}\n" for block in blocks)
+    text = "".join(f"{_inserted(block)}\n" for block in blocks)
     requests: list[dict] = [
         {"insertText": {"location": {"index": start_index}, "text": text}}
     ]
 
-    # Pure arithmetic: each paragraph starts where the previous one ended,
-    # plus the newline that terminates it.
+    # Pure arithmetic: each paragraph starts where the previous one ended, plus
+    # the newline that terminates it.
     offsets: list[int] = []
     cursor = start_index
     for block in blocks:
         offsets.append(cursor)
-        cursor += len(block.text) + 1
+        cursor += utf16_len(_inserted(block)) + 1
 
+    bullets: list[dict] = []
     index = 0
     while index < len(blocks):
         block = blocks[index]
-        base = offsets[index]
 
-        if block.kind in ("bullet", "ordered"):
+        if _is_list(block):
             run_end = _list_run_end(blocks, index)
-            bullet: dict[str, object] = {
-                "range": {
-                    "startIndex": base,
-                    "endIndex": offsets[run_end] + len(blocks[run_end].text),
-                },
-                "bulletPreset": (
-                    BULLET_PRESET_DISC if block.kind == "bullet" else BULLET_PRESET_NUMBERED
-                ),
-            }
-            if block.level:
-                bullet["indentLevel"] = block.level
-            requests.append({"createParagraphBullets": bullet})
-            for cursor_index in range(index, run_end + 1):
-                requests.extend(_span_requests(blocks[cursor_index], offsets[cursor_index]))
+            bullets.append(
+                {
+                    "createParagraphBullets": {
+                        "range": {
+                            "startIndex": offsets[index],
+                            "endIndex": offsets[run_end] + utf16_len(_inserted(blocks[run_end])),
+                        },
+                        "bulletPreset": (
+                            BULLET_PRESET_DISC if block.kind == "bullet" else BULLET_PRESET_NUMBERED
+                        ),
+                    }
+                }
+            )
+            for item in range(index, run_end + 1):
+                # Inline styles are applied before the bullets remove the tabs, so
+                # they are anchored after the tabs and move with the text.
+                requests.extend(_span_requests(blocks[item], offsets[item] + blocks[item].level))
             index = run_end + 1
             continue
 
-        requests.extend(_block_requests(block, base))
+        requests.extend(_block_requests(block, offsets[index]))
         index += 1
 
+    requests.extend(reversed(bullets))
     return requests
 
 
@@ -776,7 +875,10 @@ def render_index_doc(
         {"insertText": {"location": {"index": start_index}, "text": text}},
         {
             "createParagraphBullets": {
-                "range": {"startIndex": start_index, "endIndex": start_index + len(text) - 1},
+                "range": {
+                    "startIndex": start_index,
+                    "endIndex": start_index + utf16_len(text) - 1,
+                },
                 "bulletPreset": BULLET_PRESET_NUMBERED,
             }
         },
@@ -797,5 +899,6 @@ __all__ = [
     "render_index_doc",
     "render_plain_text",
     "sanitize_drive_filename",
+    "utf16_len",
     "sanitize_title",
 ]

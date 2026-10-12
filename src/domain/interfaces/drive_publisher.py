@@ -24,12 +24,15 @@ class PublishEntry:
     """A single approved video's notes to be published or updated in Drive."""
 
     video_pk: int
-    #: 1-based playlist position (PRD section 19: Doc numbering starts at 001).
+    #: 1-based playlist position, zero-padded in Doc names to the playlist's pad width
+    #: (e.g. "7 - x" in a 9-video playlist, "007 - x" once it has 100+ videos).
     position: int
     title: str
     markdown: str
     existing_doc_id: str | None = None
     #: Only rename the existing Doc (the zero-pad width grew); leave its body alone.
+    #: ``markdown`` is still the published notes, so a Doc that has disappeared from
+    #: Drive can be re-created instead of failing the publish.
     rename_only: bool = False
 
 
@@ -61,6 +64,19 @@ class PublishResult:
 
 class DriveAuthorizationRequired(DomainError):
     """Raised when Drive access is needed but consent has not been completed."""
+
+
+class DriveFolderMissing(DomainError):
+    """The playlist's stored Drive folder was deleted or moved to the trash.
+
+    Every Doc Atlas created lives in that folder, so the caller forgets the stored
+    folder/index/Doc ids and publishes the playlist again into a fresh folder.
+    """
+
+    def __init__(self, folder_id: str, state: str) -> None:
+        super().__init__(f"Drive folder {folder_id} is {state}")
+        self.folder_id = folder_id
+        self.state = state
 
 
 class PublishProgress(Protocol):
@@ -124,7 +140,8 @@ class DrivePublisherPort(Protocol):
             entries: PublishEntry instances, already approved and in order.
             index_titles: ``(position, title)`` of every video, for the index Doc.
             update_index: Whether the index Doc content must be (re)written.
-            existing_folder_id: Reuse this folder instead of creating one.
+            existing_folder_id: Reuse this folder instead of creating one. Raises
+                :class:`DriveFolderMissing` if it was deleted or trashed in Drive.
             existing_index_doc_id: Reuse this index Doc instead of creating one.
             progress: Sink told about each Drive object as soon as it exists.
 

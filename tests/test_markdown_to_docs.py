@@ -305,25 +305,27 @@ def test_contiguous_list_items_share_one_bullets_request() -> None:
     assert len(bullet_requests(requests)) == 1
 
 
-def test_nesting_by_two_spaces_becomes_an_indent_level() -> None:
+def test_nesting_by_two_spaces_becomes_one_leading_tab() -> None:
+    """``createParagraphBullets`` has no ``indentLevel`` field (an unknown field is an
+    HTTP 400 for the whole batch): Docs reads the nesting level from leading tabs."""
     requests = markdown_to_docs("- outer\n  - inner")
 
     bullets = bullet_requests(requests)
-    assert len(bullets) == 2
-    assert "indentLevel" not in bullets[0]
-    assert bullets[1]["indentLevel"] == 1
+    assert len(bullets) == 1  # one list, so nesting and numbering stay together
+    assert all("indentLevel" not in bullet for bullet in bullets)
+    assert inserted_text(requests) == "outer\n\tinner\n"
 
 
 def test_nesting_by_four_spaces_becomes_two_levels() -> None:
     requests = markdown_to_docs("- outer\n    - inner")
 
-    assert bullet_requests(requests)[1]["indentLevel"] == 2
+    assert inserted_text(requests) == "outer\n\t\tinner\n"
 
 
 def test_deep_nesting_is_clamped_to_what_docs_accepts() -> None:
     requests = markdown_to_docs("- outer\n" + " " * 40 + "- inner")
 
-    assert bullet_requests(requests)[1]["indentLevel"] == 8
+    assert inserted_text(requests) == "outer\n" + "\t" * 8 + "inner\n"
 
 
 def test_a_list_interrupted_by_a_paragraph_starts_a_new_bullets_request() -> None:
@@ -386,10 +388,11 @@ def test_inline_italic_emits_italic_over_the_right_range() -> None:
 def test_inline_code_is_monospaced_and_shaded() -> None:
     requests = markdown_to_docs("Call `render()` first")
 
+    # TextStyle has no "shading" field: the highlight is TextStyle.backgroundColor.
     code = [
         style
         for style in text_style_requests(requests)
-        if style["textStyle"].get("shading", {}).get("backgroundColor")
+        if style["textStyle"].get("backgroundColor")
     ]
     assert len(code) == 1
     assert is_monospaced(code[0])
@@ -486,10 +489,54 @@ def test_an_unclosed_backtick_span_stays_literal() -> None:
     assert "`" in inserted_text(requests)
 
 
-def test_a_markdown_table_is_skipped_rather_than_rendered() -> None:
-    requests = markdown_to_docs("| a | b |\n| --- | --- |\n| 1 | 2 |")
+def test_a_markdown_table_keeps_its_content_as_one_paragraph_per_row() -> None:
+    """Dropping a table silently lost content (users paste tables into edited notes)."""
+    requests = markdown_to_docs("Intro\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nAfter")
 
-    assert "| a | b |" not in inserted_text(requests)
+    assert inserted_text(requests) == "Intro\na | b\n1 | 2\nAfter\n"
+    bold = [s for s in text_style_requests(requests) if s["textStyle"].get("bold")]
+    assert len(bold) == 1  # the header row
+    assert text_at(requests, bold[0]["range"]["startIndex"]) == "a"
+
+
+def test_generics_survive_in_text_and_inline_code() -> None:
+    """``<String>`` used to be stripped as an HTML tag -- fatal for Java notes."""
+    requests = markdown_to_docs("A `List<String>` is a List<T> and Map<K, V> too")
+
+    assert inserted_text(requests) == "A List<String> is a List<T> and Map<K, V> too\n"
+
+
+def test_real_html_tags_are_still_stripped() -> None:
+    requests = markdown_to_docs("line<br>next <span class='x'>kept</span>")
+
+    assert inserted_text(requests) == "line next kept\n"
+
+
+def test_link_syntax_inside_inline_code_is_literal() -> None:
+    requests = markdown_to_docs("Index with `arr[i](x)` here")
+
+    assert "arr[i](x)" in inserted_text(requests)
+
+
+def test_snake_case_and_arithmetic_are_not_emphasis() -> None:
+    requests = markdown_to_docs("Call my_var_name and compute 2 * 3 * 4")
+
+    assert inserted_text(requests) == "Call my_var_name and compute 2 * 3 * 4\n"
+    assert text_style_requests(requests) == []
+
+
+def test_a_fence_indented_under_a_list_item_is_still_a_code_block() -> None:
+    markdown = "- Step one:\n    ```java\n    int x = 1;\n      nested();\n    ```\n- Step two"
+    requests = markdown_to_docs(markdown)
+
+    assert inserted_text(requests) == "Step one:\njava\nint x = 1;\n  nested();\nStep two\n"
+    assert any(is_boxed(style) for style in paragraph_style_requests(requests))
+
+
+def test_a_fence_with_an_info_string_is_still_a_code_block() -> None:
+    requests = markdown_to_docs('```java title="Main.java"\nclass Main {}\n```')
+
+    assert inserted_text(requests) == "java\nclass Main {}\n"
 
 
 def test_a_horizontal_rule_is_skipped() -> None:
@@ -557,12 +604,20 @@ def test_content_is_inserted_with_exactly_one_request() -> None:
     assert len(of_kind(requests, "insertText")) == 1
 
 
+def assert_styling_ascends_then_bullets_descend(requests: list[Request]) -> None:
+    """Styling never changes lengths, so it ascends; bullet creation removes nesting tabs
+    (shifting later indices), so bullets come last and bottom-up."""
+    styling = [request_index(r) for r in requests if "createParagraphBullets" not in r]
+    bullets = [request_index(r) for r in requests if "createParagraphBullets" in r]
+    assert styling == sorted(styling)
+    assert bullets == sorted(bullets, reverse=True)
+    first_bullet = next((i for i, r in enumerate(requests) if "createParagraphBullets" in r), None)
+    if first_bullet is not None:
+        assert all("createParagraphBullets" in r for r in requests[first_bullet:])
+
+
 def test_every_request_index_is_non_decreasing() -> None:
-    requests = markdown_to_docs(SAMPLE_NOTES)
-
-    indices = [request_index(request) for request in requests]
-
-    assert indices == sorted(indices)
+    assert_styling_ascends_then_bullets_descend(markdown_to_docs(SAMPLE_NOTES))
 
 
 def test_every_request_lands_inside_the_growing_document_extent() -> None:
@@ -629,10 +684,7 @@ def test_render_plain_text_matches_the_inserted_text() -> None:
 def test_a_large_document_stays_monotonic() -> None:
     big = "\n\n".join(f"## Section {n}\n\n- item **one**\n- item two" for n in range(50))
 
-    requests = markdown_to_docs(big)
-    indices = [request_index(request) for request in requests]
-
-    assert indices == sorted(indices)
+    assert_styling_ascends_then_bullets_descend(markdown_to_docs(big))
 
 
 # ---------------------------------------------------------------------------

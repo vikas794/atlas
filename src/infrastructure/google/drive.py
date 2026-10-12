@@ -11,7 +11,9 @@ from typing import Any
 
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 
@@ -31,12 +33,47 @@ _REAUTH_HINT = (
     "(complete the consent once on the machine that runs Atlas)."
 )
 
+FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
+
+#: :meth:`GoogleDriveExporter.file_state` results.
+FILE_OK = "ok"
+FILE_TRASHED = "trashed"
+FILE_MISSING = "missing"
+DOC_MIME_TYPE = "application/vnd.google-apps.document"
+
 #: Docs ``body.content`` of a brand-new, empty document ends at index 2 (one empty paragraph).
 _EMPTY_DOC_END_INDEX = 2
+
+#: How long the interactive consent flow waits for the browser redirect before giving up,
+#: so an abandoned consent never pins a server thread (and the redirect port) forever.
+CONSENT_TIMEOUT_SECONDS = 300
+
+#: Redirect port for "web"-type OAuth clients, whose redirect URI must match exactly.
+#: "installed" (Desktop app) clients accept any loopback port, so a free one is used.
+_WEB_CLIENT_REDIRECT_PORT = 8080
 
 
 class GoogleDriveAuthorizationRequired(RuntimeError):
     """Raised when an operation needs Drive access that has not been granted."""
+
+
+def is_permanent_refresh_error(exc: BaseException) -> bool:
+    """Whether a token-refresh failure needs the user to re-authorize.
+
+    ``invalid_grant`` (refresh token revoked or expired -- e.g. the 7-day expiry of an
+    OAuth app in "Testing" mode) is permanent; google-auth marks failures that are worth
+    retrying (5xx, timeouts) as ``retryable``.
+    """
+    return isinstance(exc, RefreshError) and not getattr(exc, "retryable", False)
+
+
+def reauthorize_message(exc: BaseException) -> str:
+    """The user-facing message for a revoked/expired refresh token."""
+    return (
+        "Google Drive access has expired or was revoked "
+        f"({type(exc).__name__}: {str(exc).splitlines()[0][:120] if str(exc) else 'no detail'}). "
+        f"Re-authorize Drive. {_REAUTH_HINT}"
+    )
 
 
 class GoogleDriveExporter:
@@ -73,6 +110,11 @@ class GoogleDriveExporter:
 
         self._credentials: Credentials | None = None
         self._creds_lock = threading.Lock()
+        self._consent_lock = threading.Lock()
+        #: (token file mtime, message) of a refresh that failed permanently. While the
+        #: token file is unchanged, the token is known to be dead even though it *looks*
+        #: refreshable, so the status endpoint must not claim "authorized".
+        self._dead_token: tuple[float, str] | None = None
         self._local = threading.local()
         self._drive_service_factory = drive_service_factory
         self._docs_service_factory = docs_service_factory
@@ -92,6 +134,9 @@ class GoogleDriveExporter:
                 creds = Credentials.from_authorized_user_file(str(self.token_path), SCOPES)
             except Exception:
                 creds = None
+            dead = self._dead_token_message()
+            if dead is not None:
+                return STATE_NEEDS_CONSENT, dead
             if creds is not None and (creds.valid or (creds.expired and creds.refresh_token)):
                 return STATE_AUTHORIZED, "Google Drive is authorized."
             if not has_creds:
@@ -122,16 +167,53 @@ class GoogleDriveExporter:
         """Raise :class:`GoogleDriveAuthorizationRequired` unless usable credentials exist."""
         self._ensure_credentials()
 
+    def _token_mtime(self) -> float | None:
+        try:
+            return self.token_path.stat().st_mtime
+        except OSError:
+            return None
+
+    def _dead_token_message(self) -> str | None:
+        if self._dead_token is None:
+            return None
+        mtime, message = self._dead_token
+        return message if self._token_mtime() == mtime else None
+
+    def mark_token_revoked(self, exc: BaseException) -> GoogleDriveAuthorizationRequired:
+        """Record a permanent refresh failure and return the error to raise.
+
+        Drops the cached credentials and per-thread services so the next use re-reads the
+        token file (e.g. after the user re-authorizes), and makes :meth:`auth_state`
+        report ``needs_consent`` until the token file changes.
+        """
+        message = reauthorize_message(exc)
+        with self._creds_lock:
+            self._credentials = None
+            self._local = threading.local()
+            mtime = self._token_mtime()
+            self._dead_token = (mtime, message) if mtime is not None else None
+        return GoogleDriveAuthorizationRequired(message)
+
     def authenticate(self) -> None:
         """Run the interactive OAuth consent flow and persist the token file.
 
-        Blocking (it waits for the browser); callers run it in a worker thread.
+        Blocking (it waits for the browser, at most :data:`CONSENT_TIMEOUT_SECONDS`);
+        callers run it in a worker thread. Only one consent flow runs at a time: a second
+        concurrent request fails fast instead of fighting over the redirect port.
         """
-        creds = self._run_consent_flow()
-        self._write_token(creds)
-        with self._creds_lock:
-            self._credentials = creds
-        self._local = threading.local()
+        if not self._consent_lock.acquire(blocking=False):
+            raise RuntimeError(
+                "A Google consent flow is already waiting for the browser; finish it first."
+            )
+        try:
+            creds = self._run_consent_flow()
+            self._write_token(creds)
+            with self._creds_lock:
+                self._credentials = creds
+                self._dead_token = None
+                self._local = threading.local()
+        finally:
+            self._consent_lock.release()
 
     def _ensure_credentials(self) -> Credentials:
         """Resolve usable credentials without ever starting a consent flow."""
@@ -150,12 +232,16 @@ class GoogleDriveExporter:
             if creds is not None and creds.expired and creds.refresh_token:
                 try:
                     creds.refresh(Request())
-                except Exception as exc:
+                except RefreshError as exc:
+                    if not is_permanent_refresh_error(exc):
+                        raise  # transient (5xx/timeout): the caller's retry policy decides
                     # A revoked/expired refresh token cannot be fixed by retrying.
-                    raise GoogleDriveAuthorizationRequired(
-                        f"The Google token could not be refreshed ({type(exc).__name__}); "
-                        f"re-run authentication. {_REAUTH_HINT}"
-                    ) from exc
+                    mtime = self._token_mtime()
+                    message = reauthorize_message(exc)
+                    self._dead_token = (mtime, message) if mtime is not None else None
+                    raise GoogleDriveAuthorizationRequired(message) from exc
+                # Network errors (google.auth TransportError) propagate unchanged: they
+                # are transient and must not be reported as "re-authorize".
                 self._write_token(creds)
                 self._credentials = creds
                 return creds
@@ -197,17 +283,43 @@ class GoogleDriveExporter:
 
             try:
                 flow = InstalledAppFlow.from_client_secrets_file(temp_creds_path, SCOPES)
-                return flow.run_local_server(port=8080)
+                return flow.run_local_server(
+                    port=_WEB_CLIENT_REDIRECT_PORT, timeout_seconds=CONSENT_TIMEOUT_SECONDS
+                )
             finally:
                 os.unlink(temp_creds_path)
 
+        # Desktop ("installed") clients accept any loopback port: port 0 picks a free one,
+        # so the flow cannot collide with the frontend dev server or another app on 8080.
         flow = InstalledAppFlow.from_client_secrets_file(str(self.creds_path), SCOPES)
-        return flow.run_local_server(port=8080)
+        return flow.run_local_server(port=0, timeout_seconds=CONSENT_TIMEOUT_SECONDS)
 
     def _write_token(self, creds: Credentials) -> None:
+        """Write the token file atomically (temp file + rename) and owner-only.
+
+        A crash or full disk mid-write must never leave a truncated token behind: that
+        would silently turn a working setup into "consent required".
+        """
         self.token_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.token_path, "w") as token:
-            token.write(creds.to_json())
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{self.token_path.name}.", suffix=".tmp", dir=self.token_path.parent
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(creds.to_json())
+                handle.flush()
+                os.fsync(handle.fileno())
+            try:
+                os.chmod(tmp_name, 0o600)
+            except OSError:  # pragma: no cover - e.g. filesystems without POSIX modes
+                pass
+            os.replace(tmp_name, self.token_path)
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
 
     # ------------------------------------------------------------------
     # Per-thread API services
@@ -245,16 +357,30 @@ class GoogleDriveExporter:
     # Drive / Docs operations (each is one idempotency-friendly API step)
     # ------------------------------------------------------------------
 
-    def create_folder(self, folder_name: str) -> str:
-        """Create a folder in Google Drive and return its ID."""
-        file_metadata = {
+    def create_folder(
+        self, folder_name: str, app_properties: dict[str, str] | None = None
+    ) -> str:
+        """Create a folder in Google Drive and return its ID.
+
+        ``app_properties`` are private key/values (visible only to this OAuth client) that
+        :meth:`find_tagged_file` can search for, so a create whose response was lost can be
+        detected instead of repeated.
+        """
+        file_metadata: dict[str, Any] = {
             "name": folder_name,
-            "mimeType": "application/vnd.google-apps.folder",
+            "mimeType": FOLDER_MIME_TYPE,
         }
+        if app_properties:
+            file_metadata["appProperties"] = dict(app_properties)
         file = self.drive_service.files().create(body=file_metadata, fields="id").execute()
         return file.get("id")
 
-    def create_empty_doc(self, title: str, folder_id: str | None) -> str:
+    def create_empty_doc(
+        self,
+        title: str,
+        folder_id: str | None,
+        app_properties: dict[str, str] | None = None,
+    ) -> str:
         """Create an empty Google Doc (in ``folder_id``, or the root) and return its ID.
 
         Creating and filling a Doc are separate steps on purpose: the caller persists
@@ -263,12 +389,66 @@ class GoogleDriveExporter:
         """
         file_metadata: dict[str, Any] = {
             "name": title,
-            "mimeType": "application/vnd.google-apps.document",
+            "mimeType": DOC_MIME_TYPE,
         }
         if folder_id:
             file_metadata["parents"] = [folder_id]
+        if app_properties:
+            file_metadata["appProperties"] = dict(app_properties)
         doc = self.drive_service.files().create(body=file_metadata, fields="id").execute()
         return doc.get("id")
+
+    def file_state(self, file_id: str) -> str:
+        """Return ``"ok"``, ``"trashed"`` or ``"missing"`` (deleted / no longer accessible)."""
+        try:
+            meta = (
+                self.drive_service.files()
+                .get(fileId=file_id, fields="id,trashed")
+                .execute()
+            )
+        except HttpError as exc:
+            if int(getattr(exc.resp, "status", 0) or 0) == 404:
+                return FILE_MISSING
+            raise
+        return FILE_TRASHED if meta.get("trashed") else FILE_OK
+
+    def find_tagged_file(
+        self,
+        app_properties: dict[str, str],
+        *,
+        mime_type: str,
+        parent_id: str | None = None,
+    ) -> str | None:
+        """Return the id of a non-trashed file this app created with ``app_properties``.
+
+        Used before (re)creating a Drive object, so a create that succeeded on Google's
+        side but whose response never arrived (timeout, connection reset, crash before
+        the id was stored) is adopted instead of duplicated. ``drive.file`` scope only
+        ever sees files this app created, which is exactly the search space wanted.
+        """
+
+        def quoted(value: str) -> str:
+            return value.replace("\\", "\\\\").replace("'", "\\'")
+
+        clauses = [f"mimeType = '{quoted(mime_type)}'", "trashed = false"]
+        if parent_id:
+            clauses.append(f"'{quoted(parent_id)}' in parents")
+        for key, value in sorted(app_properties.items()):
+            clauses.append(
+                f"appProperties has {{ key='{quoted(key)}' and value='{quoted(value)}' }}"
+            )
+        response = (
+            self.drive_service.files()
+            .list(
+                q=" and ".join(clauses),
+                spaces="drive",
+                fields="files(id)",
+                pageSize=1,
+            )
+            .execute()
+        )
+        files = response.get("files") or []
+        return files[0].get("id") if files else None
 
     def apply_requests(self, doc_id: str, requests: list[dict]) -> None:
         """Apply Docs ``batchUpdate`` requests to ``doc_id`` (no-op for an empty list)."""
@@ -358,10 +538,15 @@ class GoogleDriveExporter:
 
 
 __all__ = [
+    "CONSENT_TIMEOUT_SECONDS",
+    "DOC_MIME_TYPE",
+    "FOLDER_MIME_TYPE",
     "SCOPES",
     "STATE_AUTHORIZED",
     "STATE_CREDENTIALS_MISSING",
     "STATE_NEEDS_CONSENT",
     "GoogleDriveAuthorizationRequired",
     "GoogleDriveExporter",
+    "is_permanent_refresh_error",
+    "reauthorize_message",
 ]
