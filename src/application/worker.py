@@ -197,6 +197,8 @@ class PlaylistWorker:
             )
         finally:
             self._in_flight_video_ids.discard(video_id)
+            # A slot just freed up: refill it now instead of after the idle poll interval.
+            self._wake_event.set()
 
     async def _dispatch_publish(self, playlist_pk: int) -> None:
         try:
