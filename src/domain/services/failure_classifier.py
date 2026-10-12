@@ -40,9 +40,15 @@ _RATE_LIMIT_PATTERN: Final[re.Pattern[str]] = re.compile(
     re.IGNORECASE,
 )
 
-#: Ordered ``(failure type, pattern)`` rules. First match wins, so the specific
-#: video-availability rules are listed before the generic transport ones.
+#: Ordered ``(failure type, pattern)`` rules. First match wins. Rate limiting comes
+#: first: when YouTube throttles an IP, yt-dlp reports "Video unavailable. This content
+#: isn't available, try again later. The current session has been rate-limited by
+#: YouTube", which the availability rules below would otherwise read as a permanently
+#: deleted video (taken at face value, the message itself says "try again later").
+#: The specific video-availability rules then come before the generic transport ones.
 _RULES: Final[tuple[tuple[FailureType, re.Pattern[str]], ...]] = (
+    (FailureType.RATE_LIMITED, _RATE_LIMIT_PATTERN),
+    (FailureType.RATE_LIMITED, _any_of("try again later")),
     (
         FailureType.VIDEO_PRIVATE,
         _any_of(
@@ -136,7 +142,6 @@ _RULES: Final[tuple[tuple[FailureType, re.Pattern[str]], ...]] = (
             "unsupported language",
         ),
     ),
-    (FailureType.RATE_LIMITED, _RATE_LIMIT_PATTERN),
     (
         FailureType.NETWORK_ERROR,
         _any_of(

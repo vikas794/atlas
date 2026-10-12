@@ -289,3 +289,23 @@ def test_safe_diagnostic_collapses_inner_whitespace() -> None:
 def test_safe_diagnostic_never_returns_a_whole_transcript() -> None:
     transcript = "line one of a transcript\n" + "lorem ipsum " * 100
     assert len(safe_diagnostic(transcript)) <= 200
+
+
+@pytest.mark.parametrize(
+    "detail",
+    [
+        # yt-dlp's wording when YouTube throttles the IP: it says "unavailable" but also
+        # "try again later" / "rate-limited", so it must not become a permanent deletion.
+        "ERROR: [youtube] abc123def45: Video unavailable. This content isn't available, "
+        "try again later.",
+        "ERROR: [youtube] abc123def45: Video unavailable. The current session has been "
+        "rate-limited by YouTube for up to an hour.",
+    ],
+)
+def test_throttling_disguised_as_unavailable_is_rate_limited(detail: str) -> None:
+    assert classify_transcript_error(detail) is FailureType.RATE_LIMITED
+
+
+def test_a_plain_unavailable_video_is_still_permanent() -> None:
+    detail = "ERROR: [youtube] abc123def45: Video unavailable. This video has been removed."
+    assert classify_transcript_error(detail) is FailureType.VIDEO_DELETED
