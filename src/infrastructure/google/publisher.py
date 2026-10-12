@@ -30,6 +30,7 @@ from googleapiclient.errors import HttpError
 from google.auth.exceptions import RefreshError, TransportError
 from src.domain.interfaces.drive_publisher import (
     DriveAuthorizationRequired,
+    DriveFolderMissing,
     DrivePublisherPort,
     PublishEntry,
     PublishProgress,
@@ -46,6 +47,7 @@ from src.domain.services.doc_naming import (
 from src.domain.services.markdown_to_docs import markdown_to_docs, render_index_doc
 from src.infrastructure.google.drive import (
     DOC_MIME_TYPE,
+    FILE_OK,
     FOLDER_MIME_TYPE,
     GoogleDriveAuthorizationRequired,
     GoogleDriveExporter,
@@ -243,8 +245,14 @@ class GoogleDrivePublisher(DrivePublisherPort):
         sink: PublishProgress = progress or _NoProgress()
         ctx = {"playlist_id": playlist_pk}
 
-        # 1. Folder: create once, persist its id right away.
+        # 1. Folder: create once, persist its id right away. A stored folder that the user
+        # deleted or trashed in Drive is reported, so the caller can start a fresh one
+        # instead of failing every publish with a 404 (or writing Docs into the trash).
         folder_id = existing_folder_id
+        if folder_id:
+            state = await self._retry_call(self.exporter.file_state, folder_id)
+            if state != FILE_OK:
+                raise DriveFolderMissing(folder_id, state)
         if not folder_id:
             folder_name = playlist_folder_name(playlist_title)
             folder_tag = {"atlasKind": "playlist-folder", "atlasPlaylist": str(playlist_pk)}
@@ -293,19 +301,33 @@ class GoogleDrivePublisher(DrivePublisherPort):
             name = doc_name(entry.position, entry.title, width=pad_width)
             vctx = {**ctx, "video_id": entry.video_pk}
 
-            if entry.rename_only and entry.existing_doc_id:
-                await self._retry_call(self.exporter.rename_doc, entry.existing_doc_id, name)
-                doc_ids[entry.video_pk] = entry.existing_doc_id
+            existing_doc_id = entry.existing_doc_id
+            if existing_doc_id:
+                # A Doc the user deleted or trashed in Drive is re-created (and its new
+                # id stored) rather than failing every publish or editing a trashed Doc.
+                state = await self._retry_call(self.exporter.file_state, existing_doc_id)
+                if state != FILE_OK:
+                    logger.warning(
+                        "Stored Doc %s is %s in Drive; creating a new one",
+                        existing_doc_id,
+                        state,
+                        extra=vctx,
+                    )
+                    existing_doc_id = None
+
+            if entry.rename_only and existing_doc_id:
+                await self._retry_call(self.exporter.rename_doc, existing_doc_id, name)
+                doc_ids[entry.video_pk] = existing_doc_id
                 updated_count += 1
-                logger.info("Renamed Doc %s to '%s'", entry.existing_doc_id, name, extra=vctx)
+                logger.info("Renamed Doc %s to '%s'", existing_doc_id, name, extra=vctx)
                 continue
 
             markdown = render_doc_markdown(
                 entry.position, entry.title, entry.markdown, width=pad_width
             )
-            if entry.existing_doc_id:
+            if existing_doc_id:
                 # Update the existing Doc in place (a retried or resumed publish lands here).
-                doc_id = entry.existing_doc_id
+                doc_id = existing_doc_id
                 await self._retry_call(
                     self.exporter.replace_doc_body,
                     doc_id,

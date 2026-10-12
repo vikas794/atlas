@@ -33,6 +33,7 @@ import logging
 
 from src.domain.exceptions import ConflictError, NotFoundError
 from src.domain.interfaces.drive_publisher import (
+    DriveFolderMissing,
     DrivePublisherPort,
     PublishEntry,
     PublishResult,
@@ -132,7 +133,35 @@ class PublishPlaylistUseCase:
         return result
 
     async def execute(self, playlist_pk: int) -> PublishResult:
-        """Publish approved or edited-published videos to Drive in playlist order."""
+        """Publish approved or edited-published videos to Drive in playlist order.
+
+        If the playlist's Drive folder was deleted or trashed by the user, the stored
+        folder, index and Doc ids are forgotten and the playlist is published again into a
+        new folder (every already-published video is re-created from its published
+        notes). Nothing unapproved is added by this: only videos already published or
+        approved qualify, exactly as on a normal publish.
+        """
+        try:
+            return await self._execute(playlist_pk)
+        except DriveFolderMissing as exc:
+            logger.warning(
+                "Drive folder %s is %s; re-publishing the playlist into a new folder",
+                exc.folder_id,
+                exc.state,
+                extra={"playlist_id": playlist_pk},
+            )
+            await self._forget_drive_ids(playlist_pk)
+            return await self._execute(playlist_pk)
+
+    async def _forget_drive_ids(self, playlist_pk: int) -> None:
+        await self.repo.set_drive_folder(playlist_pk, None)
+        await self.repo.set_drive_index_doc(playlist_pk, None)
+        await self.repo.set_index_digest(playlist_pk, None)
+        for video in await self.repo.list_videos(playlist_pk):
+            if video.drive_doc_id:
+                await self.repo.set_drive_doc_id(video.id, None)
+
+    async def _execute(self, playlist_pk: int) -> PublishResult:
         playlist = await self.repo.get_playlist(playlist_pk)
         if playlist is None:
             raise NotFoundError(f"Playlist {playlist_pk} not found")
@@ -155,11 +184,13 @@ class PublishPlaylistUseCase:
             elif video.stage == Stage.PUBLISHED:
                 published_videos.append(video)
                 summary = await self.repo.get_summary(video.id)
-                if (
+                edited_since_publish = bool(
                     summary
                     and summary.edited
                     and sha256_text(summary.content) != summary.published_digest
-                ):
+                )
+                # No stored Doc id: its folder was deleted and is being re-created.
+                if summary and (edited_since_publish or not video.drive_doc_id):
                     entries.append(self._entry(video, summary))
                     qualifying[video.id] = summary
 
@@ -168,12 +199,14 @@ class PublishPlaylistUseCase:
             in_entries = {e.video_pk for e in entries}
             for video in published_videos:
                 if video.drive_doc_id and video.id not in in_entries:
+                    summary = await self.repo.get_summary(video.id)
                     entries.append(
                         PublishEntry(
                             video_pk=video.id,
                             position=video.position,
                             title=video.title,
-                            markdown="",
+                            # Only used if the Doc vanished from Drive and is re-created.
+                            markdown=summary.content if summary else "",
                             existing_doc_id=video.drive_doc_id,
                             rename_only=True,
                         )

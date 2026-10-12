@@ -268,3 +268,85 @@ async def test_a_doc_created_before_a_crash_but_never_stored_is_adopted_on_resum
 
     assert len(docs(stub)) == docs_before
     assert (await repo.get_video(beta.id)).drive_doc_id == beta.drive_doc_id
+
+
+
+# ------------------------------------------ objects deleted or trashed by the user
+
+
+async def _add_approved_video(repo: PlaylistRepository, playlist_id: int, position: int, title: str) -> None:
+    new = await repo.insert_videos(playlist_id, [PlaylistEntry(f"vid{position}", title, position)])
+    await repo.upsert_summary(new[0].id, f"## Notes\n\nNotes of {title}")
+    await repo.update_stage(new[0].id, Stage.PENDING_REVIEW)
+    await repo.approve(new[0].id)
+
+
+@pytest.mark.parametrize("how", ["trashed", "deleted"])
+async def test_a_folder_deleted_in_drive_is_recreated_with_every_published_doc(
+    repo: PlaylistRepository, stub: StubGoogle, how: str
+) -> None:
+    playlist, videos = await seed(repo, ["Alpha", "Beta"])
+    uc = use_case(repo, stub)
+    await uc.execute(playlist.id)
+    old_folder = (await repo.get_playlist(playlist.id)).drive_folder_id
+    gone = {c["id"] for c in stub.created}  # the folder and everything in it
+    (stub.trashed if how == "trashed" else stub.deleted).update(gone)
+    await _add_approved_video(repo, playlist.id, 3, "Late")
+
+    result = await uc.execute(playlist.id)
+
+    stored = await repo.get_playlist(playlist.id)
+    assert stored.drive_folder_id not in (None, old_folder)
+    assert [c["name"] for c in stub.live()] == [
+        "Course 101",
+        "00 - Index - Course 101",
+        "1 - Alpha",
+        "2 - Beta",
+        "3 - Late",
+    ]
+    assert all(c["parents"] == [stored.drive_folder_id] for c in stub.live()[1:])
+    assert result.created == 3
+    for video in await repo.list_videos(playlist.id):
+        assert video.stage == Stage.PUBLISHED and video.drive_doc_id not in gone
+
+
+@pytest.mark.parametrize("how", ["trashed", "deleted"])
+async def test_a_single_doc_deleted_in_drive_is_recreated_on_republish(
+    repo: PlaylistRepository, stub: StubGoogle, how: str
+) -> None:
+    playlist, videos = await seed(repo, ["Alpha", "Beta"])
+    uc = use_case(repo, stub)
+    await uc.execute(playlist.id)
+    alpha_old = (await repo.get_video(videos[0].id)).drive_doc_id
+    (stub.trashed if how == "trashed" else stub.deleted).add(alpha_old)
+    await SaveSummaryEditUseCase(repo).execute(videos[0].id, "## Notes\n\nFixed typo")
+
+    result = await uc.execute(playlist.id)
+
+    alpha_new = (await repo.get_video(videos[0].id)).drive_doc_id
+    assert alpha_new != alpha_old and result.created == 1
+    assert "Fixed typo" in last_body_text(stub, alpha_new)
+    assert [d["name"] for d in docs(stub)].count("1 - Alpha") == 1
+
+
+async def test_padding_growth_recreates_a_doc_that_vanished_instead_of_failing(
+    repo: PlaylistRepository, stub: StubGoogle
+) -> None:
+    playlist, videos = await seed(repo, [f"T{i}" for i in range(1, 10)])
+    uc = use_case(repo, stub)
+    await uc.execute(playlist.id)
+    t1_old = (await repo.get_video(videos[0].id)).drive_doc_id
+    stub.deleted.add(t1_old)
+    await _add_approved_video(repo, playlist.id, 10, "T10")
+
+    await uc.execute(playlist.id)
+
+    t1_new = (await repo.get_video(videos[0].id)).drive_doc_id
+    assert t1_new != t1_old
+    assert "Notes of T1" in last_body_text(stub, t1_new)
+    current = {d["id"]: d["name"] for d in docs(stub)}
+    for update in stub.updates:  # renames
+        if update["fileId"] in current:
+            current[update["fileId"]] = update["name"]
+    names = sorted(current.values())
+    assert names[1:] == [f"{i:02d} - T{i}" for i in range(1, 11)]  # after "00 - Index"

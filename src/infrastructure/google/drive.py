@@ -11,6 +11,7 @@ from typing import Any
 
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
@@ -33,6 +34,11 @@ _REAUTH_HINT = (
 )
 
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
+
+#: :meth:`GoogleDriveExporter.file_state` results.
+FILE_OK = "ok"
+FILE_TRASHED = "trashed"
+FILE_MISSING = "missing"
 DOC_MIME_TYPE = "application/vnd.google-apps.document"
 
 #: Docs ``body.content`` of a brand-new, empty document ends at index 2 (one empty paragraph).
@@ -391,6 +397,20 @@ class GoogleDriveExporter:
             file_metadata["appProperties"] = dict(app_properties)
         doc = self.drive_service.files().create(body=file_metadata, fields="id").execute()
         return doc.get("id")
+
+    def file_state(self, file_id: str) -> str:
+        """Return ``"ok"``, ``"trashed"`` or ``"missing"`` (deleted / no longer accessible)."""
+        try:
+            meta = (
+                self.drive_service.files()
+                .get(fileId=file_id, fields="id,trashed")
+                .execute()
+            )
+        except HttpError as exc:
+            if int(getattr(exc.resp, "status", 0) or 0) == 404:
+                return FILE_MISSING
+            raise
+        return FILE_TRASHED if meta.get("trashed") else FILE_OK
 
     def find_tagged_file(
         self,
