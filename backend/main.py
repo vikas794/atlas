@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from starlette.responses import FileResponse
 
+from backend.spa import SpaFallback, default_dist_dir
 from src.config import load_settings
 from src.shared.logging_setup import configure_logging
 from src.transport.http.fastapi.dependencies import get_usage_ledger, get_worker
@@ -92,17 +90,6 @@ def shutdown_development_server(
     return {"status": "stopping"}
 
 
-# Serve the built frontend SPA, if present (e.g. in the Docker image). Registered
-# last so it never shadows the /api/* routers above.
-_frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
-if _frontend_dist.exists():
-    app.mount("/assets", StaticFiles(directory=_frontend_dist / "assets"), name="frontend-assets")
-
-    @app.get("/{full_path:path}")
-    def serve_frontend(full_path: str) -> FileResponse:
-        if full_path.startswith("api/"):
-            raise HTTPException(status_code=404, detail="Not found")
-        candidate = _frontend_dist / full_path
-        if full_path and candidate.is_file():
-            return FileResponse(candidate)
-        return FileResponse(_frontend_dist / "index.html")
+# Single-app mode: when no API route matches, serve the built frontend (frontend/dist) with
+# an SPA fallback. Unknown /api/* paths still get the JSON 404 envelope; see backend/spa.py.
+app.router.default = SpaFallback(default_dist_dir())
