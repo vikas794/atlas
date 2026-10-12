@@ -3,7 +3,6 @@
 Usage:
     python -m src.infrastructure.storage.cli init
     python -m src.infrastructure.storage.cli status
-    python -m src.infrastructure.storage.cli purge [--retention-days N]
     python -m src.infrastructure.storage.cli delete-legacy [--dry-run]
 """
 
@@ -14,6 +13,8 @@ import re
 import shutil
 import sys
 from pathlib import Path
+
+from src.infrastructure.storage.db import connect, initialize
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -27,44 +28,33 @@ def _settings() -> dict:
     return get_storage_settings(load_settings())
 
 
-def _repository():
-    from src.infrastructure.storage.repository import RunRepository
-
-    settings = _settings()
-    return RunRepository(settings["database_path"], settings["artifact_root"])
-
-
 def cmd_init(_args) -> int:
-    repo = _repository()
-    print(f"Storage initialized at {repo.db_path}")
-    print(f"Artifact root: {repo.artifact_root}")
+    settings = _settings()
+    db_path = settings["database_path"]
+    initialize(db_path)
+    print(f"Storage initialized at {db_path}")
     return 0
 
 
 def cmd_status(_args) -> int:
-    repo = _repository()
-    stats = repo.stats()
-    print(f"Database: {repo.db_path}")
-    print(f"Artifact root: {repo.artifact_root}")
-    print("Runs:")
-    for status, count in sorted(stats["runs"].items()):
-        print(f"  {status}: {count}")
-    print("Generation jobs:")
-    for status, count in sorted(stats["generation_jobs"].items()):
-        print(f"  {status}: {count}")
-    print(f"Cache entries: {stats['cache_entries']}")
-    print(f"Expired cache entries: {stats['expired_cache_entries']}")
-    return 0
-
-
-def cmd_purge(args) -> int:
     settings = _settings()
-    retention = args.retention_days or settings["cleanup_retention_days"]
-    repo = _repository()
-    result = repo.purge_expired(retention_days=retention)
-    print(f"Removed {result['removed_cache_entries']} expired cache entries")
-    print(f"Removed runs: {', '.join(result['removed_runs']) or 'none'}")
-    print(f"Removed orphan artifact folders: {', '.join(result['removed_orphan_folders']) or 'none'}")
+    db_path = settings["database_path"]
+    initialize(db_path)
+    conn = connect(db_path)
+    try:
+        playlists_cnt = conn.execute("SELECT COUNT(*) FROM playlists").fetchone()[0]
+        videos_cnt = conn.execute("SELECT COUNT(*) FROM videos").fetchone()[0]
+        transcripts_cnt = conn.execute("SELECT COUNT(*) FROM transcripts").fetchone()[0]
+        summaries_cnt = conn.execute("SELECT COUNT(*) FROM summaries").fetchone()[0]
+        usage_cnt = conn.execute("SELECT COUNT(*) FROM usage_ledger").fetchone()[0]
+        print(f"Database: {db_path}")
+        print(f"Playlists: {playlists_cnt}")
+        print(f"Videos: {videos_cnt}")
+        print(f"Transcripts: {transcripts_cnt}")
+        print(f"Summaries: {summaries_cnt}")
+        print(f"Usage ledger records: {usage_cnt}")
+    finally:
+        conn.close()
     return 0
 
 
@@ -95,10 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("init", help="Create/migrate the database.")
-    subparsers.add_parser("status", help="Show run/cache/job status.")
-
-    purge = subparsers.add_parser("purge", help="Purge expired cache and aged runs/artifacts.")
-    purge.add_argument("--retention-days", type=int, default=None)
+    subparsers.add_parser("status", help="Show pipeline status.")
 
     legacy = subparsers.add_parser(
         "delete-legacy", help="Delete legacy pipeline_output_* folders (explicit only)."
@@ -111,8 +98,6 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_init(args)
     if command == "status":
         return cmd_status(args)
-    if command == "purge":
-        return cmd_purge(args)
     if command == "delete-legacy":
         return cmd_delete_legacy(args)
     parser.error(f"Unknown command: {command}")

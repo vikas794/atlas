@@ -1,17 +1,5 @@
-from __future__ import annotations
+"""Application use cases.
 
-from .search_pipeline import SearchPipelineUseCase
-from .generate_transcripts import GenerateTranscriptsUseCase
-from .generate_summaries import GenerateSummariesUseCase
-from .generate_comparison import GenerateComparisonUseCase
-from .generate_assignments import GenerateAssignmentsUseCase
-from .generate_quiz import GenerateQuizUseCase
-
-__all__ = [
-    "SearchPipelineUseCase",
-    "GenerateTranscriptsUseCase",
-    "GenerateSummariesUseCase",
-    "GenerateComparisonUseCase",
-    "GenerateAssignmentsUseCase",
-    "GenerateQuizUseCase",
-]
+The playlist-to-notes pipeline use cases live here. The legacy search-run
+and quiz orchestrators were removed in the v1 rebuild.
+"""

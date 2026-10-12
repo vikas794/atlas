@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **atlas** (2377 symbols, 5079 relationships, 204 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **atlas** (2437 symbols, 5162 relationships, 209 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -42,3 +42,11 @@ This project is indexed by GitNexus as **atlas** (2377 symbols, 5079 relationshi
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+# Atlas Product Spec & Design Source of Truth
+
+- **`Atlas_PRD.md`** is the source of truth for *what* to build: scope, functional requirements, data model, pipeline state machine, API contract, failure handling, Drive publishing, and milestone acceptance criteria. Read the relevant sections before implementing any feature, and do not add behavior the PRD lists as out of scope for v1.
+- **`design.md`** is the source of truth for *how the UI looks and behaves*: color tokens, typography, spacing, screens, components, status-badge mapping, and accessibility rules. Read it before any frontend work. Follow it instead of making ad hoc visual choices, and keep tokens in the single global stylesheet; never hardcode colors in components.
+- For any required implementation, check both files first. Backend/pipeline/API work follows `Atlas_PRD.md`; UI work follows `design.md` and the PRD sections it references (6, 7, 8, 15, 16).
+- If the code, the PRD and `design.md` disagree, or a requirement is ambiguous, stop and ask the user. Do not silently pick one, and do not edit either document unless asked.
+- Build in PRD milestone order (M1 to M6) unless the user directs otherwise.

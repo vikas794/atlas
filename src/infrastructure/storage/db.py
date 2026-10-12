@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from src.infrastructure.storage.migrations import MIGRATIONS
+from src.infrastructure.storage.migrations import FOREIGN_KEYS_OFF, MIGRATIONS
+
+logger = logging.getLogger(__name__)
 
 
 def now_iso() -> str:
@@ -50,8 +53,34 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     return conn
 
 
+def _backup_before_migrating(conn: sqlite3.Connection, db_path: Path, version: str) -> None:
+    """Copy an existing, populated database aside before its first pending migration.
+
+    Migration 0003 drops the legacy search-run tables and 0004 rebuilds ``videos``;
+    a plain copy next to the database is the cheapest safety net. Best effort: a
+    failed backup is logged and never blocks startup.
+    """
+    target = db_path.with_name(f"{db_path.name}.pre-{version}.bak")
+    if target.exists():
+        return
+    try:
+        dest = sqlite3.connect(str(target))
+        try:
+            conn.backup(dest)
+        finally:
+            dest.close()
+        logger.info("Backed up %s to %s before applying migration %s", db_path, target, version)
+    except Exception:
+        logger.warning("Could not back up %s before migration %s", db_path, version, exc_info=True)
+
+
 def initialize(db_path: str | Path) -> None:
-    """Create the database (if needed) and apply any pending migrations."""
+    """Create the database (if needed) and apply any pending migrations.
+
+    When an existing database that already has applied migrations is about to
+    receive a new one, a ``<db>.pre-<version>.bak`` copy is written first.
+    """
+    db_path = Path(db_path)
     conn = connect(db_path)
     try:
         conn.execute(
@@ -62,13 +91,24 @@ def initialize(db_path: str | Path) -> None:
         applied = {
             row["version"] for row in conn.execute("SELECT version FROM schema_migrations")
         }
-        for version, statements in MIGRATIONS:
-            if version in applied:
-                continue
+        pending = [m for m in MIGRATIONS if m[0] not in applied]
+        if applied and pending:
+            _backup_before_migrating(conn, db_path, pending[0][0])
+        for version, statements in pending:
+            fk_off = version in FOREIGN_KEYS_OFF
+            if fk_off:
+                # A no-op inside a transaction, so it must be set before BEGIN.
+                conn.execute("PRAGMA foreign_keys=OFF")
             conn.execute("BEGIN IMMEDIATE")
             try:
                 for statement in statements:
                     conn.execute(statement)
+                if fk_off:
+                    violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+                    if violations:
+                        raise sqlite3.IntegrityError(
+                            f"Migration {version} left {len(violations)} foreign key violation(s)"
+                        )
                 conn.execute(
                     "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                     (version, now_iso()),
@@ -77,6 +117,9 @@ def initialize(db_path: str | Path) -> None:
             except Exception:
                 conn.rollback()
                 raise
+            finally:
+                if fk_off:
+                    conn.execute("PRAGMA foreign_keys=ON")
     finally:
         conn.close()
 

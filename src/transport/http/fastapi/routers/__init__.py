@@ -1,3 +1,5 @@
-from . import pipeline, quiz, runs, usage
+"""FastAPI routers exposed by the Atlas API."""
 
-__all__ = ["pipeline", "quiz", "runs", "usage"]
+from . import drive_auth, usage
+
+__all__ = ["drive_auth", "usage"]

@@ -1,100 +1,61 @@
-# Atlas Project Configuration
-# Main configuration file for the YouTube transcript processing project
+# Atlas configuration
+#
+# THIS FILE MUST STAY FLAT. Every top-level key must be an AtlasSettings dataclass
+# field name (see src/config/settings.py) written in snake_case, e.g. `database_path`.
+#
+# AtlasSettings.from_dict() drops any key it does not recognise, so a nested layout
+# such as `api: {openai: {model: ...}}` is discarded wholesale and every setting
+# silently falls back to its dataclass default. Nested keys are NOT unpacked.
+#
+# Keys not listed below fall back to the dataclass defaults. Any field can be
+# overridden at runtime with ATLAS_<FIELD_NAME_IN_UPPERCASE>, and the notes/LLM
+# fields also with the unprefixed names documented in .env.example (NOTES_PROVIDER,
+# GEMINI_MODEL, OPENROUTER_MODEL, ...). Empty values count as unset.
 
-# API Configuration
-api:
-  openai:
-    model: "openai/gpt-5-mini"
-    timeout: 180  # seconds
-    max_retries: 3
-  youtube:
-    # YouTube Data API configuration
-    api_version: "v3"
-    max_results: 5
-    order: "relevance"
-    type: "video"
-    timeout: 30  # seconds
+# --- Storage -------------------------------------------------------------------
+database_path: "data/atlas.sqlite3"
 
-  gemini:
-    model: "gemini-3.6-flash"
-    timeout: 180
+# --- Secrets -------------------------------------------------------------------
+# These are the NAMES of the environment variables that hold the keys, never keys
+# themselves. Put the actual values in .env (see .env.example).
+openrouter_api_key_env: "OPENROUTER_API_KEY"
+youtube_api_key_env: "YOUTUBE_API_KEY"
+gemini_api_key_env: "GEMINI_API_KEY"
 
-# Processing Configuration
-processing:
-  # Parallel processing settings
-  workers:
-    auto_detect: true
-    min_workers: 2
-    max_workers: 16
-    cpu_ratio: 0.5  # Use 50% of available CPU cores for auto-detection
-    
-  # Transcript processing
-  transcripts:
-    language: "en"
-    format: "srt"
-    output_folder: "transcripts"
-    
-  # Summary processing
-  summaries:
-    output_folder: "summaries"
-    file_suffix: ".json"
+# --- Google OAuth --------------------------------------------------------------
+google_creds_path: "credentials.json"
+google_token_path: "token.json"
+drive_max_retries: 3
+drive_backoff_base_seconds: 1.0
+drive_backoff_cap_seconds: 10.0
 
-# File paths and directories
-paths:
-  # Prompt templates
-  prompts:
-    base_dir: "src/prompts"
-    summarizer_v1: "summarizer_youtube.yaml"
-    summarizer_v2: "summarizer_youtube_v2.yaml"
-    default_summarizer: "summarizer_youtube_v2.yaml"
-  
-  outputs:
-    transcripts: "transcripts"
-    summaries: "summaries"
-    logs: "logs"
-    quiz_output: "quiz_output"
+# --- Transcripts ---------------------------------------------------------------
+transcript_language: "en"
+transcript_output_folder: "transcripts"
 
-# Playlist Quiz Configuration
-playlist_quiz:
-  output_folder: "quiz_output"
-  delay_between_requests: 2  # seconds between quizzes to avoid Gemini rate limits
-  max_retries: 3             # retries per quiz if generation fails
-  transcript_max_retries: 4  # derived from the retry schedule length; kept for compatibility
-  transcript_retry_wait_seconds: [15, 30, 60, 120]  # explicit retry waits between attempts
-  transcript_retry_jitter_seconds: 5                # bounded jitter (seconds) added to each retry wait
-  transcript_delay_between_requests: 4
-  transcript_min_delay_between_videos: 15           # minimum delay between different videos
-  transcript_rate_limit_cooldown_seconds: 120       # pipeline-wide cooldown after any HTTP 429
+# --- Notes generation ----------------------------------------------------------
+notes_provider: "gemini"  # gemini | openrouter
+notes_model: ""  # empty -> use gemini_model / openrouter_model / the provider default
+gemini_model: "gemini-2.5-flash"
+gemini_input_token_limit: 1000000
+openrouter_model: ""
+openrouter_base_url: "https://openrouter.ai/api/v1"
+openrouter_input_token_limit: 128000
+notes_prompt_name: "notes_v1_1.yaml"  # the recorded prompt version is this file's own `version`
 
-# Storage Configuration (SQLite pipeline store)
-storage:
-  database_path: "data/atlas.sqlite3"
-  artifact_root: "data/artifacts"
-  cache_ttl_days: 30
-  cleanup_retention_days: 90
+# --- Pipeline concurrency & retries --------------------------------------------
+max_concurrent_videos: 2
+max_auto_retries: 4
+backoff_base_seconds: 5.0
+backoff_cap_seconds: 300.0
+worker_poll_interval_seconds: 2.0
+worker_shutdown_timeout_seconds: 5.0
 
-# Logging Configuration
-logging:
-  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-  format: "[%(levelname)s] %(message)s"
-  file_logging: false
-  log_file: "logs/atlas.log"
+# --- Paths ---------------------------------------------------------------------
+prompts_base_dir: "src/prompts"
 
-# YouTube Download Configuration
-download:
-  # yt-dlp options
-  skip_download: true
-  write_subtitles: true
-  write_automatic_sub: true
-  subtitles_format: "srt"
-  output_template: "%(id)s.%(ext)s"
-
-# Search Configuration
-search:
-  default_max_results: 10
-  description_max_length: 200
-  
-# Environment variables (defaults, can be overridden by actual env vars)
-environment:
-  openrouter_api_key_env: "OPENROUTER_API_KEY"
-  youtube_api_key_env: "YOUTUBE_API_KEY"
+# --- Logging -------------------------------------------------------------------
+log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+log_format: "%(asctime)s %(levelname)s %(name)s: %(message)s"
+log_file_logging: false
+log_file: "logs/atlas.log"

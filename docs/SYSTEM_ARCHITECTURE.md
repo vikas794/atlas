@@ -1,106 +1,100 @@
-# Atlas — System Architecture
+# Atlas - System Architecture
 
-> Describes the code **as it exists at commit `cc6af15`**. [`ARCHITECTURE.md`](ARCHITECTURE.md) is the original target design / migration plan; this document is the current-state reference.
->
-> Interactive diagram: open [`atlas-architecture.html`](../.archify/architecture-atlas-overview/atlas-architecture.html) in a browser (generated with [Archify](https://github.com/tt-a1i/archify); source JSON in `.archify/architecture-atlas-overview/candidate.json`).
+> Describes the code as it is now. The product spec is [`Atlas_PRD.md`](../Atlas_PRD.md);
+> [`ARCHITECTURE.md`](ARCHITECTURE.md) and `IMPLEMENTATION_PLAN.md` are the original (search-run era)
+> design notes and are historical.
 
 ## 1. What Atlas is
 
-An AI-assisted content-analysis platform for technical education. A learner searches YouTube, and Atlas pulls transcripts, summarizes each video with an LLM, compares the videos, and generates assignments. A separate flow turns a YouTube playlist into quizzes exported to Google Drive. A usage dashboard tracks token cost.
-
-## 2. System overview
+A single-user, local-first tool that turns a YouTube playlist into a Google Drive "course": a
+folder with one numbered Google Doc of AI-written notes per video plus an index Doc. Videos move
+through a persisted pipeline (queued -> fetching transcript -> generating notes -> pending review ->
+approved -> published) driven by a background worker; the user reviews, edits and approves in a web UI.
 
 ```
-Learner ─HTTP─▶ React SPA ─REST/SSE─▶ FastAPI transport ─▶ Use cases ─▶ LLM adapters ─▶ OpenRouter / Gemini
-                                            │                  ├──────▶ YouTube adapters ─▶ YouTube (Data API, yt-dlp)
-                                            │                  ├──────▶ Drive exporter ─▶ Google Drive
-                                            └─ reads ─▶ Storage adapters ◀─┘
-                                                           ├─▶ SQLite (runs, cache, usage ledger)
-                                                           └─▶ Artifact files (transcripts, summaries)
+Browser (React SPA) --REST/polling--> FastAPI --use cases--> ports --> adapters
+                                         |                              |- YouTube Data API   (playlist listing)
+                                         |                              |- yt-dlp             (transcripts)
+                                         |                              |- Gemini / OpenRouter (notes)
+                                         |                              |- Google Drive + Docs (publishing)
+                                         |                              `- SQLite             (all state)
+                                         `-- PlaylistWorker (same process, started by the app lifespan)
 ```
 
-| Runtime unit | Where | Notes |
-|---|---|---|
-| React SPA | `frontend/` | Vite, TypeScript, Tailwind, TanStack Query, Framer Motion |
-| API process | `backend/main.py` | One uvicorn/FastAPI app; also serves the built SPA when `frontend/dist` exists |
-| SQLite | `data/atlas.sqlite3` | Single file; WAL mode, foreign keys, busy timeout via `src/infrastructure/storage/db.py` |
-| Artifact files | `data/artifacts/` | Transcript / summary / assignment text per run + video |
-| External APIs | network | OpenRouter (OpenAI-compatible), Gemini, YouTube Data API, YouTube (yt-dlp), Google Drive |
-
-## 3. Layers (`src/`)
-
-Clean/hexagonal layout; dependencies should point inward.
+## 2. Layers (`src/`)
 
 | Layer | Path | Responsibility |
 |---|---|---|
-| Transport | `src/transport/http/fastapi/` | Routers, Pydantic request/response schemas, error mapping, correlation-id + request-logging middleware, DI wiring (`dependencies.py`) |
-| Application | `src/application/` | Six use cases (`search_pipeline`, `generate_transcripts`, `generate_summaries`, `generate_comparison`, `generate_assignments`, `generate_quiz`), DTOs, `ports/` (re-exports of domain interfaces), `artifact_readers/` (shape stored data for read endpoints) |
-| Domain | `src/domain/` | Models (video, transcript, summary, comparison, assignment, quiz), port interfaces (`interfaces/`), pure services (`RunHashComputer`, `CacheKeyBuilder`, `ComparisonInferenceService`), exceptions (`DomainError`, `ProviderError`, `CacheError`, `StorageError`) |
-| Infrastructure | `src/infrastructure/` | Adapters: `llm/openai`, `llm/gemini`, `youtube`, `transcript/ytdlp`, `google/drive`, `storage` (SQL repository, usage ledger, filesystem store, migrations), `cache/sql_cache` |
-| Config / shared | `src/config/`, `src/configs/config.yaml`, `src/prompts/*.yaml`, `src/shared/` | `AtlasSettings` (env `ATLAS_*` overrides), prompt + model registries, text helpers |
+| Domain | `src/domain/` | Models (`Playlist`, `Video`, `Transcript`, `Summary`, `Stage`, failure taxonomy), the stage machine, sync diffing, failure classification, Doc naming, Markdown-to-Docs conversion, and the **ports**: `PlaylistRepositoryPort`, `PlaylistProviderPort`, `TranscriptProviderPort`, `NotesGeneratorPort`, `DrivePublisherPort`, `UsageLedgerPort` |
+| Application | `src/application/` | Use cases (`IngestPlaylist`, `ProcessVideo`, user actions, `PublishPlaylist`) and `PlaylistWorker`. Depends only on ports. |
+| Infrastructure | `src/infrastructure/` | `youtube/playlist.py`, `transcript/ytdlp`, `llm/` (Gemini, OpenRouter, `factory.py`), `storage/` (SQLite repository, migrations, usage ledger), `google/` (Drive exporter + publisher) |
+| Transport | `src/transport/http/fastapi/` | Routers, schemas, error mapping, middleware, and `dependencies.py` - the composition root |
+| Config / shared | `src/config/`, `src/configs/config.yaml`, `src/prompts/`, `src/shared/` | `AtlasSettings` (env + yaml), versioned prompt files, redaction / logging / file helpers |
 
-Composition root: `src/transport/http/fastapi/dependencies.py` builds repositories, cache, ledger, artifact store and injects them into each use case via FastAPI `Depends`. Settings, prompt registry and model registry are `lru_cache` singletons.
+Retry policy: **`ProcessVideoUseCase` is the single owner of retries.** Adapters make exactly one
+provider call. A transient failure is stored with `next_retry_at`; the worker re-runs the video when
+it is due, up to `max_auto_retries`. After that the failure stays `transient` with no schedule
+(`retries_exhausted`) and only a manual retry runs it again.
 
-## 4. HTTP surface
+## 3. Data model (SQLite, `data/atlas.sqlite3`)
 
-| Router | Endpoints |
-|---|---|
-| `runs` (`/api/runs`) | `GET ""`, `/latest`, `/{id}`, `/{id}/videos`, `/{id}/transcripts`, `/{id}/summaries`, `/{id}/comparison`, `/{id}/assignments` — read-only, served from stored runs |
-| `pipeline` (`/api`) | `POST /pipeline/search`, `/runs/{id}/transcripts`, `/summaries`, `/comparison`, `/assignments` — each awaits the matching use case |
-| `quiz` (`/api/quiz`) | `POST /playlist`, `POST /playlist/stream` (SSE progress: worker thread + queue), `GET /drive-status`, `POST /credentials`, `POST /auth` |
-| `usage` | `GET /api/usage` — aggregate from the usage ledger |
-| app | `GET /api/health`, `POST /api/dev/shutdown` (token-guarded, dev only), catch-all SPA fallback (never shadows `/api/*`) |
+Migrations are numbered and applied automatically at startup (`storage/migrations.py`); a populated
+database is copied to `*.pre-<version>.bak` first.
 
-CORS origins come from `ATLAS_CORS_ORIGINS`.
+- `playlists`: ids, title, Drive folder/index Doc ids, `status` (`ingested` | `publishing` |
+  `published` | `publish_failed`), `last_publish_error`, `pad_width`, `index_digest`.
+- `videos`: **one row per playlist position** (`UNIQUE(playlist_id, position)`, positions are
+  **1-based**), `stage`, failure type/kind/reason, retry state, `drive_doc_id`, `removed_upstream`,
+  `duplicate_of_video_id` (a repeated video is processed once and its row reuses the first
+  summary), `run_token` (stale-run guard) and `regen_requested`.
+- `transcripts` (soft-deletable: text and raw subtitle file are removed, the audit row stays),
+  `summaries` (review/publish flags, `prompt_version` taken from the prompt file), `usage_ledger`.
 
-## 5. Key flows
+## 4. Worker and flows
 
-**Pipeline run** (each step is a separate call, driven from the dashboard):
-1. `search` → YouTube Data API → videos stored on a new `run` (cache-aware via `prefer_cache`).
-2. `transcripts` → yt-dlp fetches subtitles → text written to the artifact store, metadata/hash to SQLite.
-3. `summaries` → OpenAI-compatible LLM (OpenRouter by default) per video, with retry policy.
-4. `comparison` → rule-based `ComparisonInferenceService`, optionally enriched by `OpenAIInsightsProvider` (`use_ai_insights`).
-5. `assignments` → LLM generates assignments from summaries.
+`PlaylistWorker` (`application/worker.py`) runs inside the API process (FastAPI lifespan):
 
-**Quiz flow:** playlist URL → `YouTubePlaylistProvider` → transcripts → `GeminiQuizProvider` → `GoogleDriveExporter` (folder + docs). Progress streams to the UI over SSE.
+- **Video jobs:** queued videos (including `transcript_ready` ones and regenerate requests) and
+  transiently failed videos whose `next_retry_at` is due, with bounded concurrency. Writes carry the
+  video's `run_token`, so a reprocess/delete during a run discards the stale result.
+- **Publish jobs:** `POST /api/playlists/{id}/publish` validates, marks the playlist `publishing`
+  and returns 202; the worker runs it and records `published` / `publish_failed`.
+- **Crash recovery on start:** in-flight stages (`fetching_transcript`, `transcript_ready`,
+  `generating_notes`) are re-queued (a stored transcript is reused); playlists left `publishing` are
+  re-queued (publishing is idempotent).
+- **Shutdown:** running jobs get a short grace period, the rest are cancelled and recovered on the
+  next start.
 
-**Read path:** `runs` routers → `get_run_repository` + `artifact_readers` → JSON for the UI. No LLM calls.
+Publishing (`PublishPlaylistUseCase` + `GoogleDrivePublisher`): folder, then index Doc, then video
+Docs in position order. The publisher reports each Drive object to a progress sink the moment it
+exists, so the folder id, index Doc id and every Doc id are persisted immediately; creating a Doc and
+formatting it are separate retried steps, so a failure never orphans or duplicates a Doc. Doc names are
+`<position zero-padded to the width of the largest position> - <title>` and every Doc starts with that
+text as a Heading 1.
 
-## 6. Persistence, caching and staleness
+## 5. HTTP surface
 
-SQLite tables (`src/infrastructure/storage/migrations.py`): `runs`, `videos`, `transcripts`, `summaries`, `comparisons`, `assignments`, `generation_jobs`, `cache_entries`, `usage_ledger` (+ `schema_migrations`). Large text lives in files under `artifact_root`.
+`/api/playlists` (POST ingest - 201 new / 200 re-sync; GET list/detail/videos; POST process,
+reprocess, approve-all, publish (202); DELETE playlist, transcripts), `/api/videos/{id}` (GET,
+summary GET/PUT, approve, retry, regenerate (202), DELETE transcript), `/api/drive/*` (status,
+credentials upload, auth), `/api/usage`, `/api/health`. Errors use `{code, message, details}`:
+404 `NOT_FOUND`, 409 `CONFLICT` / `INVALID_STATE` / `DRIVE_AUTH_REQUIRED`, 422 validation,
+503 `CONFIG_MISSING`. The UI polls (no websockets).
 
-- **Cache keys:** `CacheKeyBuilder` (version `v2`) hashes `kind|params…` into a `CacheKey`; `SqlCacheAdapter` stores compressed payloads with a TTL (`cache_ttl_days`, default 30).
-- **Staleness:** `RunHashComputer` produces stable state hashes of videos / transcripts / summaries so downstream steps can tell whether their inputs changed; `refresh=true` forces regeneration.
-- **Cost tracking:** every LLM/provider call writes a `UsageRecord` to `usage_ledger`; `GET /api/usage` aggregates it.
+## 6. Configuration, logging, deployment
 
-## 7. Frontend (`frontend/src`)
+- Settings: `ATLAS_<FIELD>` > documented names (`NOTES_PROVIDER`, `GEMINI_MODEL`, ...) > `config.yaml` >
+  defaults; empty values count as unset. Keys come from `YOUTUBE_API_KEY`, `GEMINI_API_KEY`,
+  `OPENROUTER_API_KEY`.
+- Logging is configured at startup (`src/shared/logging_setup.py`): stderr (and optionally a rotating
+  file), every `extra` rendered as `key=value` (pipeline events carry `playlist_id` and `video_id`), all
+  output passed through the secret redactor.
+- Docker: one container runs API + frontend + worker; `./data`, `./transcripts` and a writable
+  `./secrets` are mounted; only `127.0.0.1:8000` is published. Google consent is done once on the host.
 
-- `lib/api.ts` — single fetch wrapper (`VITE_API_BASE_URL`, empty = same origin) plus SSE client for quiz streaming; `lib/types.ts` mirrors API schemas.
-- `features/pipeline/` — run form, dashboard, per-artifact tabs, assignment progress hook.
-- `features/quiz/` — playlist quiz panel, Google auth panel.
-- `features/usage/` — usage dashboard.
-- `components/ui`, `components/shared` — reusable primitives.
+## 7. Known limits
 
-## 8. Deployment
-
-Multi-stage `Dockerfile`: Node 20 builds the SPA, Python 3.13 + `uv` runs `uvicorn backend.main:app` on port 8000 and serves `frontend/dist`. `docker-compose.yml` publishes `8000:8000`, loads `.env`, and mounts `./data`, `./transcripts`, and read-only `credentials.json` / `token.json`.
-
-## 9. Known gaps (observed)
-
-- **Layering leaks:** use cases import concrete adapters (e.g. `YouTubeDataApiSearchProvider`, `YtDlpTranscriptProvider`, `OpenAISummarizerAdapter`, `GoogleDriveExporter`) instead of depending only on ports.
-- `SqlRunRepository` (the port implementation) is a thin async wrapper over the legacy sync `RunRepository` in `storage/repository.py` (`sql.py:31`); the legacy class also backs `storage/cli.py`.
-- Pipeline endpoints run work inside the request (no job queue); long runs rely on client timeouts. `generation_jobs` records job start/finish/fail per run, but no code was found that resumes interrupted jobs.
-- Single-process SQLite: fine for one container, not for horizontal scaling.
-- `credentials.json` / `token.json` live in the repo root (gitignored; mounted read-only into the container, not copied into the image).
-
-## 10. Regenerating the diagram
-
-```bash
-node .claude/skills/archify/bin/archify.mjs finalize architecture \
-  .archify/architecture-atlas-overview/candidate.json \
-  .archify/architecture-atlas-overview/atlas-architecture.html \
-  --repo-root . --quality showcase --json
-```
-
-Archify was installed with `npx skills add tt-a1i/archify --skill archify --agent claude-code --copy` (project-scoped, `.claude/skills/archify`). Ask Claude to "use archify" for workflow, sequence, data-flow or lifecycle diagrams.
+- Single process, single SQLite file: no horizontal scaling (by design for v1).
+- Between Drive returning a new Doc id and the database write that stores it there is a tiny window in
+  which a crash would orphan one Doc; it is not closed by name lookups.
+- A duplicate row whose first occurrence permanently fails stays queued (the UI shows `duplicate_of`).

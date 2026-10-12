@@ -1,77 +1,142 @@
+@import './tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  color: #f4f4f5;
-  background: #0b0d10;
-  font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/*
+ * Global base styles. Everything here reads a token from `tokens.css` —
+ * there are no hardcoded colors, gradients or font stacks left in the app
+ * (design.md section 2: flat design, solid colors, thin 1px borders).
+ */
+@layer base {
+  html {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: var(--size-body);
+    line-height: var(--leading-body);
+    font-weight: var(--font-weight-body);
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background-color: var(--bg);
+    color: var(--text);
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  /* Section 7: visible accent focus ring on every interactive element. */
+  :focus-visible {
+    outline: var(--focus-ring-width) solid var(--accent);
+    outline-offset: var(--focus-ring-offset);
+  }
+
+  ::selection {
+    background-color: var(--accent-soft);
+    color: var(--text);
+  }
+
+  /* Section 4: tables use tabular figures. */
+  table,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--bg);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: var(--border);
+    background-clip: padding-box;
+  }
 }
 
-* {
-  box-sizing: border-box;
+@layer components {
+  /* Section 7: inputs are 32px high with a 1px border. */
+  .input {
+    height: var(--control-height);
+    width: 100%;
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius);
+    background-color: var(--surface);
+    color: var(--text);
+    padding: 0 var(--space-3);
+    font-size: var(--size-body);
+    line-height: var(--leading-body);
+  }
+
+  .input::placeholder {
+    color: var(--text-muted);
+  }
+
+  .input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }
 
-html {
-  scroll-behavior: smooth;
+/* Spinner for in-flight stages (design.md 3.3). Kept outside reduced-motion. */
+@layer utilities {
+  .atlas-spin {
+    animation: atlas-spin 1s linear infinite;
+  }
 }
 
-body {
-  margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
-  background:
-    radial-gradient(circle at top, rgba(255, 255, 255, 0.04), transparent 26%),
-    linear-gradient(180deg, rgba(23, 25, 31, 0.96), rgba(11, 13, 16, 1)),
-    #0b0d10;
-  color: #f4f4f5;
+/*
+ * Section 8: respect prefers-reduced-motion. Transitions stay at 120ms and
+ * spinners keep animating (they convey progress); all other animation is off.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: var(--transition-duration) !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-spin,
+  .atlas-spin,
+  [data-motion='spinner'] {
+    animation: atlas-spin 1s linear infinite !important;
+  }
 }
 
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-button,
-input,
-select,
-textarea {
-  font: inherit;
-}
-
-::selection {
-  background: rgba(244, 244, 245, 0.18);
-  color: #fff;
-}
-
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.03);
-}
-
-::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  background-clip: padding-box;
-}
-
-#root {
-  min-height: 100vh;
+@keyframes atlas-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

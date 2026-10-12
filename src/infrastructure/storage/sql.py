@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from src.infrastructure.storage.db import connect, now_iso, transaction
-from src.domain.interfaces.storage import RunRepositoryPort
 from src.domain.interfaces.usage_ledger import (
     CacheAggregate,
     OperationAggregate,
@@ -17,176 +16,7 @@ from src.domain.interfaces.usage_ledger import (
     UsageLedgerPort,
     UsageRecord,
 )
-
-
-class SqlRunRepository(RunRepositoryPort):
-    """Async-facing adapter over the synchronous :class:`RunRepository`.
-
-    Delegates every method to the same-package ``RunRepository`` (a plain
-    sync SQLite implementation) so callers can await this port without the
-    concrete repository needing to know about asyncio.
-    """
-
-    def __init__(self, db_path: str | Path, artifact_root: str | Path) -> None:
-        from src.infrastructure.storage.repository import RunRepository
-
-        self._repo = RunRepository(db_path, artifact_root)
-
-    def _conn(self):
-        return self._repo._conn()
-
-    @contextmanager
-    def _tx(self) -> Iterator:
-        with self._repo._tx() as conn:
-            yield conn
-
-    async def create_run(
-        self,
-        run_id: str,
-        cache_key: str | None,
-        search_query: str,
-        normalized_query: str,
-        max_videos: int,
-        transcript_language: str,
-        is_fallback: bool,
-    ) -> str:
-        return self._repo.create_run(
-            run_id=run_id,
-            cache_key=cache_key,
-            search_query=search_query,
-            normalized_query=normalized_query,
-            max_videos=max_videos,
-            transcript_language=transcript_language,
-            is_fallback=is_fallback,
-        )
-
-    async def get_run(self, run_id: str) -> dict | None:
-        return self._repo.get_run(run_id)
-
-    async def list_runs(self) -> list[dict]:
-        return self._repo.list_runs()
-
-    async def latest_run(self) -> dict | None:
-        return self._repo.latest_run()
-
-    async def set_run_status(self, run_id: str, status: str, error: str | None = None) -> None:
-        self._repo.set_run_status(run_id, status, error)
-
-    async def set_videos(self, run_id: str, videos: list[dict]) -> None:
-        self._repo.set_videos(run_id, videos)
-
-    async def get_videos(self, run_id: str) -> list[dict]:
-        return self._repo.get_videos(run_id)
-
-    async def videos_state_hash(self, run_id: str) -> str:
-        return self._repo.videos_state_hash(run_id)
-
-    async def upsert_transcripts(
-        self,
-        run_id: str,
-        transcripts: list[dict],
-        settings: dict | None = None,
-    ) -> None:
-        self._repo.upsert_transcripts(run_id, transcripts, settings)
-
-    async def get_transcripts(self, run_id: str) -> list[dict]:
-        return self._repo.get_transcripts(run_id)
-
-    async def transcripts_state_hash(self, run_id: str) -> str:
-        return self._repo.transcripts_state_hash(run_id)
-
-    async def upsert_summaries(
-        self,
-        run_id: str,
-        summaries: list[dict],
-        settings: dict | None = None,
-    ) -> None:
-        self._repo.upsert_summaries(run_id, summaries, settings)
-
-    async def get_summaries(self, run_id: str) -> list[dict]:
-        return self._repo.get_summaries(run_id)
-
-    async def summaries_state_hash(self, run_id: str) -> str:
-        return self._repo.summaries_state_hash(run_id)
-
-    async def set_comparison(
-        self,
-        run_id: str,
-        rows: list[dict],
-        insights_report: dict,
-        recommendations: dict,
-        settings: dict | None = None,
-        status: str = "succeeded",
-        error: str | None = None,
-    ) -> None:
-        payload = {
-            "rows": rows,
-            "insights_report": insights_report,
-            "recommendations": recommendations,
-        }
-        self._repo.set_comparison(run_id, payload, settings, status, error)
-
-    async def get_comparison(self, run_id: str) -> dict | None:
-        """Return the persisted comparison row used by the comparison flow.
-
-        The legacy repository stores metadata such as ``status``, ``data``,
-        and the input/settings hashes alongside the generated payload.  The
-        application and HTTP layers both need those fields to decide whether
-        a result can be reused or returned directly.
-        """
-        return self._repo.get_comparison(run_id)
-
-    async def upsert_assignments(
-        self,
-        run_id: str,
-        assignments: list[dict],
-        settings: dict | None = None,
-    ) -> None:
-        self._repo.upsert_assignments(run_id, assignments, settings)
-
-    async def get_assignments(self, run_id: str) -> list[dict]:
-        return self._repo.get_assignments(run_id)
-
-    async def set_quiz_result(
-        self,
-        run_id: str,
-        result: dict,
-        settings: dict | None = None,
-    ) -> None:
-        self._repo.set_comparison(run_id, result, settings)
-
-    async def get_quiz_result(self, run_id: str) -> dict | None:
-        return self._repo.get_comparison(run_id)
-
-    async def recompute_run_hashes(self, run_id: str) -> None:
-        self._repo.recompute_run_hashes(run_id)
-
-    async def mark_stale_derived(self, run_id: str) -> None:
-        self._repo.mark_stale_derived(run_id)
-
-    async def purge_expired(self, retention_days: int = 90) -> dict:
-        return self._repo.purge_expired(retention_days)
-
-    async def stats(self) -> dict:
-        return self._repo.stats()
-
-    async def start_job(self, run_id: str, job_type: str, metadata: dict | None = None) -> None:
-        self._repo.start_job(run_id, job_type, metadata)
-
-    async def fail_job(self, run_id: str, job_type: str, error: str) -> None:
-        self._repo.fail_job(run_id, job_type, error)
-
-    async def finish_job(self, run_id: str, job_type: str) -> None:
-        self._repo.finish_job(run_id, job_type)
-
-    async def find_cached_run(self, cache_key: str) -> dict | None:
-        return self._repo.find_cached_run(cache_key)
-
-    async def put_cache_entry(self, cache_key: str, kind: str, run_id: str, normalized_query: str, settings: dict, ttl_days: int) -> None:
-        self._repo.put_cache_entry(cache_key, kind, run_id, normalized_query, settings, ttl_days)
-
-    async def touch_cache_hit(self, cache_key: str) -> None:
-        self._repo.touch_cache_hit(cache_key)
+from src.infrastructure.storage.db import connect, now_iso, transaction
 
 
 class SqlUsageLedger(UsageLedgerPort):
@@ -200,8 +30,18 @@ class SqlUsageLedger(UsageLedgerPort):
         self.db_path = Path(db_path)
         self._ensure_table()
 
-    def _conn(self):
-        return connect(self.db_path)
+    @contextmanager
+    def _conn(self) -> Iterator:
+        """A short-lived connection that is always closed.
+
+        ``sqlite3.Connection`` as a context manager only commits/rolls back; it never closes,
+        so the previous ``with connect(...)`` leaked one connection per call.
+        """
+        conn = connect(self.db_path)
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     def _ensure_table(self) -> None:
         with self._conn() as conn:
@@ -254,7 +94,10 @@ class SqlUsageLedger(UsageLedgerPort):
     # --- Refactor outline interface ---
 
     async def record(self, record: UsageRecord) -> None:
-        """Record a usage event (refactor outline interface)."""
+        """Record a usage event without blocking the event loop (runs in a worker thread)."""
+        await asyncio.to_thread(self._record_sync, record)
+
+    def _record_sync(self, record: UsageRecord) -> None:
         request_id = str(uuid.uuid4())
         now = now_iso()
         with self._conn() as conn:

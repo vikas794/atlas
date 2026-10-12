@@ -189,4 +189,180 @@ MIGRATIONS: list[tuple[str, list[str]]] = [
             "ALTER TABLE cache_entries ADD COLUMN value BLOB",
         ],
     ),
+    (
+        "0003_playlist_pipeline",
+        [
+            # --- Retire the legacy search-run schema -------------------------------
+            # Dropped child-first: every table below references runs(run_id) and
+            # foreign_keys=ON, so a parent cannot be dropped before its children.
+            # usage_ledger intentionally survives (its run_id is plain TEXT, not an
+            # FK) so the usage dashboard keeps its history.
+            "DROP TABLE IF EXISTS cache_entries",
+            "DROP TABLE IF EXISTS generation_jobs",
+            "DROP TABLE IF EXISTS assignments",
+            "DROP TABLE IF EXISTS comparisons",
+            "DROP TABLE IF EXISTS summaries",
+            "DROP TABLE IF EXISTS transcripts",
+            "DROP TABLE IF EXISTS videos",
+            "DROP TABLE IF EXISTS runs",
+            # --- Playlist ingestion -------------------------------------------------
+            """
+            CREATE TABLE playlists (
+                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                playlist_id        TEXT NOT NULL UNIQUE,
+                source_url         TEXT NOT NULL,
+                title              TEXT NOT NULL DEFAULT '',
+                video_count        INTEGER NOT NULL DEFAULT 0,
+                status             TEXT NOT NULL DEFAULT 'ingested',
+                drive_folder_id    TEXT,
+                drive_index_doc_id TEXT,
+                created_at         TEXT NOT NULL,
+                updated_at         TEXT NOT NULL,
+                last_synced_at     TEXT
+            )
+            """,
+            "CREATE INDEX idx_playlists_created ON playlists(created_at)",
+            # --- Videos ---------------------------------------------------------------
+            # UNIQUE (playlist_id, youtube_video_id): a video appearing twice in one
+            # playlist is stored and processed once. Its first YouTube position is
+            # kept verbatim, so published Doc numbering can contain gaps.
+            """
+            CREATE TABLE videos (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                playlist_id       INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+                youtube_video_id  TEXT NOT NULL,
+                title             TEXT NOT NULL DEFAULT '',
+                position          INTEGER NOT NULL DEFAULT 0,
+                stage             TEXT NOT NULL DEFAULT 'queued',
+                failure_type      TEXT,
+                failure_kind      TEXT,
+                failure_reason    TEXT,
+                retry_count       INTEGER NOT NULL DEFAULT 0,
+                next_retry_at     TEXT,
+                drive_doc_id      TEXT,
+                removed_upstream  INTEGER NOT NULL DEFAULT 0,
+                created_at        TEXT NOT NULL,
+                updated_at        TEXT NOT NULL,
+                UNIQUE (playlist_id, youtube_video_id)
+            )
+            """,
+            "CREATE INDEX idx_videos_playlist_stage ON videos(playlist_id, stage)",
+            "CREATE INDEX idx_videos_playlist_position ON videos(playlist_id, position)",
+            "CREATE INDEX idx_videos_youtube ON videos(youtube_video_id)",
+            # --- Transcripts ---------------------------------------------------------
+            # Soft delete (deleted_at) keeps the audit row per PRD section 7.
+            """
+            CREATE TABLE transcripts (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                video_id     INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+                content      TEXT NOT NULL,
+                language     TEXT NOT NULL DEFAULT 'en',
+                byte_size    INTEGER NOT NULL DEFAULT 0,
+                content_hash TEXT,
+                fetched_at   TEXT NOT NULL,
+                deleted_at   TEXT,
+                UNIQUE (video_id)
+            )
+            """,
+            "CREATE INDEX idx_transcripts_video ON transcripts(video_id)",
+            # --- Summaries -----------------------------------------------------------
+            # published_digest lets the UI show "Edited since publishing" by
+            # comparing the live content hash against the hash at publish time.
+            """
+            CREATE TABLE summaries (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                video_id         INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+                content          TEXT NOT NULL,
+                provider         TEXT,
+                model            TEXT,
+                prompt_version   TEXT,
+                generated_at     TEXT NOT NULL,
+                edited           INTEGER NOT NULL DEFAULT 0,
+                approved         INTEGER NOT NULL DEFAULT 0,
+                approved_at      TEXT,
+                published        INTEGER NOT NULL DEFAULT 0,
+                published_at     TEXT,
+                published_digest TEXT,
+                UNIQUE (video_id)
+            )
+            """,
+            "CREATE INDEX idx_summaries_video ON summaries(video_id)",
+        ],
+    ),
+    (
+        "0004_duplicates_publish_state",
+        [
+            # --- Publish state on the playlist (PRD section 16: publish runs in the
+            # background worker and the UI polls these). pad_width remembers the
+            # zero-pad width of already-published Doc names; index_digest the hash
+            # of the index Doc text last written to Drive.
+            "ALTER TABLE playlists ADD COLUMN last_publish_error TEXT",
+            "ALTER TABLE playlists ADD COLUMN pad_width INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE playlists ADD COLUMN index_digest TEXT",
+            # --- Raw subtitle artifact of a transcript, so a manual cleanup can delete
+            # the file as well as the DB text (PRD FR11).
+            "ALTER TABLE transcripts ADD COLUMN artifact_path TEXT",
+            # --- videos: one row per playlist POSITION (PRD section 20). The old
+            # UNIQUE (playlist_id, youtube_video_id) silently dropped repeated videos
+            # and made numbering disagree with YouTube. The new table keeps ids (so
+            # transcripts/summaries keep pointing at the same rows), replaces that
+            # constraint with UNIQUE (playlist_id, position), and adds:
+            #   duplicate_of_video_id - first occurrence of a repeated video
+            #   run_token             - bumped on reset/retry; stale tasks must not write
+            #   regen_requested       - "regenerate notes" was requested (worker job)
+            # Positions become 1-based: a playlist stored 0-based (it has a row at
+            # position 0) is shifted by one so numbering starts at 001. This runs with
+            # foreign keys OFF (see FOREIGN_KEYS_OFF) because dropping the old table
+            # would otherwise cascade-delete every transcript and summary.
+            """
+            CREATE TABLE videos_new (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                playlist_id           INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+                youtube_video_id      TEXT NOT NULL,
+                title                 TEXT NOT NULL DEFAULT '',
+                position              INTEGER NOT NULL DEFAULT 1,
+                stage                 TEXT NOT NULL DEFAULT 'queued',
+                failure_type          TEXT,
+                failure_kind          TEXT,
+                failure_reason        TEXT,
+                retry_count           INTEGER NOT NULL DEFAULT 0,
+                next_retry_at         TEXT,
+                drive_doc_id          TEXT,
+                removed_upstream      INTEGER NOT NULL DEFAULT 0,
+                duplicate_of_video_id INTEGER REFERENCES videos(id) ON DELETE SET NULL,
+                run_token             INTEGER NOT NULL DEFAULT 0,
+                regen_requested       INTEGER NOT NULL DEFAULT 0,
+                created_at            TEXT NOT NULL,
+                updated_at            TEXT NOT NULL,
+                UNIQUE (playlist_id, position)
+            )
+            """,
+            """
+            INSERT INTO videos_new (
+                id, playlist_id, youtube_video_id, title, position, stage, failure_type,
+                failure_kind, failure_reason, retry_count, next_retry_at, drive_doc_id,
+                removed_upstream, created_at, updated_at
+            )
+            SELECT
+                v.id, v.playlist_id, v.youtube_video_id, v.title,
+                v.position + CASE WHEN EXISTS (
+                    SELECT 1 FROM videos z WHERE z.playlist_id = v.playlist_id AND z.position = 0
+                ) THEN 1 ELSE 0 END,
+                v.stage, v.failure_type, v.failure_kind, v.failure_reason, v.retry_count,
+                v.next_retry_at, v.drive_doc_id, v.removed_upstream, v.created_at, v.updated_at
+            FROM videos v
+            """,
+            "DROP TABLE videos",
+            "ALTER TABLE videos_new RENAME TO videos",
+            "CREATE INDEX idx_videos_playlist_stage ON videos(playlist_id, stage)",
+            "CREATE INDEX idx_videos_youtube ON videos(playlist_id, youtube_video_id)",
+            "CREATE INDEX idx_videos_duplicate_of ON videos(duplicate_of_video_id)",
+        ],
+    ),
 ]
+
+#: Migrations that must run with ``PRAGMA foreign_keys = OFF`` (the pragma is a
+#: no-op inside a transaction, so the runner toggles it around the transaction).
+#: Needed for the SQLite "create new, copy, drop old, rename" table rebuild:
+#: with foreign keys ON, dropping the old table cascades into its children.
+FOREIGN_KEYS_OFF: frozenset[str] = frozenset({"0004_duplicates_publish_state"})

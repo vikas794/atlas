@@ -52,6 +52,14 @@ function Reset-LogFiles {
 
 Set-Location $repoRoot
 $env:PYTHONUTF8 = "1"
+
+# First run: create .env from the template so every documented setting is visible. Empty values
+# mean "use the default", so the copy is valid as-is; the keys still have to be filled in.
+$envFile = Join-Path $repoRoot ".env"
+if (-not (Test-Path $envFile)) {
+    Copy-Item (Join-Path $repoRoot ".env.example") $envFile
+    Write-Warning "Created .env from .env.example. Add YOUTUBE_API_KEY and GEMINI_API_KEY (or OPENROUTER_API_KEY with NOTES_PROVIDER=openrouter) before ingesting a playlist."
+}
 New-Item -ItemType Directory -Path $logsRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
 

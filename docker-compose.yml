@@ -1,3 +1,15 @@
+# Atlas in Docker. The container runs the API, the built frontend AND the background worker
+# (video processing, retries, publishing) in one process: `uvicorn backend.main:app` starts the
+# worker in its lifespan, so there is nothing else to run.
+#
+# Google Drive consent needs a browser and a local redirect (port 8080), so do it ONCE ON THE
+# HOST (see README "Google Drive setup"), then copy the two files into ./secrets:
+#
+#   mkdir secrets
+#   cp credentials.json token.json secrets/
+#
+# ./secrets is mounted WRITABLE on purpose: Google refreshes the access token regularly and
+# Atlas rewrites token.json when it does (a read-only mount makes every refresh fail).
 services:
   atlas:
     build:
@@ -6,12 +18,19 @@ services:
     image: atlas:latest
     container_name: atlas
     ports:
-      - "8000:8000"
+      # Only the web UI/API, and only on this machine (Atlas has no authentication).
+      # Port 8080 (the OAuth redirect) is intentionally NOT published.
+      - "127.0.0.1:8000:8000"
     env_file:
       - .env
+    environment:
+      # Paths inside the container; these win over anything in .env.
+      ATLAS_DATABASE_PATH: /app/data/atlas.sqlite3
+      ATLAS_TRANSCRIPT_OUTPUT_FOLDER: /app/transcripts
+      ATLAS_GOOGLE_CREDS_PATH: /app/secrets/credentials.json
+      ATLAS_GOOGLE_TOKEN_PATH: /app/secrets/token.json
     volumes:
-      - ./data:/app/data
+      - ./data:/app/data              # SQLite database: back this up (copy atlas.sqlite3)
       - ./transcripts:/app/transcripts
-      - ./credentials.json:/app/credentials.json:ro
-      - ./token.json:/app/token.json:ro
+      - ./secrets:/app/secrets        # credentials.json + token.json, writable
     restart: unless-stopped

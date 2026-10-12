@@ -1,272 +1,173 @@
 # Atlas
 
-> AI-powered content analysis platform for technical education workflows
+> Turn a YouTube playlist into a skimmable study "course": one Google Doc of AI-written notes
+> per video, plus an index Doc, in a Google Drive folder.
 
-Atlas combines a YouTube analysis pipeline, comparison analysis, and assignment generation into a single product-oriented experience. The current application uses a `FastAPI` backend and a React frontend while preserving the original Python pipeline modules for search, transcript extraction, summarization, comparison, and educational content generation.
+Atlas is a single-user, local-first tool. You paste a playlist link; Atlas fetches every video,
+gets each transcript, asks an LLM (Gemini by default, or OpenRouter) to write detailed notes
+with your own prompt, lets you review/edit/approve them in a web UI, and publishes the approved
+notes to Google Drive as numbered Docs (`001 - Title`, `002 - Title`, ...) with an index Doc on
+top. Re-running a playlist only processes the videos added since last time.
 
-## What Atlas Does
+What it does for you:
 
-### YouTube analysis pipeline
-- Search YouTube videos from a natural language query
-- Fetch subtitles and transcripts for selected videos
-- Generate structured AI summaries focused on technical learning outcomes
-- Compare multiple videos across depth, difficulty, teaching style, and audience fit
-- Generate educational assignments from the analyzed content
+- **Pipeline per video:** queued -> fetching transcript -> generating notes -> pending review ->
+  approved -> published, persisted in SQLite so nothing is ever recomputed unless you ask.
+- **Failure handling:** permanent failures (private/deleted video, no subtitles, ...) fail fast
+  with a readable reason; transient ones (rate limits, network) are retried automatically with
+  exponential backoff, up to `ATLAS_MAX_AUTO_RETRIES`, then wait for a manual retry.
+- **Background worker:** processing, retries and publishing run in a worker inside the API
+  process, so requests return immediately. After a crash or restart in-flight work resumes.
+- **Review UI:** status dashboard, inline editing, approve / approve-all, regenerate, retry.
+- **Drive publishing:** one folder per playlist, numbered Docs with a heading and shaded code
+  blocks, and an index Doc. Publishing is resumable and never duplicates Docs.
 
-### Product interface
-- Browse existing pipeline runs
-- Explore videos, transcripts, summaries, comparison outputs, and assignments in a modern React UI
-- Trigger fresh pipeline steps through the API when credentials are available
-
-## Tech Stack
-
-### Backend
-- `FastAPI`
-- `Pydantic`
-- Python 3.13
-- Existing pipeline modules in `src/`
-
-### Frontend
-- React
-- TypeScript
-- Vite
-- Tailwind CSS
-- TanStack Query
-- Framer Motion
+---
 
 ## Architecture
 
-Atlas is split into a typed API layer and a React client, while the core domain logic remains in the original Python modules.
+Hexagonal (ports and adapters):
 
-```mermaid
-flowchart LR
-  ReactFrontend[ReactFrontend] --> FastAPIBackend[FastAPIBackend]
-  FastAPIBackend --> RunService[RunService]
-  FastAPIBackend --> PipelineService[PipelineService]
-  RunService --> PipelineArtifacts[pipeline_output_Artifacts]
-  PipelineService --> YouTubePipeline[YouTubePipeline]
-  PipelineService --> YouTubeComparator[YouTubeOutputComparator]
-  PipelineService --> AssignmentGenerator[YouTubeAssignmentGenerator]
-```
+- `src/domain/` - models, the stage machine, sync diffing, failure classification, Doc naming,
+  Markdown-to-Docs conversion, and the ports (`PlaylistRepositoryPort`, `DrivePublisherPort`,
+  `NotesGeneratorPort`, `PlaylistProviderPort`, ...).
+- `src/application/` - use cases (ingest, process video, actions, publish) and the background
+  `PlaylistWorker`. They depend only on ports.
+- `src/infrastructure/` - adapters: YouTube Data API, yt-dlp transcripts, Gemini / OpenRouter
+  (`llm/`), SQLite (`storage/`), Google Drive/Docs (`google/`).
+- `src/transport/http/fastapi/` - REST API; `dependencies.py` is the composition root.
+- `frontend/` - React + TypeScript + Vite.
 
-### Backend responsibilities
-- Expose run metadata and artifact endpoints
-- Wrap the existing YouTube workflow
-- Read pipeline artifacts from `pipeline_output_*` folders
-- Provide execution endpoints for live searches and downstream pipeline steps
+See [`docs/SYSTEM_ARCHITECTURE.md`](docs/SYSTEM_ARCHITECTURE.md) and the product spec in
+[`Atlas_PRD.md`](Atlas_PRD.md).
 
-### Frontend responsibilities
-- Load the latest available run
-- Render structured search, transcript, summary, comparison, and assignment views
-- Trigger new runs and artifact generation through the API
+---
 
-## Core Modules
+## One-time setup
 
-### Existing domain modules
-- `src/youtube_pipeline.py`
-- `src/compare_youtube_outputs.py`
-- `src/assignment_generator.py`
-- `src/fetch_youtube_transcript.py`
-- `src/summarize_youtube_transcript.py`
-
-### Backend API layer
-- `backend/main.py`
-- `backend/routers/runs.py`
-- `backend/routers/pipeline.py`
-- `backend/services/run_service.py`
-- `backend/services/pipeline_service.py`
-- `backend/services/artifact_readers.py`
-
-### Frontend application
-- `frontend/src/App.tsx`
-- `frontend/src/features/pipeline/pipeline-dashboard.tsx`
-- `frontend/src/lib/api.ts`
-- `frontend/src/lib/types.ts`
-
-## Project Structure
-
-```text
-atlas/
-├── backend/                        # FastAPI application
-│   ├── main.py
-│   ├── routers/
-│   ├── schemas/
-│   └── services/
-├── frontend/                       # React + Vite frontend
-│   ├── src/
-│   ├── package.json
-│   └── vite.config.ts
-├── src/                            # Existing Python domain logic
-│   ├── youtube_pipeline.py
-│   ├── compare_youtube_outputs.py
-│   ├── assignment_generator.py
-│   └── configs/config.yaml
-├── pipeline_output_*/              # YouTube pipeline artifacts
-├── requirements.txt
-└── README.md
-```
-
-## Setup
-
-### Prerequisites
-- `uv` (Python package manager, install from https://docs.astral.sh/uv/getting-started/installation/)
-- Node.js 18+
-- npm
-- OpenRouter API key
-- YouTube Data API key
-
-### 1. Clone the repository
+Prerequisites: Python 3.13 with [`uv`](https://docs.astral.sh/uv/), Node.js 18+, and the keys
+below.
 
 ```bash
-git clone https://github.com/ishandutta0098/atlas
-cd atlas
+git clone <this repo> && cd atlas
+uv sync                       # backend dependencies
+cp .env.example .env          # then fill in the keys (below); empty values mean "default"
 ```
 
-### 2. Create Python environment and install dependencies
+Edit `.env`:
 
-```bash
-uv sync --locked --no-dev
-```
+| Variable | Needed for |
+|---|---|
+| `YOUTUBE_API_KEY` | **Required** to ingest playlists (YouTube Data API v3 key) |
+| `GEMINI_API_KEY` | Required when `NOTES_PROVIDER=gemini` (the default) |
+| `OPENROUTER_API_KEY` | Required when `NOTES_PROVIDER=openrouter` (OpenRouter, not OpenAI) |
 
-This creates a `.venv` with Python 3.13.13 and installs locked dependencies from `uv.lock`.
+Everything else in `.env.example` is optional and documented there (`NOTES_PROVIDER`,
+`NOTES_MODEL`, `GEMINI_MODEL`, `OPENROUTER_MODEL`, concurrency, retry limits, log level, ...).
+A key that is missing is reported with a clear message naming the variable (HTTP 503
+`CONFIG_MISSING` for the YouTube key, a permanent `config_error` failure on the video for an LLM
+key) - it never retries forever.
 
-### 3. Install frontend dependencies
+**Database migrations run automatically** when the app starts (`data/atlas.sqlite3` is created
+on first run). Nothing to run by hand.
 
-```bash
-cd frontend
-npm install
-cd ..
-```
+### Google Drive consent (once)
 
-### 4. Configure environment variables
+1. In the [Google Cloud Console](https://console.cloud.google.com/) create a project and enable
+   the **Google Drive API** and **Google Docs API**.
+2. Configure the OAuth consent screen (External, Testing; add yourself as a test user) with the
+   scopes `.../auth/drive.file` and `.../auth/documents`.
+3. Create an **OAuth client ID** of type **Desktop app**, download the JSON and save it as
+   `credentials.json` in the repository root (or upload it from the Settings screen).
+4. Complete the consent **once, on the machine that runs Atlas**: start Atlas, open the
+   Settings screen and press Authorize (or `POST /api/drive/auth`). A browser window opens and
+   Google redirects to `http://localhost:8080/`. The token is stored in `token.json` and refreshed
+   automatically.
 
-Create or update `.env` in the repository root:
+`GET /api/drive/status` reports `credentials_missing`, `needs_consent` or `authorized`
+(authorized means a valid or refreshable token exists). `credentials.json` and `token.json` are
+gitignored; never commit them.
 
-```bash
-OPENROUTER_API_KEY=your_openrouter_key
-YOUTUBE_API_KEY=your_youtube_key
-```
+---
 
-## Running Atlas
+## Start it (one command)
 
-Atlas runs as two processes during development: the FastAPI backend and the React frontend.
-
-### 1. Start the backend
-
-From the repository root:
-
-```bash
-uv run uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-Backend health endpoint:
-
-```text
-http://127.0.0.1:8000/api/health
-```
-
-### 2. Start the frontend
-
-In a second terminal:
-
-```bash
-cd frontend
-npm run dev
-```
-
-Frontend development URL:
-
-```text
-http://127.0.0.1:5173
-```
-
-The Vite dev server proxies `/api` requests to `http://127.0.0.1:8000` via `frontend/vite.config.ts`.
-
-## Build Commands
-
-### Frontend
-
-```bash
-cd frontend
-npm run lint
-npm run build
-```
-
-### Backend smoke check
-
-```bash
-uv run python -c "from fastapi.testclient import TestClient; from backend.main import app; client = TestClient(app); print(client.get('/api/health').json())"
-```
-
-### Python verification
-
-```bash
-uv sync --locked --dev
-uv run ruff check .
-uv run pytest
-uv pip check
-```
-
-## Development with the Launcher
-
-For a one-command development start on Windows:
+On Windows, from the repository root:
 
 ```powershell
-.\scripts\start-dev.ps1
+.\scripts\start-dev.ps1          # installs what is missing, starts backend + frontend, waits for both
+.\scripts\stop-dev.ps1           # stops them
 ```
 
-This uses `uv` to manage the Python 3.13.13 environment and locked dependencies automatically.
+Then open <http://127.0.0.1:5173> (API health: <http://127.0.0.1:8000/api/health>). See
+[`SETUP_SOP.md`](SETUP_SOP.md) for details. On other systems:
 
-## API Overview
+```bash
+uv run uvicorn backend.main:app --host 127.0.0.1 --port 8000     # API + background worker
+cd frontend && npm install && npm run dev                         # UI on http://127.0.0.1:5173
+```
 
-### Run and artifact endpoints
-- `GET /api/runs`
-- `GET /api/runs/latest`
-- `GET /api/runs/{run_id}`
-- `GET /api/runs/{run_id}/videos`
-- `GET /api/runs/{run_id}/transcripts`
-- `GET /api/runs/{run_id}/summaries`
-- `GET /api/runs/{run_id}/comparison`
-- `GET /api/runs/{run_id}/assignments`
+The worker starts and stops with the API process (the FastAPI lifespan); there is no separate
+worker to launch.
 
-### Pipeline execution endpoints
-- `POST /api/pipeline/search`
-- `POST /api/runs/{run_id}/transcripts`
-- `POST /api/runs/{run_id}/summaries`
-- `POST /api/runs/{run_id}/comparison`
-- `POST /api/runs/{run_id}/assignments`
+---
 
-## Application Flow
+## Docker
 
-### YouTube workflow
-1. Submit a query through the frontend
-2. Backend creates or reuses a pipeline run
-3. Video metadata is exposed from run artifacts
-4. Transcript, summary, comparison, and assignment artifacts are read or generated
-5. The frontend renders each stage as a separate structured view
+```bash
+cp .env.example .env                 # fill in the keys
+mkdir -p secrets && cp credentials.json token.json secrets/   # consent was done on the host
+docker compose up --build            # UI + API at http://127.0.0.1:8000
+```
 
-## Configuration
+- The container runs the API, the built frontend **and the background worker** in one process.
+- Do the Google consent **on the host once** (it needs a browser and the `localhost:8080`
+  redirect), then copy `credentials.json` and `token.json` into `./secrets`. That folder is
+  mounted **writable** because Atlas rewrites `token.json` when the token refreshes; the old
+  read-only file mounts made every refresh fail.
+- Only port 8000 is published, and only on `127.0.0.1` (Atlas has no authentication). Port 8080 is
+  not published; the consent flow does not run inside the container.
+- `./data` (the SQLite database) and `./transcripts` are mounted so nothing is lost on rebuild.
 
-Primary runtime configuration lives in `src/configs/config.yaml`.
+---
 
-Important settings include:
-- OpenRouter model selection
-- worker counts and concurrency behavior
-- transcript language defaults
-- YouTube API settings
-- prompt paths and output directory settings
+## SQLite database and backups
 
-## Data and Storage
+All playlists, transcripts, notes and unpublished edits live in one file, `data/atlas.sqlite3`
+(plus `-wal`/`-shm` side files while running). **That file is the only copy of your transcripts
+and unreviewed edits**, so back it up by copying it:
 
-### YouTube artifacts
-Each pipeline run writes files under a `pipeline_output_<timestamp>` folder:
-- `metadata/search_results_*.json`
-- `metadata/fetch_results_*.json`
-- `metadata/summary_results_*.json`
-- `transcripts/*.srt`
-- `summaries/*_summary.json`
-- `assignments/*_assignment.md`
+```bash
+# stop Atlas, then:
+cp data/atlas.sqlite3 backups/atlas-$(date +%Y%m%d).sqlite3
+# or, while running (safe with WAL):
+sqlite3 data/atlas.sqlite3 ".backup 'backups/atlas-backup.sqlite3'"
+```
+
+To restore, stop Atlas and put the backup in place of `data/atlas.sqlite3`.
+
+### Migration warning
+
+Migration **0003** (the move from the old search-run app to the playlist pipeline) **drops the
+legacy tables** `runs`, `videos`, `transcripts`, `summaries`, `comparisons`, `assignments`,
+`generation_jobs` and `cache_entries`. Only `usage_ledger` survives. Migration **0004** rebuilds
+`videos` (one row per playlist position, 1-based positions, duplicate-video support) and keeps
+all existing rows. Before applying any pending migration to an existing, populated database,
+Atlas now copies it to `data/atlas.sqlite3.pre-<migration>.bak` (e.g. `...pre-0003_playlist_pipeline.bak`).
+**If you have data in an old database you care about, copy the file yourself before upgrading too.**
+
+---
+
+## Quality checks
+
+```bash
+uv run ruff check .          # lint
+uv run pytest                # backend tests (temp SQLite; no network, no real keys)
+cd frontend && npm run lint && npm test && npm run build
+```
+
+---
 
 ## License
 
-MIT License. See `LICENSE` for details.
+MIT License. See [LICENSE](LICENSE).

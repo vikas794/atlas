@@ -1,12 +1,23 @@
 import type { HTMLAttributes } from 'react'
 
 import { cn } from '../../lib/utils'
+import { TONE_BADGE, type Tone } from '../../lib/tone'
 
-export function Badge({ className, ...props }: HTMLAttributes<HTMLSpanElement>) {
+/** Section 3.2 semantic tones. Each pairs a colored text color with a soft background. */
+export type BadgeTone = Tone
+
+interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
+  tone?: BadgeTone
+}
+
+export function Badge({ className, tone = 'neutral', ...props }: BadgeProps) {
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-full border border-white/8 bg-white/[0.04] px-3 py-1 text-[11px] font-medium uppercase tracking-[0.22em] text-zinc-200',
+        // Section 7: pill shape, 12px text, soft background + colored text.
+        // The caller supplies an icon so status never relies on color alone.
+        'inline-flex items-center gap-1 rounded-pill px-2 py-1 text-label',
+        TONE_BADGE[tone],
         className,
       )}
       {...props}

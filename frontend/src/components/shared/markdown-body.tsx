@@ -1,49 +1,85 @@
+import { Children, isValidElement, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 import { cn } from '../../lib/utils'
 
-export function MarkdownBody({ markdown }: { markdown: string }) {
+/** Pull the fence tag (`language-python`) out of the `<code>` inside `<pre>`. */
+function fenceLanguage(children: ReactNode): string {
+  const [child] = Children.toArray(children)
+  if (!isValidElement<{ className?: string }>(child)) return ''
+  const match = /language-([\w+#-]+)/.exec(child.props.className ?? '')
+  return match ? match[1] : ''
+}
+
+/**
+ * Rendered notes for the Review screen.
+ *
+ * Section 4: notes content is Lexend at 15px / 26px. Section 7: code blocks
+ * are JetBrains Mono 13px on `--surface-muted` with a 1px border, 6px radius,
+ * horizontal scroll and a language label in the top-right corner.
+ */
+export function MarkdownBody({ markdown, className }: { markdown: string; className?: string }) {
   return (
-    <div className="space-y-4 text-sm leading-7 text-zinc-300">
+    <div
+      className={cn(
+        'space-y-4 font-notes text-notes text-text',
+        '[&_h1]:text-section [&_h1]:font-semibold [&_h1]:text-text',
+        '[&_h2]:text-section [&_h2]:font-semibold [&_h2]:text-text',
+        '[&_h3]:text-body [&_h3]:font-semibold [&_h3]:text-text',
+        '[&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-5',
+        '[&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-5',
+        '[&_table]:w-full [&_table]:text-body [&_table]:font-ui [&_th]:border-b [&_th]:border-border [&_th]:bg-surface-muted [&_th]:text-left [&_th]:font-medium [&_th]:text-text-muted [&_td]:border-b [&_td]:border-border [&_td]:align-top',
+        '[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-text-muted',
+        '[&_hr]:border-border',
+        className,
+      )}
+    >
       <ReactMarkdown
         components={{
-          a: ({ className, ...props }) => (
+          a: ({ className: anchorClassName, ...props }) => (
             <a
-              className={cn('font-medium text-white underline decoration-white/20 underline-offset-4', className)}
+              className={cn('text-accent underline underline-offset-4', anchorClassName)}
               rel="noreferrer"
               target="_blank"
               {...props}
             />
           ),
-          h1: ({ className, ...props }) => (
-            <h1 className={cn('text-2xl font-semibold tracking-[-0.04em] text-white', className)} {...props} />
-          ),
-          h2: ({ className, ...props }) => (
-            <h2 className={cn('text-xl font-semibold tracking-[-0.03em] text-white', className)} {...props} />
-          ),
-          h3: ({ className, ...props }) => (
-            <h3 className={cn('text-base font-semibold text-white', className)} {...props} />
-          ),
-          p: ({ className, ...props }) => <p className={cn('text-zinc-300', className)} {...props} />,
-          ul: ({ className, ...props }) => <ul className={cn('space-y-2 pl-5', className)} {...props} />,
-          ol: ({ className, ...props }) => <ol className={cn('space-y-2 pl-5', className)} {...props} />,
-          li: ({ className, ...props }) => <li className={cn('text-zinc-300', className)} {...props} />,
-          pre: ({ className, ...props }) => (
-            <pre
-              className={cn(
-                'overflow-x-auto rounded-2xl border border-white/8 bg-black/20 p-4 text-[13px] leading-6 text-zinc-100',
-                className,
-              )}
-              {...props}
-            />
-          ),
-          code: ({ className, ...props }) => (
-            <code
-              className={cn('rounded-md bg-white/[0.05] px-1.5 py-0.5 text-[0.92em] text-zinc-100', className)}
-              {...props}
-            />
-          ),
+          pre: ({ children, className: preClassName, ...props }) => {
+            const language = fenceLanguage(children)
+            return (
+              <div className="relative">
+                {language ? (
+                  <span className="absolute right-2 top-1 select-none text-label text-text-muted">
+                    {language}
+                  </span>
+                ) : null}
+                <pre
+                  className={cn(
+                    'overflow-x-auto rounded border border-border bg-surface-muted p-3 pt-8',
+                    'font-mono text-code text-text',
+                    preClassName,
+                  )}
+                  {...props}
+                >
+                  {children}
+                </pre>
+              </div>
+            )
+          },
+          code: ({ className: codeClassName, ...props }) => {
+            const isFenced = /language-/.test(codeClassName ?? '')
+            return (
+              <code
+                className={cn(
+                  'font-mono text-code text-text',
+                  isFenced ? null : 'rounded bg-surface-muted px-1',
+                  codeClassName,
+                )}
+                {...props}
+              />
+            )
+          },
         }}
         remarkPlugins={[remarkGfm]}
       >

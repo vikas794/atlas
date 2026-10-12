@@ -1,174 +1,260 @@
 import type {
-  ArtifactGenerationRequest,
-  PipelineActionResponse,
-  RunBundle,
-  RunManifest,
-  SearchRequest,
-  PlaylistQuizRequest,
-  PlaylistQuizProgress,
-  PlaylistQuizStatusResponse,
+  ActionResponse,
+  DriveActionResponse,
   DriveStatusResponse,
+  Playlist,
+  PlaylistListResponse,
+  PublishResponse,
+  Stage,
+  Summary,
   UsageAggregateResponse,
+  Video,
+  VideoListResponse,
 } from './types'
+import { ALL_STAGES } from './types'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-    ...init,
-  })
+const DEFAULT_ERROR_MESSAGE = 'Request failed.'
+const NETWORK_ERROR_MESSAGE = 'Could not reach the Atlas backend.'
+
+/**
+ * Every failed call throws this, so a screen can show `message` to the user
+ * and branch on `code` instead of guessing from the HTTP status.
+ */
+export class ApiError extends Error {
+  code: string
+  details: unknown
+  status: number
+
+  constructor(message: string, code: string, details: unknown, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.code = code
+    this.details = details
+    this.status = status
+  }
+}
+
+/** Fallback codes for responses that do not carry the backend envelope. */
+function codeForStatus(status: number): string {
+  if (status === 400 || status === 422) return 'validation_error'
+  if (status === 401 || status === 403) return 'unauthorized'
+  if (status === 404) return 'not_found'
+  if (status === 409) return 'conflict'
+  if (status === 413) return 'payload_too_large'
+  if (status >= 500) return 'server_error'
+  return 'request_failed'
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+/**
+ * Turn a non-OK response into an `ApiError`. The backend envelope is
+ * `{ code, message, details }`.
+ */
+async function toApiError(response: Response): Promise<ApiError> {
+  const fallback = response.statusText || DEFAULT_ERROR_MESSAGE
+  let body: unknown
+
+  try {
+    const raw = await response.text()
+    if (raw) body = JSON.parse(raw) as unknown
+  } catch {
+    body = undefined
+  }
+
+  if (!isRecord(body)) {
+    return new ApiError(fallback, codeForStatus(response.status), {}, response.status)
+  }
+
+  const message =
+    typeof body.message === 'string' && body.message.trim()
+      ? body.message
+      : typeof body.detail === 'string' && body.detail.trim()
+        ? body.detail
+        : fallback
+
+  const code =
+    typeof body.code === 'string' && body.code.trim() ? body.code : codeForStatus(response.status)
+
+  return new ApiError(message, code, body.details ?? {}, response.status)
+}
+
+function defaultHeaders(init?: RequestInit): HeadersInit {
+  const supplied = init?.headers ?? {}
+  const isMultipart = typeof FormData !== 'undefined' && init?.body instanceof FormData
+  if (isMultipart) return supplied
+  return { 'Content-Type': 'application/json', ...supplied }
+}
+
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let response: Response
+
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: defaultHeaders(init),
+    })
+  } catch (cause) {
+    throw new ApiError(NETWORK_ERROR_MESSAGE, 'network_error', { cause: String(cause) }, 0)
+  }
 
   if (!response.ok) {
-    let message = 'Request failed.'
-    try {
-      const errorBody = (await response.json()) as { detail?: string }
-      message = errorBody.detail ?? message
-    } catch {
-      message = response.statusText || message
-    }
-    throw new Error(message)
+    throw await toApiError(response)
   }
 
-  return (await response.json()) as T
+  if (response.status === 204) return undefined as T
+
+  const text = await response.text()
+  if (!text) return undefined as T
+
+  return JSON.parse(text) as T
 }
 
-export function getRuns() {
-  return request<{ runs: RunManifest[] }>('/api/runs')
+/* --------------------------------------------------------------- Playlists */
+
+export function getPlaylists(params?: { limit?: number; offset?: number }) {
+  const query = new URLSearchParams()
+  if (params?.limit) query.set('limit', String(params.limit))
+  if (params?.offset) query.set('offset', String(params.offset))
+  const qs = query.toString()
+  return request<PlaylistListResponse>(`/api/playlists${qs ? `?${qs}` : ''}`)
 }
 
-export function getLatestRun() {
-  return request<RunManifest>('/api/runs/latest')
+export function getPlaylist(id: number) {
+  return request<Playlist>(`/api/playlists/${id}`)
 }
 
-export async function getRunBundle(runId: string): Promise<RunBundle> {
-  const [videos, transcripts, summaries, comparison, assignments] = await Promise.all([
-    request<RunBundle['videos']>(`/api/runs/${runId}/videos`),
-    request<RunBundle['transcripts']>(`/api/runs/${runId}/transcripts`),
-    request<RunBundle['summaries']>(`/api/runs/${runId}/summaries`),
-    request<RunBundle['comparison']>(`/api/runs/${runId}/comparison`),
-    request<RunBundle['assignments']>(`/api/runs/${runId}/assignments`),
-  ])
-
-  return {
-    videos,
-    transcripts,
-    summaries,
-    comparison,
-    assignments,
-  }
-}
-
-export function searchPipeline(payload: SearchRequest) {
-  return request<PipelineActionResponse>('/api/pipeline/search', {
+export function ingestPlaylist(url: string) {
+  return request<Playlist>('/api/playlists', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ url }),
   })
 }
 
-export function triggerTranscripts(runId: string, payload: ArtifactGenerationRequest) {
-  return request<PipelineActionResponse>(`/api/runs/${runId}/transcripts`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
-}
-
-export function triggerSummaries(runId: string, payload: ArtifactGenerationRequest) {
-  return request<PipelineActionResponse>(`/api/runs/${runId}/summaries`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
-}
-
-export function triggerComparison(runId: string, payload: ArtifactGenerationRequest) {
-  return request<PipelineActionResponse>(`/api/runs/${runId}/comparison`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
-}
-
-export function triggerAssignments(runId: string, payload: ArtifactGenerationRequest) {
-  return request<PipelineActionResponse>(`/api/runs/${runId}/assignments`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
-}
-
-export function generatePlaylistQuiz(payload: PlaylistQuizRequest) {
-  return request<PlaylistQuizStatusResponse>('/api/quiz/playlist', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
-}
-
-export async function generatePlaylistQuizStream(
-  payload: PlaylistQuizRequest,
-  onProgress: (progress: PlaylistQuizProgress) => void,
+export function getPlaylistVideos(
+  playlistId: number,
+  params?: { stage?: Stage; search?: string; page?: number; page_size?: number }
 ) {
-  const response = await fetch(`${API_BASE_URL}/api/quiz/playlist/stream`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-
-  if (!response.ok || !response.body) {
-    throw new Error('Unable to start quiz generation.')
-  }
-
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-
-  while (true) {
-    const { done, value } = await reader.read()
-    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done })
-    const events = buffer.split('\n\n')
-    buffer = events.pop() ?? ''
-
-    for (const event of events) {
-      const data = event.split('\n').find((line) => line.startsWith('data: '))?.slice(6)
-      if (!data) continue
-      const message = JSON.parse(data) as PlaylistQuizProgress | ({ type: 'complete' } & PlaylistQuizStatusResponse) | { type: 'error'; message: string }
-      if (message.type === 'progress') onProgress(message)
-      if (message.type === 'complete') return message
-      if (message.type === 'error') throw new Error(message.message)
-    }
-
-    if (done) break
-  }
-
-  throw new Error('Quiz generation ended before returning a result.')
+  const query = new URLSearchParams()
+  // The backend 500s on unknown stages, so never forward anything else.
+  if (params?.stage && ALL_STAGES.includes(params.stage)) query.set('stage', params.stage)
+  if (params?.search) query.set('search', params.search)
+  if (params?.page) query.set('page', String(params.page))
+  if (params?.page_size) query.set('page_size', String(params.page_size))
+  const qs = query.toString()
+  return request<VideoListResponse>(`/api/playlists/${playlistId}/videos${qs ? `?${qs}` : ''}`)
 }
+
+export function processPlaylist(playlistId: number) {
+  return request<ActionResponse>(`/api/playlists/${playlistId}/process`, {
+    method: 'POST',
+  })
+}
+
+export function reprocessPlaylist(playlistId: number) {
+  return request<ActionResponse>(`/api/playlists/${playlistId}/reprocess`, {
+    method: 'POST',
+  })
+}
+
+export function deletePlaylist(playlistId: number) {
+  return request<ActionResponse>(`/api/playlists/${playlistId}`, {
+    method: 'DELETE',
+  })
+}
+
+export function approveAllVideos(playlistId: number) {
+  return request<ActionResponse>(`/api/playlists/${playlistId}/approve-all`, {
+    method: 'POST',
+  })
+}
+
+export function publishPlaylist(playlistId: number) {
+  return request<PublishResponse>(`/api/playlists/${playlistId}/publish`, {
+    method: 'POST',
+  })
+}
+
+export function cleanupPlaylistTranscripts(playlistId: number) {
+  return request<ActionResponse>(`/api/playlists/${playlistId}/transcripts`, {
+    method: 'DELETE',
+  })
+}
+
+/* ------------------------------------------------------------------ Videos */
+
+export function getVideoSummary(videoId: number) {
+  return request<Summary>(`/api/videos/${videoId}/summary`)
+}
+
+export function updateVideoSummary(videoId: number, content: string) {
+  return request<Summary>(`/api/videos/${videoId}/summary`, {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
+  })
+}
+
+export function approveVideo(videoId: number) {
+  return request<Video>(`/api/videos/${videoId}/approve`, {
+    method: 'POST',
+  })
+}
+
+export function retryVideo(videoId: number) {
+  return request<Video>(`/api/videos/${videoId}/retry`, {
+    method: 'POST',
+  })
+}
+
+/**
+ * Sync backends answer 200 with the new summary; async ones answer 202 with an
+ * action envelope and the notes arrive later (poll the video stage).
+ */
+export type RegenerateResponse = Summary | ActionResponse
+
+export function isSummaryResponse(value: RegenerateResponse | undefined): value is Summary {
+  return Boolean(value) && typeof (value as Summary).content === 'string'
+}
+
+export function regenerateVideo(videoId: number) {
+  return request<RegenerateResponse>(`/api/videos/${videoId}/regenerate`, {
+    method: 'POST',
+  })
+}
+
+export function deleteVideoTranscript(videoId: number) {
+  return request<ActionResponse>(`/api/videos/${videoId}/transcript`, {
+    method: 'DELETE',
+  })
+}
+
+/* ------------------------------------------------------------------ Drive */
 
 export function getDriveStatus() {
-  return request<DriveStatusResponse>('/api/quiz/drive-status')
+  return request<DriveStatusResponse>('/api/drive/status')
 }
 
-export async function uploadCredentials(file: File) {
+export function uploadDriveCredentials(file: File) {
   const formData = new FormData()
   formData.append('file', file)
 
-  const response = await fetch(`${API_BASE_URL}/api/quiz/credentials`, {
+  return request<DriveActionResponse>('/api/drive/credentials', {
     method: 'POST',
     body: formData,
-    // note: intentionally omit 'Content-Type': 'application/json'
   })
-
-  if (!response.ok) {
-    throw new Error('Failed to upload credentials')
-  }
-
-  return response.json() as Promise<{ status: string; message: string }>
 }
 
 export function authenticateDrive() {
-  return request<{ status: string; message: string }>('/api/quiz/auth', {
+  return request<DriveActionResponse>('/api/drive/auth', {
     method: 'POST',
   })
 }
+
+/* ------------------------------------------------------------------ Usage */
 
 export interface UsageQueryParams {
   provider?: string
@@ -192,4 +278,4 @@ export function getUsageAggregate(params?: UsageQueryParams) {
   return request<UsageAggregateResponse>(`/api/usage${query ? `?${query}` : ''}`)
 }
 
-export type { UsageAggregateResponse }
+export type { DriveActionResponse, DriveStatusResponse, UsageAggregateResponse }

@@ -10,34 +10,40 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 
 from src.config import load_settings
-from src.transport.http.fastapi.dependencies import (
-    get_run_repository,
-    get_cache,
-    get_usage_ledger,
-)
+from src.shared.logging_setup import configure_logging
+from src.transport.http.fastapi.dependencies import get_usage_ledger, get_worker
 from src.transport.http.fastapi.errors import register_error_handlers
-from src.transport.http.fastapi.middleware import CorrelationIdMiddleware, RequestLoggingMiddleware
-from src.transport.http.fastapi.routers import pipeline, quiz, runs, usage
-from src.transport.http.fastapi.schemas.usage import UsageAggregateResponse
+from src.transport.http.fastapi.middleware import (
+    CorrelationIdMiddleware,
+    RequestLoggingMiddleware,
+)
+from src.transport.http.fastapi.routers import drive_auth, playlists, usage, videos
+
+# Under uvicorn only uvicorn's own loggers are configured; without this, every src.* log line
+# (including all pipeline events) is dropped. Honours log_level / log_file_logging / log_file.
+configure_logging(load_settings())
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan - initialize connections on startup."""
-    # Initialize repository connection
-    get_run_repository()
-    # Initialize cache
-    get_cache()
+    """Application lifespan - run migrations and start the background worker.
+
+    The worker (video processing, retries, publishing, crash recovery) lives inside this
+    process, so it also runs in the Docker container started with ``uvicorn backend.main:app``.
+    """
     # Initialize usage ledger
     get_usage_ledger()
+    worker = get_worker()
+    await worker.start()
     yield
-    # Cleanup on shutdown if needed
+    # Cleanup on shutdown
+    await worker.stop()
 
 
 app = FastAPI(
     title="Atlas API",
     version="1.0.0",
-    description="FastAPI backend for the Atlas YouTube analysis platform.",
+    description="FastAPI backend for the Atlas playlist-to-notes pipeline.",
     lifespan=lifespan,
 )
 
@@ -60,10 +66,10 @@ app.add_middleware(RequestLoggingMiddleware)
 register_error_handlers(app)
 
 # Include routers
-app.include_router(runs.router)
-app.include_router(pipeline.router)
-app.include_router(quiz.router)
 app.include_router(usage.router)
+app.include_router(drive_auth.router)
+app.include_router(playlists.router)
+app.include_router(videos.router)
 
 
 @app.get("/api/health")

@@ -1,146 +1,195 @@
+"""YouTube Data API adapter that lists a playlist's videos (PRD section 5, stage 1).
+
+Three properties matter here:
+
+* **1-based positions.** The API's ``snippet.position`` is 0-based; Atlas numbers
+  Docs from ``001`` (PRD section 19), so the provider hands out dense 1-based
+  positions over the videos it keeps. Private and deleted placeholders are
+  skipped, so the numbering has no holes.
+* **Thread safety.** The methods are blocking and run in ``asyncio.to_thread``.
+  ``httplib2`` (under ``googleapiclient``) is not thread-safe, so a fresh service
+  is built per call rather than shared. Nothing here touches the event loop:
+  usage recording is the caller's job (it runs in async context).
+* **No key leaks.** ``HttpError`` text contains the request URL including
+  ``key=<API key>``. Every message that leaves this module is redacted, and
+  tracebacks are never logged (they would print the same text).
+"""
+
 from __future__ import annotations
 
+import json
 import logging
 import os
-from datetime import datetime
+from collections.abc import Callable
+from typing import Any
 
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
-from src.domain.exceptions import ProviderError
-from src.domain.interfaces.usage_ledger import UsageLedgerPort, UsageRecord
-from src.domain.models.video import VideoId, VideoMetadata
+from src.domain.exceptions import ConfigurationError, ProviderError
+from src.domain.models.playlist import FailureType, PipelineError
+from src.domain.services.sync_diff import PlaylistEntry
+from src.shared.redaction import redact_text
 
 logger = logging.getLogger(__name__)
 
+#: Titles the API returns for items it cannot describe.
+_PLACEHOLDER_TITLES = frozenset({"Private video", "Deleted video"})
+
+#: The playlistItems endpoint caps a page at 50 items.
+PAGE_SIZE = 50
+
+DEFAULT_API_KEY_ENV = "YOUTUBE_API_KEY"
+
+#: ``error.errors[].reason`` values that mean "this playlist cannot be read".
+_PLAYLIST_UNAVAILABLE_REASONS = frozenset(
+    # "invalid" is what the API answers (HTTP 400) for a malformed playlist id.
+    {"playlistNotFound", "playlistItemsNotAccessible", "playlistForbidden", "forbidden", "invalid"}
+)
+#: Reasons that mean Atlas' own key is wrong or not enabled for the Data API.
+_KEY_REJECTED_REASONS = frozenset({"keyInvalid", "accessNotConfigured", "ipRefererBlocked"})
+_QUOTA_REASONS = frozenset({"quotaExceeded", "rateLimitExceeded", "dailyLimitExceeded"})
+
+
+def _error_reasons(exc: HttpError) -> set[str]:
+    """Extract ``error.errors[].reason`` codes from an HttpError body, best effort."""
+    try:
+        body = json.loads(exc.content.decode("utf-8")) if exc.content else {}
+    except (ValueError, AttributeError):
+        return set()
+    errors = body.get("error", {}).get("errors", []) if isinstance(body, dict) else []
+    return {str(item.get("reason", "")) for item in errors if isinstance(item, dict)}
+
 
 class YouTubePlaylistProvider:
-    """YouTube playlist video fetcher.
+    """Reads playlist titles and videos from the YouTube Data API v3.
 
-    Preserves exact logic from legacy playlist_quiz_generator.py:PlaylistVideoFetcher.
+    Args:
+        api_key: The API key. When omitted it is read from ``api_key_env``.
+        api_key_env: Name of the environment variable that holds the key (used
+            for the error message only when ``api_key`` is not given).
+        service_factory: Builds a ``googleapiclient`` YouTube service. Tests
+            inject a stub here; production builds a real service per call.
+
+    Raises:
+        ConfigurationError: If no key is available and no ``service_factory`` is given.
     """
 
     def __init__(
         self,
-        usage_ledger: UsageLedgerPort | None = None,
         api_key: str | None = None,
+        *,
+        api_key_env: str = DEFAULT_API_KEY_ENV,
+        service_factory: Callable[[], Any] | None = None,
     ) -> None:
-        self.usage_ledger = usage_ledger
-        self.api_key = api_key or os.getenv("YOUTUBE_API_KEY")
-        if not self.api_key:
-            raise ProviderError(
-                "YOUTUBE_API_KEY is not set.", provider="youtube"
+        self.api_key = (api_key or os.getenv(api_key_env) or "").strip()
+        if not self.api_key and service_factory is None:
+            raise ConfigurationError(
+                f"{api_key_env} is not set. Create a YouTube Data API v3 key in Google Cloud "
+                f"and put it in .env as {api_key_env}=<key> (it is required to list playlists)."
             )
-        self._youtube = build("youtube", "v3", developerKey=self.api_key)
-        self.logger = logging.getLogger(__name__)
+        self._service_factory = service_factory
+
+    def _service(self) -> Any:
+        """A new service per call: ``httplib2`` objects must not be shared across threads."""
+        if self._service_factory is not None:
+            return self._service_factory()
+        return build("youtube", "v3", developerKey=self.api_key, cache_discovery=False)
+
+    def _translate(self, exc: Exception, what: str) -> Exception:
+        """Map a client exception to a classified, redacted Atlas error."""
+        detail = redact_text(str(exc), self.api_key)
+        if isinstance(exc, HttpError):
+            status = int(getattr(exc.resp, "status", 0) or 0)
+            reasons = _error_reasons(exc)
+            if reasons & _KEY_REJECTED_REASONS:
+                return ConfigurationError(
+                    "The YouTube API rejected the configured key (YOUTUBE_API_KEY). Check that it "
+                    "is valid and that the YouTube Data API v3 is enabled for its project."
+                )
+            if reasons & _QUOTA_REASONS:
+                return PipelineError(
+                    FailureType.RATE_LIMITED,
+                    "The YouTube Data API quota was exceeded; try again later.",
+                )
+            if status == 404 or reasons & _PLAYLIST_UNAVAILABLE_REASONS:
+                return PipelineError(
+                    FailureType.PLAYLIST_UNAVAILABLE,
+                    "The playlist was not found or is private.",
+                )
+            return ProviderError(f"YouTube {what} failed (HTTP {status}): {detail}", provider="youtube")
+        return ProviderError(f"YouTube {what} failed: {detail}", provider="youtube")
 
     def fetch_playlist_videos(
         self, playlist_id: str, max_videos: int | None = None
-    ) -> list[VideoMetadata]:
-        """Fetches videos from a playlist.
+    ) -> list[PlaylistEntry]:
+        """Fetch a playlist's videos in upstream order with dense **1-based** positions.
 
-        Returns list of VideoMetadata with video_id, title, channel, position.
-
-        Args:
-            playlist_id: YouTube playlist ID
-            max_videos: Maximum number of videos to fetch (None for all)
-
-        Returns:
-            List of VideoMetadata objects
+        Private and deleted placeholders are skipped (and not numbered). Pages of
+        50 are followed until exhausted or ``max_videos`` is reached.
 
         Raises:
-            ProviderError: If the API call fails
+            PipelineError: ``PLAYLIST_UNAVAILABLE`` (missing/private) or
+                ``RATE_LIMITED`` (quota).
+            ConfigurationError: The API key is rejected.
+            ProviderError: Any other API or network failure (message redacted).
         """
-        videos: list[VideoMetadata] = []
-        next_page_token: str | None = None
-
+        entries: list[PlaylistEntry] = []
+        page_token: str | None = None
         try:
+            service = self._service()
             while True:
-                request = self._youtube.playlistItems().list(
-                    part="snippet,contentDetails",
-                    playlistId=playlist_id,
-                    maxResults=50,
-                    pageToken=next_page_token,
+                response = (
+                    service.playlistItems()
+                    .list(
+                        part="snippet,contentDetails",
+                        playlistId=playlist_id,
+                        maxResults=PAGE_SIZE,
+                        pageToken=page_token,
+                    )
+                    .execute()
                 )
-                response = request.execute()
-
                 for item in response.get("items", []):
                     snippet = item.get("snippet", {})
-                    video_title = snippet.get("title", "")
-                    if video_title in ["Private video", "Deleted video"]:
+                    title = snippet.get("title", "")
+                    if title in _PLACEHOLDER_TITLES:
                         continue
-
-                    video_id = snippet.get("resourceId", {}).get("videoId")
-                    if video_id:
-                        videos.append(
-                            VideoMetadata(
-                                video_id=VideoId(value=video_id),
-                                title=video_title,
-                                position=snippet.get("position", 0),
-                                channel=snippet.get("videoOwnerChannelTitle", ""),
-                                url=f"https://www.youtube.com/watch?v={video_id}",
-                                description="",
-                                published_at=snippet.get("publishedAt", ""),
-                                duration="Unknown",
-                            )
+                    video_id = snippet.get("resourceId", {}).get("videoId") or item.get(
+                        "contentDetails", {}
+                    ).get("videoId")
+                    if not video_id:
+                        continue
+                    entries.append(
+                        PlaylistEntry(
+                            youtube_video_id=video_id,
+                            title=title,
+                            position=len(entries) + 1,
                         )
-
-                    if max_videos and len(videos) >= max_videos:
-                        break
-
-                next_page_token = response.get("nextPageToken")
-                if not next_page_token or (
-                    max_videos and len(videos) >= max_videos
-                ):
-                    break
-
-            result = videos[:max_videos] if max_videos else videos
-
-            if self.usage_ledger:
-                record = UsageRecord(
-                    timestamp=datetime.utcnow(),
-                    provider="youtube",
-                    operation="playlist_fetch",
-                    model="youtube-data-api-v3",
-                    input_tokens=0,
-                    output_tokens=0,
-                    total_tokens=0,
-                    cost_usd=0.0,
-                    cache_hit=False,
-                    run_id=None,
-                    video_id=None,
-                )
-                import asyncio
-                asyncio.create_task(self.usage_ledger.record_usage(record))
-
-            return result
-
-        except Exception as e:
-            self.logger.exception("YouTube playlist fetch failed")
-            raise ProviderError(
-                f"Error fetching playlist videos: {str(e)}", provider="youtube"
-            ) from e
+                    )
+                    if max_videos and len(entries) >= max_videos:
+                        return entries
+                page_token = response.get("nextPageToken")
+                if not page_token:
+                    return entries
+        except (PipelineError, ConfigurationError):
+            raise
+        except Exception as exc:
+            translated = self._translate(exc, "playlist fetch")
+            # Message only, never a traceback: HttpError repr carries the key URL.
+            logger.warning("YouTube playlist fetch failed for %s: %s", playlist_id, translated)
+            raise translated from None
 
     def get_playlist_title(self, playlist_id: str) -> str:
-        """Get the title of a playlist.
-
-        Args:
-            playlist_id: YouTube playlist ID
-
-        Returns:
-            Playlist title or "Untitled Playlist" if not found
-        """
+        """Return the playlist title, or ``"Untitled Playlist"`` when the API has none."""
         try:
-            request = self._youtube.playlists().list(
-                part="snippet",
-                id=playlist_id,
-            )
-            response = request.execute()
-            items = response.get("items", [])
-            if items:
-                return items[0]["snippet"]["title"]
-            return "Untitled Playlist"
-        except Exception as e:
-            self.logger.exception("Failed to get playlist title")
-            raise ProviderError(
-                f"Error getting playlist title: {str(e)}", provider="youtube"
-            ) from e
+            response = self._service().playlists().list(part="snippet", id=playlist_id).execute()
+        except (PipelineError, ConfigurationError):
+            raise
+        except Exception as exc:
+            translated = self._translate(exc, "playlist title lookup")
+            logger.warning("YouTube title lookup failed for %s: %s", playlist_id, translated)
+            raise translated from None
+        items = response.get("items", [])
+        if items:
+            return str(items[0].get("snippet", {}).get("title") or "Untitled Playlist")
+        return "Untitled Playlist"

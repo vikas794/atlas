@@ -1,0 +1,158 @@
+/**
+ * Atlas design tokens — the single source of truth for every visual value.
+ *
+ * Every value below is copied verbatim from `design.md` sections 2, 3, 4 and 5.
+ * Components must read these custom properties (directly, or through the
+ * matching Tailwind utilities in `tailwind.config.js`). Never hardcode a hex
+ * value, font stack or spacing value inside a component.
+ *
+ * Light is the default theme (design.md section 2). Dark is a tuned override,
+ * not an inversion: dark navy surfaces, soft off-white text, and status colors
+ * brightened so they do not wash out on a dark surface.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ---------------------------------------------------------------------
+   * 3.1 Neutrals and accent
+   * ------------------------------------------------------------------ */
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-muted: #f1f5f9;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --accent: #4f46e5;
+  --accent-soft: #eef2ff;
+  --on-accent: #ffffff;
+
+  /* ---------------------------------------------------------------------
+   * 3.2 Status colors (semantic) — one foreground and one soft background
+   *     per meaning. Amber ("review") always means "this needs you".
+   * ------------------------------------------------------------------ */
+  --st-neutral-fg: #475569;
+  --st-neutral-bg: #f1f5f9;
+  --st-progress-fg: #2563eb;
+  --st-progress-bg: #eff6ff;
+  --st-review-fg: #b45309;
+  --st-review-bg: #fffbeb;
+  --st-success-fg: #15803d;
+  --st-success-bg: #f0fdf4;
+  --st-error-fg: #b91c1c;
+  --st-error-bg: #fef2f2;
+  --st-warn-fg: #c2410c;
+  --st-warn-bg: #fff7ed;
+
+  /* ---------------------------------------------------------------------
+   * 4. Typography — three fonts, each with exactly one job.
+   * ------------------------------------------------------------------ */
+  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-notes: 'Lexend', 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --font-weight-body: 400;
+  --font-weight-label: 500;
+  --font-weight-title: 600;
+
+  --size-page-title: 22px;
+  --leading-page-title: 28px;
+  --size-section-title: 16px;
+  --leading-section-title: 24px;
+  --size-body: 14px;
+  --leading-body: 20px;
+  --size-label: 12px;
+  --leading-label: 16px;
+  --size-notes: 15px;
+  --leading-notes: 26px;
+  --size-code: 13px;
+  --leading-code: 20px;
+
+  /* ---------------------------------------------------------------------
+   * 5. Spacing, layout and sizing (4px base scale — use only these six)
+   * ------------------------------------------------------------------ */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --page-max-width: 1280px;
+  --page-padding: 24px;
+  --topbar-height: 56px;
+  --row-height: 40px;
+  --control-height: 32px;
+  --modal-width: 480px;
+  --icon-size: 16px;
+  --icon-size-lg: 20px;
+
+  /* Section 2: small rounded corners, thin 1px borders, almost no shadows. */
+  --radius: 6px;
+  --radius-modal: 10px;
+  --border-width: 1px;
+  --progress-bar-height: 8px;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 1px;
+  --transition-duration: 120ms;
+}
+
+/* -----------------------------------------------------------------------
+ * Dark theme — applied when the user picks dark explicitly, or when the OS
+ * asks for dark and the user has not pinned light via the manual toggle.
+ * --------------------------------------------------------------------- */
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --surface-muted: #273449;
+  --border: #334155;
+  --text: #e2e8f0;
+  --text-muted: #94a3b8;
+  --accent: #818cf8;
+  --accent-soft: #2a2f5c;
+  --on-accent: #0f172a;
+
+  --st-neutral-fg: #cbd5e1;
+  --st-neutral-bg: #334155;
+  --st-progress-fg: #60a5fa;
+  --st-progress-bg: #1e3a5f;
+  --st-review-fg: #fbbf24;
+  --st-review-bg: #4a3a12;
+  --st-success-fg: #4ade80;
+  --st-success-bg: #14392a;
+  --st-error-fg: #f87171;
+  --st-error-bg: #4a1d1d;
+  --st-warn-fg: #fb923c;
+  --st-warn-bg: #4a2a12;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --bg: #0f172a;
+    --surface: #1e293b;
+    --surface-muted: #273449;
+    --border: #334155;
+    --text: #e2e8f0;
+    --text-muted: #94a3b8;
+    --accent: #818cf8;
+    --accent-soft: #2a2f5c;
+    --on-accent: #0f172a;
+
+    --st-neutral-fg: #cbd5e1;
+    --st-neutral-bg: #334155;
+    --st-progress-fg: #60a5fa;
+    --st-progress-bg: #1e3a5f;
+    --st-review-fg: #fbbf24;
+    --st-review-bg: #4a3a12;
+    --st-success-fg: #4ade80;
+    --st-success-bg: #14392a;
+    --st-error-fg: #f87171;
+    --st-error-bg: #4a1d1d;
+    --st-warn-fg: #fb923c;
+    --st-warn-bg: #4a2a12;
+  }
+}

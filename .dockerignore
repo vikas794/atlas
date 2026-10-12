@@ -23,6 +23,8 @@ transcripts
 .env.*
 credentials.json
 token.json
+secrets
+client_secret*.json
 
 node_modules
 frontend/node_modules

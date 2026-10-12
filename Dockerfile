@@ -20,5 +20,8 @@ COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
 ENV PATH="/app/.venv/bin:$PATH"
 
+# data/ (SQLite), transcripts/ and secrets/ are mounted by docker-compose.yml.
+RUN mkdir -p /app/data /app/transcripts /app/secrets
+
 EXPOSE 8000
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

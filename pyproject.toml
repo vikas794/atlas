@@ -15,8 +15,6 @@ dependencies = [
     "google-genai==2.16.0",
     "openai==2.52.0",
     "yt-dlp==2026.7.4",
-    "tabulate==0.10.0",
-    "pandas==3.0.5",
     "pydantic==2.13.4",
 ]
 
@@ -33,6 +31,9 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Pin basetemp inside the repo. The OS temp dir is ACL-restricted on some Windows
+# setups, which makes the default `pytest-of-<user>` tree fail with PermissionError.
+addopts = "--basetemp=.pytest_tmp"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 python_files = ["test_*.py"]
@@ -59,3 +60,7 @@ select = [
 ignore = [
     "E501",  # line too long (handled by line-length)
 ]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI parameter markers are evaluated once at import time by design.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.File", "fastapi.Header"]
