@@ -45,6 +45,8 @@ from src.domain.services.doc_naming import (
 )
 from src.domain.services.markdown_to_docs import markdown_to_docs, render_index_doc
 from src.infrastructure.google.drive import (
+    DOC_MIME_TYPE,
+    FOLDER_MIME_TYPE,
     GoogleDriveAuthorizationRequired,
     GoogleDriveExporter,
     is_permanent_refresh_error,
@@ -184,6 +186,35 @@ class GoogleDrivePublisher(DrivePublisherPort):
                     reason=f"Google Drive error: {redact_text(str(exc))}",
                 ) from None
 
+    async def _create_once(
+        self,
+        create: Callable[[], str],
+        find: Callable[[], str | None],
+        *,
+        find_first: bool,
+    ) -> str:
+        """Create a Drive object at most once, even across ambiguous failures.
+
+        A create can succeed on Google's side while its response is lost (timeout,
+        connection reset, 5xx after commit). Retrying it blindly would leave a duplicate
+        Doc or folder in Drive, so every *retry* first looks for the object by its private
+        ``appProperties`` tag and adopts it. With ``find_first`` the very first attempt
+        looks too, which also covers a crash between Drive creating the object and the
+        database storing its id.
+        """
+        state = {"attempted": False}
+
+        def attempt() -> str:
+            if find_first or state["attempted"]:
+                found = find()
+                if found:
+                    logger.info("Adopted an existing Drive object (id=%s) instead of re-creating it", found)
+                    return found
+            state["attempted"] = True
+            return create()
+
+        return await self._retry_call(attempt)
+
     async def _backoff(self, attempt: int, what: str) -> None:
         delay = compute_delay(attempt, self.backoff_base, self.backoff_cap)
         logger.warning(
@@ -216,7 +247,14 @@ class GoogleDrivePublisher(DrivePublisherPort):
         folder_id = existing_folder_id
         if not folder_id:
             folder_name = playlist_folder_name(playlist_title)
-            folder_id = await self._retry_call(self.exporter.create_folder, folder_name)
+            folder_tag = {"atlasKind": "playlist-folder", "atlasPlaylist": str(playlist_pk)}
+            # Only retries search: a first-time search could adopt the folder of an older,
+            # deleted playlist that happened to have the same database id.
+            folder_id = await self._create_once(
+                lambda: self.exporter.create_folder(folder_name, folder_tag),
+                lambda: self.exporter.find_tagged_file(folder_tag, mime_type=FOLDER_MIME_TYPE),
+                find_first=False,
+            )
             await sink.folder_created(folder_id)
             logger.info("Created Drive folder (id=%s)", folder_id, extra=ctx)
 
@@ -224,8 +262,13 @@ class GoogleDrivePublisher(DrivePublisherPort):
         index_doc_id = existing_index_doc_id
         idx_name = index_doc_name(playlist_title)
         if not index_doc_id:
-            index_doc_id = await self._retry_call(
-                self.exporter.create_empty_doc, idx_name, folder_id
+            index_tag = {"atlasKind": "index", "atlasPlaylist": str(playlist_pk)}
+            index_doc_id = await self._create_once(
+                lambda: self.exporter.create_empty_doc(idx_name, folder_id, index_tag),
+                lambda: self.exporter.find_tagged_file(
+                    index_tag, mime_type=DOC_MIME_TYPE, parent_id=folder_id
+                ),
+                find_first=True,
             )
             await sink.index_doc_created(index_doc_id)
             update_index = True
@@ -275,13 +318,26 @@ class GoogleDrivePublisher(DrivePublisherPort):
             else:
                 # Create, persist the id, THEN format: a failure while formatting leaves a
                 # Doc whose id is already stored, so the retry updates it instead of
-                # creating a duplicate.
-                doc_id = await self._retry_call(self.exporter.create_empty_doc, name, folder_id)
+                # creating a duplicate. A Doc created earlier whose id never reached the
+                # database (lost response, crash) is found by its tag and adopted.
+                doc_tag = {"atlasKind": "video", "atlasVideo": str(entry.video_pk)}
+                doc_id = await self._create_once(
+                    lambda name=name, tag=doc_tag: self.exporter.create_empty_doc(
+                        name, folder_id, tag
+                    ),
+                    lambda tag=doc_tag: self.exporter.find_tagged_file(
+                        tag, mime_type=DOC_MIME_TYPE, parent_id=folder_id
+                    ),
+                    find_first=True,
+                )
                 await sink.doc_created(entry.video_pk, doc_id)
+                # Written as a full-body replace (read the end index, clear, insert), not a
+                # bare insert: if a write succeeds but its response is lost, the retry
+                # rewrites the body instead of inserting the notes a second time.
                 await self._retry_call(
-                    self.exporter.apply_requests,
+                    self.exporter.replace_doc_body,
                     doc_id,
-                    markdown_to_docs(markdown, start_index=1),
+                    lambda start, md=markdown: markdown_to_docs(md, start_index=start),
                 )
                 created_count += 1
                 created = True

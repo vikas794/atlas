@@ -32,6 +32,9 @@ _REAUTH_HINT = (
     "(complete the consent once on the machine that runs Atlas)."
 )
 
+FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
+DOC_MIME_TYPE = "application/vnd.google-apps.document"
+
 #: Docs ``body.content`` of a brand-new, empty document ends at index 2 (one empty paragraph).
 _EMPTY_DOC_END_INDEX = 2
 
@@ -348,16 +351,30 @@ class GoogleDriveExporter:
     # Drive / Docs operations (each is one idempotency-friendly API step)
     # ------------------------------------------------------------------
 
-    def create_folder(self, folder_name: str) -> str:
-        """Create a folder in Google Drive and return its ID."""
-        file_metadata = {
+    def create_folder(
+        self, folder_name: str, app_properties: dict[str, str] | None = None
+    ) -> str:
+        """Create a folder in Google Drive and return its ID.
+
+        ``app_properties`` are private key/values (visible only to this OAuth client) that
+        :meth:`find_tagged_file` can search for, so a create whose response was lost can be
+        detected instead of repeated.
+        """
+        file_metadata: dict[str, Any] = {
             "name": folder_name,
-            "mimeType": "application/vnd.google-apps.folder",
+            "mimeType": FOLDER_MIME_TYPE,
         }
+        if app_properties:
+            file_metadata["appProperties"] = dict(app_properties)
         file = self.drive_service.files().create(body=file_metadata, fields="id").execute()
         return file.get("id")
 
-    def create_empty_doc(self, title: str, folder_id: str | None) -> str:
+    def create_empty_doc(
+        self,
+        title: str,
+        folder_id: str | None,
+        app_properties: dict[str, str] | None = None,
+    ) -> str:
         """Create an empty Google Doc (in ``folder_id``, or the root) and return its ID.
 
         Creating and filling a Doc are separate steps on purpose: the caller persists
@@ -366,12 +383,52 @@ class GoogleDriveExporter:
         """
         file_metadata: dict[str, Any] = {
             "name": title,
-            "mimeType": "application/vnd.google-apps.document",
+            "mimeType": DOC_MIME_TYPE,
         }
         if folder_id:
             file_metadata["parents"] = [folder_id]
+        if app_properties:
+            file_metadata["appProperties"] = dict(app_properties)
         doc = self.drive_service.files().create(body=file_metadata, fields="id").execute()
         return doc.get("id")
+
+    def find_tagged_file(
+        self,
+        app_properties: dict[str, str],
+        *,
+        mime_type: str,
+        parent_id: str | None = None,
+    ) -> str | None:
+        """Return the id of a non-trashed file this app created with ``app_properties``.
+
+        Used before (re)creating a Drive object, so a create that succeeded on Google's
+        side but whose response never arrived (timeout, connection reset, crash before
+        the id was stored) is adopted instead of duplicated. ``drive.file`` scope only
+        ever sees files this app created, which is exactly the search space wanted.
+        """
+
+        def quoted(value: str) -> str:
+            return value.replace("\\", "\\\\").replace("'", "\\'")
+
+        clauses = [f"mimeType = '{quoted(mime_type)}'", "trashed = false"]
+        if parent_id:
+            clauses.append(f"'{quoted(parent_id)}' in parents")
+        for key, value in sorted(app_properties.items()):
+            clauses.append(
+                f"appProperties has {{ key='{quoted(key)}' and value='{quoted(value)}' }}"
+            )
+        response = (
+            self.drive_service.files()
+            .list(
+                q=" and ".join(clauses),
+                spaces="drive",
+                fields="files(id)",
+                pageSize=1,
+            )
+            .execute()
+        )
+        files = response.get("files") or []
+        return files[0].get("id") if files else None
 
     def apply_requests(self, doc_id: str, requests: list[dict]) -> None:
         """Apply Docs ``batchUpdate`` requests to ``doc_id`` (no-op for an empty list)."""
@@ -462,6 +519,8 @@ class GoogleDriveExporter:
 
 __all__ = [
     "CONSENT_TIMEOUT_SECONDS",
+    "DOC_MIME_TYPE",
+    "FOLDER_MIME_TYPE",
     "SCOPES",
     "STATE_AUTHORIZED",
     "STATE_CREDENTIALS_MISSING",
