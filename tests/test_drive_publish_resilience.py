@@ -350,3 +350,62 @@ async def test_padding_growth_recreates_a_doc_that_vanished_instead_of_failing(
             current[update["fileId"]] = update["name"]
     names = sorted(current.values())
     assert names[1:] == [f"{i:02d} - T{i}" for i in range(1, 11)]  # after "00 - Index"
+
+
+# ---------------------------------------------------------- numbering / padding
+
+
+async def test_99_to_100_videos_keeps_every_number_and_only_widens_the_padding(
+    repo: PlaylistRepository, stub: StubGoogle
+) -> None:
+    """PRD section 9: existing Docs are never renumbered. Crossing 99 -> 100 changes the
+    zero-pad width (section 19/24); the existing Docs keep their number and their Doc id,
+    only their padding is widened (rename, no re-create, no content rewrite)."""
+    playlist, videos = await seed(repo, [f"T{i}" for i in range(1, 100)])
+    uc = use_case(repo, stub)
+    await uc.execute(playlist.id)
+    ids_before = {v.id: v.drive_doc_id for v in await repo.list_videos(playlist.id)}
+    assert stub.docs_named("01 - T1") and stub.docs_named("99 - T99")
+    batches_before = len(stub.batches)
+
+    # Re-publishing at the same width renames nothing.
+    updates_before = len(stub.updates)
+    await uc.execute(playlist.id)
+    assert len(stub.updates) == updates_before
+
+    await _add_approved_video(repo, playlist.id, 100, "T100")
+    result = await uc.execute(playlist.id)
+
+    assert result.created == 1
+    ids_after = {v.id: v.drive_doc_id for v in await repo.list_videos(playlist.id)}
+    assert all(ids_after[pk] == doc for pk, doc in ids_before.items())  # same Docs
+    renames = {u["fileId"]: u["name"] for u in stub.updates if u["fileId"] in ids_before.values()}
+    assert len(renames) == 99
+    assert renames[ids_before[videos[0].id]] == "001 - T1"
+    assert renames[ids_before[videos[98].id]] == "099 - T99"
+    assert stub.docs_named("100 - T100")
+    # Existing Docs' bodies were not rewritten: only the index and the new Doc were.
+    rewritten = {doc for doc, _ in stub.batches[batches_before:]}
+    assert rewritten <= {result.index_doc_id, ids_after[max(ids_after)]}
+    assert (await repo.get_playlist(playlist.id)).pad_width == 3
+
+
+async def test_only_approved_notes_ever_reach_drive(
+    repo: PlaylistRepository, stub: StubGoogle
+) -> None:
+    playlist, videos = await seed(repo, ["Pending", "Approved", "Failed", "Edited"], approve=[2])
+    await repo.update_stage(videos[2].id, Stage.FAILED, failure_reason="boom")
+    # Editing a pending note does not approve it.
+    await SaveSummaryEditUseCase(repo).execute(videos[3].id, "## Notes\n\nedited, unapproved")
+
+    await use_case(repo, stub).execute(playlist.id)
+
+    video_docs = [d["name"] for d in docs(stub) if not d["name"].startswith("00 -")]
+    assert video_docs == ["2 - Approved"]
+    all_text = "".join(stub.inserted_text(d["id"]) for d in docs(stub))
+    for unapproved in ("Notes of Pending", "Notes of Failed", "edited, unapproved"):
+        assert unapproved not in all_text
+    rows = await repo.list_videos(playlist.id)
+    assert [v.stage for v in rows] == [
+        Stage.PENDING_REVIEW, Stage.PUBLISHED, Stage.FAILED, Stage.PENDING_REVIEW,
+    ]
