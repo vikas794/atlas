@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.spa import SpaFallback, default_dist_dir
@@ -73,21 +73,6 @@ app.include_router(videos.router)
 @app.get("/api/health")
 def health_check() -> dict[str, str]:
     return {"status": "ok", "service": "atlas-api"}
-
-
-@app.post("/api/dev/shutdown")
-def shutdown_development_server(
-    background_tasks: BackgroundTasks,
-    x_atlas_dev_token: str | None = Header(default=None),
-) -> dict[str, str]:
-    """Stop a locally launched development server after validating its ephemeral token."""
-    settings = load_settings()
-    expected_token = settings.dev_shutdown_token or os.getenv("ATLAS_DEV_SHUTDOWN_TOKEN")
-    if not expected_token or x_atlas_dev_token != expected_token:
-        raise HTTPException(status_code=404, detail="Not found")
-
-    background_tasks.add_task(os._exit, 0)
-    return {"status": "stopping"}
 
 
 # Single-app mode: when no API route matches, serve the built frontend (frontend/dist) with

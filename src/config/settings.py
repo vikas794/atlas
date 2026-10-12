@@ -110,9 +110,6 @@ class AtlasSettings:
     log_file_logging: bool = False
     log_file: str = "logs/atlas.log"
 
-    # --- Development -----------------------------------------------------
-    dev_shutdown_token: str | None = None
-
     @classmethod
     def from_yaml(cls, config_path: str | Path) -> AtlasSettings:
         """Load settings from YAML file."""

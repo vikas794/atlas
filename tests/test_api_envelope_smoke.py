@@ -39,3 +39,10 @@ def test_bad_upload_returns_envelope() -> None:
 
 def test_usage_endpoint_alive() -> None:
     assert client.get("/api/usage").status_code == 200
+
+
+def test_dev_shutdown_endpoint_is_gone() -> None:
+    """It hard-exited the process (os._exit) and skipped the worker's graceful stop."""
+    resp = client.post("/api/dev/shutdown", headers={"X-Atlas-Dev-Token": "anything"})
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
