@@ -289,6 +289,20 @@ describe('ReviewScreen notes states', () => {
     expect(screen.getByRole('tab', { name: 'Edit' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('textbox', { name: 'Edit notes (Markdown)' })).toBeInTheDocument()
   })
+
+  it('switches Preview / Edit with the arrow keys (roving focus)', async () => {
+    setup()
+    const user = userEvent.setup()
+    renderRoute('/playlists/1/review/1')
+
+    const preview = await screen.findByRole('tab', { name: 'Preview' })
+    expect(screen.getByRole('tab', { name: 'Edit' })).toHaveAttribute('tabindex', '-1')
+    preview.focus()
+    await user.keyboard('{ArrowRight}')
+    const edit = screen.getByRole('tab', { name: 'Edit' })
+    expect(edit).toHaveFocus()
+    expect(edit).toHaveAttribute('aria-selected', 'true')
+  })
 })
 
 describe('ReviewScreen "Edited since publishing"', () => {

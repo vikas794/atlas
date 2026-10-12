@@ -389,15 +389,17 @@ export function ReviewScreen() {
 
             <div className="flex items-center gap-2">
               {currentVideo?.stage === 'pending_review' && (
-                <Button
-                  variant="primary"
-                  onClick={() => void approveAndNext()}
-                  disabled={isBusy || !summary}
-                  title="Approve notes (Ctrl+Enter)"
-                >
-                  <Check aria-hidden="true" className="size-icon" />
-                  {isDirty ? 'Save and approve' : 'Approve'}
-                </Button>
+                <DisabledReason reason={!summary ? 'The notes have not loaded yet' : null}>
+                  <Button
+                    variant="primary"
+                    onClick={() => void approveAndNext()}
+                    disabled={isBusy || !summary}
+                    title="Approve notes (Ctrl+Enter)"
+                  >
+                    <Check aria-hidden="true" className="size-icon" />
+                    {isDirty ? 'Save and approve' : 'Approve'}
+                  </Button>
+                </DisabledReason>
               )}
 
               <Button
@@ -503,7 +505,16 @@ export function ReviewScreen() {
                   id={`notes-tab-${option}`}
                   aria-selected={mode === option}
                   aria-controls="notes-panel"
+                  tabIndex={mode === option ? 0 : -1}
                   onClick={() => setMode(option)}
+                  onKeyDown={(event) => {
+                    // WAI-ARIA tabs: arrows move between Preview and Edit.
+                    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+                    event.preventDefault()
+                    const next = option === 'preview' ? 'edit' : 'preview'
+                    setMode(next)
+                    document.getElementById(`notes-tab-${next}`)?.focus()
+                  }}
                   className={cn(
                     'rounded px-3 text-label transition',
                     mode === option
@@ -518,16 +529,18 @@ export function ReviewScreen() {
 
             <div className="flex items-center gap-3">
               {isDirty && <span className="text-label text-st-review-fg">Unsaved changes</span>}
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={!isDirty || saveMut.isPending}
-                onClick={() => void save()}
-                title="Save changes (Ctrl+S)"
-              >
-                <Save aria-hidden="true" className="size-icon" />
-                {saveMut.isPending ? 'Saving…' : 'Save'}
-              </Button>
+              <DisabledReason reason={!isDirty ? 'No unsaved changes' : null}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={!isDirty || saveMut.isPending}
+                  onClick={() => void save()}
+                  title="Save changes (Ctrl+S)"
+                >
+                  <Save aria-hidden="true" className="size-icon" />
+                  {saveMut.isPending ? 'Saving…' : 'Save'}
+                </Button>
+              </DisabledReason>
             </div>
           </div>
 

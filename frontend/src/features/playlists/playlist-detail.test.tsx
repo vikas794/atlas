@@ -123,6 +123,22 @@ describe('PlaylistDetail table', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/playlists/1/review/1'))
   })
 
+  it('moves focus between rows with the arrow keys', async () => {
+    setup()
+    const user = userEvent.setup()
+    renderRoute('/playlists/1')
+
+    const first = (await screen.findByText('Video 1')).closest('tr')!
+    const second = screen.getByText('Video 2').closest('tr')!
+    first.focus()
+    await user.keyboard('{ArrowDown}')
+    expect(second).toHaveFocus()
+    await user.keyboard('{ArrowDown}') // last row: focus stays
+    expect(second).toHaveFocus()
+    await user.keyboard('{ArrowUp}')
+    expect(first).toHaveFocus()
+  })
+
   it('Retry does not open the review and calls the retry endpoint', async () => {
     const api = setup({
       videos: [

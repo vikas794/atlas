@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ExternalLink, Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
@@ -9,6 +9,7 @@ import { pluralize } from '../../lib/format'
 import { playlistIsBusy, pollInterval } from '../../lib/polling'
 import { validatePlaylistUrl } from '../../lib/playlist-url'
 import { queryKeys } from '../../lib/query-keys'
+import { onRowKeyDown } from '../../lib/row-keys'
 import type { Playlist } from '../../lib/types'
 import { ActionMenu } from '../../components/shared/action-menu'
 import { ConfirmDialog } from '../../components/shared/confirm-dialog'
@@ -126,11 +127,6 @@ export function PlaylistsHome() {
 
   const openPlaylist = (playlist: Playlist) => navigate(`/playlists/${playlist.id}`)
 
-  const handleRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, playlist: Playlist) => {
-    if (event.target !== event.currentTarget) return
-    if (event.key === 'Enter') openPlaylist(playlist)
-  }
-
   return (
     <div className="space-y-5">
       <h1 className="text-page text-text">Playlists</h1>
@@ -242,7 +238,7 @@ export function PlaylistsHome() {
                         key={playlist.id}
                         tabIndex={0}
                         onClick={() => openPlaylist(playlist)}
-                        onKeyDown={(event) => handleRowKeyDown(event, playlist)}
+                        onKeyDown={(event) => onRowKeyDown(event, () => openPlaylist(playlist))}
                         className="h-row cursor-pointer border-b border-border transition last:border-b-0 hover:bg-surface-muted"
                       >
                         <td className="px-3 py-1 text-text">

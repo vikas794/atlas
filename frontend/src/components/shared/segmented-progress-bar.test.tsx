@@ -33,4 +33,16 @@ describe('SegmentedProgressBar', () => {
 
     expect(screen.getByText('0 videos')).toBeInTheDocument()
   })
+
+  it('exposes progress to assistive tech as a labelled progressbar', () => {
+    render(<SegmentedProgressBar counts={counts} total={7} />)
+
+    const bar = screen.getByRole('progressbar', { name: 'Playlist progress' })
+    expect(bar).toHaveAttribute('aria-valuenow', '2')
+    expect(bar).toHaveAttribute('aria-valuemax', '7')
+    expect(bar).toHaveAttribute(
+      'aria-valuetext',
+      '2 of 7 published (2 published, 1 approved, 1 needs review, 3 failed)',
+    )
+  })
 })

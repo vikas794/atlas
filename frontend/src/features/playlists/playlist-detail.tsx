@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -29,6 +29,7 @@ import { formatPosition, pluralize } from '../../lib/format'
 import { pollInterval } from '../../lib/polling'
 import { filterCount, type StageFilter } from '../../lib/progress'
 import { invalidatePlaylist, queryKeys } from '../../lib/query-keys'
+import { onRowKeyDown } from '../../lib/row-keys'
 import { isRetriesExhausted, isRetryScheduled, videoDetail } from '../../lib/stage-badge'
 import { TONE_TEXT } from '../../lib/tone'
 import type { Playlist, Video, VideoListResponse } from '../../lib/types'
@@ -281,11 +282,6 @@ export function PlaylistDetail() {
 
   const openReview = (video: Video) => navigate(`/playlists/${playlistId}/review/${video.id}`)
 
-  const handleRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, video: Video) => {
-    // Only react when the row itself is focused, not a button or menu inside it.
-    if (event.target === event.currentTarget && event.key === 'Enter') openReview(video)
-  }
-
   return (
     <div className="space-y-5">
       {/* 6.2 Header */}
@@ -515,7 +511,7 @@ export function PlaylistDetail() {
                       key={video.id}
                       tabIndex={0}
                       onClick={() => openReview(video)}
-                      onKeyDown={(event) => handleRowKeyDown(event, video)}
+                      onKeyDown={(event) => onRowKeyDown(event, () => openReview(video))}
                       className="h-row cursor-pointer border-b border-border transition last:border-b-0 hover:bg-surface-muted"
                     >
                       <td
