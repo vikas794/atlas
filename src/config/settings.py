@@ -197,6 +197,15 @@ class AtlasSettings:
              "must be greater than 0")  # fmt: skip
         for name in ("gemini_input_token_limit", "openrouter_input_token_limit"):
             need(getattr(self, name) >= 1, name, "must be at least 1")
+        prompts_dir = Path(self.prompts_base_dir)
+        if not prompts_dir.is_absolute():
+            prompts_dir = repo_root() / prompts_dir
+        prompt = prompts_dir / self.notes_prompt_name
+        if self.notes_prompt_name.strip() and not prompt.is_file():
+            found.append(
+                f"notes_prompt_name: prompt file {self.notes_prompt_name!r} not found in "
+                f"{self.prompts_base_dir!r}"
+            )
         for origin in self.cors_origin_list:
             if origin == "*" or not origin.startswith(("http://", "https://")):
                 found.append(

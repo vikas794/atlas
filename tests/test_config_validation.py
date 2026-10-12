@@ -69,6 +69,8 @@ def test_a_nested_layout_is_reported(tmp_path: Path) -> None:
         ("ATLAS_LOG_LEVEL", "LOUD", "log_level: must be one of"),
         ("ATLAS_CORS_ORIGINS", "*", "wildcards are not allowed"),
         ("ATLAS_WORKER_POLL_INTERVAL_SECONDS", "0", "worker_poll_interval_seconds: must be greater"),
+        ("NOTES_PROMPT_NAME", "missing.yaml", "prompt file 'missing.yaml' not found"),
+        ("ATLAS_PORT", "70000", "port: must be between 1 and 65535"),
     ],
 )
 def test_out_of_range_values_are_reported(
