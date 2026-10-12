@@ -12,76 +12,12 @@ import type {
   VideoListResponse,
 } from './types'
 import { ALL_STAGES } from './types'
+import { ApiError, invalidResponseError, networkError, toApiError } from './errors'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 
-const DEFAULT_ERROR_MESSAGE = 'Request failed.'
-const NETWORK_ERROR_MESSAGE = 'Could not reach the Atlas backend.'
-
-/**
- * Every failed call throws this, so a screen can show `message` to the user
- * and branch on `code` instead of guessing from the HTTP status.
- */
-export class ApiError extends Error {
-  code: string
-  details: unknown
-  status: number
-
-  constructor(message: string, code: string, details: unknown, status: number) {
-    super(message)
-    this.name = 'ApiError'
-    this.code = code
-    this.details = details
-    this.status = status
-  }
-}
-
-/** Fallback codes for responses that do not carry the backend envelope. */
-function codeForStatus(status: number): string {
-  if (status === 400 || status === 422) return 'validation_error'
-  if (status === 401 || status === 403) return 'unauthorized'
-  if (status === 404) return 'not_found'
-  if (status === 409) return 'conflict'
-  if (status === 413) return 'payload_too_large'
-  if (status >= 500) return 'server_error'
-  return 'request_failed'
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-/**
- * Turn a non-OK response into an `ApiError`. The backend envelope is
- * `{ code, message, details }`.
- */
-async function toApiError(response: Response): Promise<ApiError> {
-  const fallback = response.statusText || DEFAULT_ERROR_MESSAGE
-  let body: unknown
-
-  try {
-    const raw = await response.text()
-    if (raw) body = JSON.parse(raw) as unknown
-  } catch {
-    body = undefined
-  }
-
-  if (!isRecord(body)) {
-    return new ApiError(fallback, codeForStatus(response.status), {}, response.status)
-  }
-
-  const message =
-    typeof body.message === 'string' && body.message.trim()
-      ? body.message
-      : typeof body.detail === 'string' && body.detail.trim()
-        ? body.detail
-        : fallback
-
-  const code =
-    typeof body.code === 'string' && body.code.trim() ? body.code : codeForStatus(response.status)
-
-  return new ApiError(message, code, body.details ?? {}, response.status)
-}
+// Errors live in errors.ts (one handler for every call); re-exported for callers.
+export { ApiError }
 
 function defaultHeaders(init?: RequestInit): HeadersInit {
   const supplied = init?.headers ?? {}
@@ -99,7 +35,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
       headers: defaultHeaders(init),
     })
   } catch (cause) {
-    throw new ApiError(NETWORK_ERROR_MESSAGE, 'network_error', { cause: String(cause) }, 0)
+    throw networkError(cause)
   }
 
   if (!response.ok) {
@@ -111,7 +47,12 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const text = await response.text()
   if (!text) return undefined as T
 
-  return JSON.parse(text) as T
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    // e.g. the dev server's index.html instead of the API (backend not proxied).
+    throw invalidResponseError(response.status)
+  }
 }
 
 /* --------------------------------------------------------------- Playlists */

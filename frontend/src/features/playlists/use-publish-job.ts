@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { getPlaylist, publishPlaylist } from '../../lib/api'
+import { failureMessage } from '../../lib/errors'
 import { describePublish, publishPhase, type JobWatch } from '../../lib/jobs'
 import { FAST_POLL_MS } from '../../lib/polling'
 import { invalidatePlaylist, queryKeys } from '../../lib/query-keys'
@@ -66,7 +67,7 @@ export function usePublishJob(playlistId: number) {
       setWatch({ startedAt: Date.now(), publishedBefore })
       void invalidatePlaylist(queryClient, playlistId)
     },
-    onError: (err: Error) => toast(err.message || 'Publishing to Drive failed.', 'error'),
+    onError: (err) => toast(failureMessage('Could not start publishing to Drive', err), 'error'),
   })
 
   return {

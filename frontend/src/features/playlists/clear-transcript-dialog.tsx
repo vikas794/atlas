@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { deleteVideoTranscript } from '../../lib/api'
+import { failureMessage } from '../../lib/errors'
 import { formatPosition } from '../../lib/format'
 import { invalidateVideo } from '../../lib/query-keys'
 import type { Video } from '../../lib/types'
@@ -28,7 +29,7 @@ export function ClearTranscriptDialog({ video, onClose }: ClearTranscriptDialogP
       toast(`Cleared the transcript for #${formatPosition(target.position)}.`)
       void invalidateVideo(queryClient, target.playlist_id, target.id)
     },
-    onError: (err: Error) => toast(err.message || 'Could not clear the transcript.', 'error'),
+    onError: (err) => toast(failureMessage('Could not clear the transcript', err), 'error'),
   })
 
   return (

@@ -12,6 +12,7 @@ import '@fontsource/lexend/600.css'
 import '@fontsource/jetbrains-mono/400.css'
 
 import './index.css'
+import { ErrorBoundary } from './components/shared/error-boundary'
 import { createQueryClient } from './lib/query-client'
 import { initTheme } from './lib/theme'
 import { routes } from './routes'
@@ -25,8 +26,10 @@ const router = createBrowserRouter(routes)
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    </ErrorBoundary>
   </StrictMode>,
 )

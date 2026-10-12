@@ -16,7 +16,6 @@ import {
 } from 'lucide-react'
 
 import {
-  ApiError,
   approveAllVideos,
   cleanupPlaylistTranscripts,
   deletePlaylist,
@@ -26,6 +25,7 @@ import {
   reprocessPlaylist,
   retryVideo,
 } from '../../lib/api'
+import { failureMessage, isNotFound } from '../../lib/errors'
 import { formatPosition, pluralize } from '../../lib/format'
 import { pollInterval } from '../../lib/polling'
 import { filterCount, type StageFilter } from '../../lib/progress'
@@ -148,7 +148,7 @@ export function PlaylistDetail() {
       toast('Processing started.')
       void refresh()
     },
-    onError: (err: Error) => toast(err.message, 'error'),
+    onError: (err) => toast(failureMessage('Could not start processing', err), 'error'),
   })
 
   const approveAllMut = useMutation({
@@ -157,7 +157,7 @@ export function PlaylistDetail() {
       toast(`Approved ${pluralize(res.count ?? 0, 'video')}.`)
       void refresh()
     },
-    onError: (err: Error) => toast(err.message, 'error'),
+    onError: (err) => toast(failureMessage('Could not approve the videos', err), 'error'),
   })
 
   const resyncMut = useMutation({
@@ -172,7 +172,7 @@ export function PlaylistDetail() {
       )
       void refresh()
     },
-    onError: (err: Error) => toast(err.message, 'error'),
+    onError: (err) => toast(failureMessage('Could not re-sync the playlist', err), 'error'),
   })
 
   const reprocessMut = useMutation({
@@ -181,7 +181,7 @@ export function PlaylistDetail() {
       toast('Playlist queued for reprocessing.')
       void refresh()
     },
-    onError: (err: Error) => toast(err.message, 'error'),
+    onError: (err) => toast(failureMessage('Could not reprocess the playlist', err), 'error'),
   })
 
   const deleteMut = useMutation({
@@ -193,7 +193,7 @@ export function PlaylistDetail() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.playlists })
       navigate('/')
     },
-    onError: (err: Error) => toast(err.message, 'error'),
+    onError: (err) => toast(failureMessage('Could not delete the playlist', err), 'error'),
   })
 
   const cleanupMut = useMutation({
@@ -202,7 +202,7 @@ export function PlaylistDetail() {
       toast(res.message || 'Transcripts cleared.')
       void refresh()
     },
-    onError: (err: Error) => toast(err.message, 'error'),
+    onError: (err) => toast(failureMessage('Could not clean up the transcripts', err), 'error'),
   })
 
   const retryMut = useMutation({
@@ -211,16 +211,11 @@ export function PlaylistDetail() {
       toast(`#${formatPosition(video.position)} queued for retry.`)
       void invalidateVideo(queryClient, playlistId, video.id)
     },
-    onError: (err: Error) => toast(err.message, 'error'),
+    onError: (err) => toast(failureMessage('Could not retry the video', err), 'error'),
   })
 
   // ---- Loading / error / not found states -------------------------------------------------
-  if (
-    !validId ||
-    (playlistQuery.isError &&
-      playlistQuery.error instanceof ApiError &&
-      playlistQuery.error.status === 404)
-  ) {
+  if (!validId || (playlistQuery.isError && isNotFound(playlistQuery.error))) {
     return (
       <div className="space-y-3">
         <h1 className="text-page text-text">Playlist not found</h1>

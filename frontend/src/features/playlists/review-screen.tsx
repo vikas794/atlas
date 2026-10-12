@@ -15,13 +15,13 @@ import {
 } from 'lucide-react'
 
 import {
-  ApiError,
   approveVideo,
   getPlaylist,
   getVideoSummary,
   regenerateVideo,
   updateVideoSummary,
 } from '../../lib/api'
+import { errorMessage, failureMessage, isNotFound } from '../../lib/errors'
 import { formatPosition } from '../../lib/format'
 import { regeneratePhase, type JobWatch } from '../../lib/jobs'
 import { pollInterval } from '../../lib/polling'
@@ -101,7 +101,7 @@ export function ReviewScreen() {
     retry: shouldRetry,
   })
   const summary = summaryQuery.data
-  const notesMissing = summaryQuery.error instanceof ApiError && summaryQuery.error.status === 404
+  const notesMissing = isNotFound(summaryQuery.error)
 
   const editedContent =
     draft && draft.videoId === currentVideoPk ? draft.content : (summary?.content ?? '')
@@ -148,7 +148,7 @@ export function ReviewScreen() {
       queryClient.setQueryData(queryKeys.summary(savedId), updated)
       void invalidateVideo(queryClient, playlistId, savedId)
     },
-    onError: (err: Error) => toast(err.message || 'Could not save the notes.', 'error'),
+    onError: (err) => toast(failureMessage('Could not save the notes', err), 'error'),
   })
 
   const approveMut = useMutation({
@@ -157,7 +157,7 @@ export function ReviewScreen() {
       toast('Video approved.')
       void invalidateVideo(queryClient, playlistId, target)
     },
-    onError: (err: Error) => toast(err.message || 'Could not approve the video.', 'error'),
+    onError: (err) => toast(failureMessage('Could not approve the video', err), 'error'),
   })
 
   const regenMut = useMutation({
@@ -167,7 +167,7 @@ export function ReviewScreen() {
       setRegenWatch({ startedAt: Date.now() })
       void invalidateVideo(queryClient, playlistId, target)
     },
-    onError: (err: Error) => toast(err.message || 'Could not regenerate the notes.', 'error'),
+    onError: (err) => toast(failureMessage('Could not regenerate the notes', err), 'error'),
   })
 
   const publishJob = usePublishJob(playlistId)
@@ -555,9 +555,7 @@ export function ReviewScreen() {
             ) : summaryQuery.isError ? (
               <ErrorState
                 title="Could not load the notes"
-                message={
-                  summaryQuery.error instanceof Error ? summaryQuery.error.message : undefined
-                }
+                message={errorMessage(summaryQuery.error)}
                 onRetry={() => void summaryQuery.refetch()}
               />
             ) : mode === 'preview' ? (

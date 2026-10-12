@@ -4,6 +4,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { ExternalLink, Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
 
 import { deletePlaylist, getPlaylists, ingestPlaylist, reprocessPlaylist } from '../../lib/api'
+import { errorMessage, failureMessage } from '../../lib/errors'
 import { pluralize } from '../../lib/format'
 import { playlistIsBusy, pollInterval } from '../../lib/polling'
 import { validatePlaylistUrl } from '../../lib/playlist-url'
@@ -56,10 +57,10 @@ export function PlaylistsHome() {
       toast(`Added "${playlist.title}" with ${pluralize(playlist.video_count, 'video')}.`)
       void invalidateLists()
     },
-    onError: (err: Error) => {
+    onError: (err) => {
       // Server-side errors (private playlist, bad URL...) show inline and as a toast.
-      setUrlError(err.message || 'Could not add this playlist.')
-      toast(err.message || 'Could not add this playlist.', 'error')
+      setUrlError(errorMessage(err, 'Could not add this playlist.'))
+      toast(failureMessage('Could not add the playlist', err), 'error')
     },
   })
 
@@ -78,8 +79,8 @@ export function PlaylistsHome() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.videos(playlist.id) })
       void invalidateLists()
     },
-    onError: (err: Error, { playlist }) => {
-      toast(err.message || `Could not sync "${playlist.title}".`, 'error')
+    onError: (err, { playlist }) => {
+      toast(failureMessage(`Could not sync "${playlist.title}"`, err), 'error')
     },
   })
 
@@ -91,7 +92,7 @@ export function PlaylistsHome() {
       queryClient.removeQueries({ queryKey: queryKeys.videos(playlist.id) })
       void invalidateLists()
     },
-    onError: (err: Error) => toast(err.message || 'Could not delete the playlist.', 'error'),
+    onError: (err) => toast(failureMessage('Could not delete the playlist', err), 'error'),
   })
 
   const reprocessMutation = useMutation({
@@ -102,7 +103,7 @@ export function PlaylistsHome() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.videos(playlist.id) })
       void invalidateLists()
     },
-    onError: (err: Error) => toast(err.message || 'Could not reprocess the playlist.', 'error'),
+    onError: (err) => toast(failureMessage('Could not reprocess the playlist', err), 'error'),
   })
 
   const handleAddSubmit = (event: FormEvent) => {
