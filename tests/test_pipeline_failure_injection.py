@@ -732,3 +732,27 @@ async def test_invalid_youtube_key_as_the_live_api_reports_it_is_a_config_error(
     provider, _ = make_provider(stub)
     with pytest.raises(ConfigurationError, match="YOUTUBE_API_KEY"):
         await IngestPlaylistUseCase(repo, provider).ingest(URL)
+
+
+async def test_retry_or_regenerate_of_a_removed_upstream_video_is_refused_not_stranded(
+    repo: PlaylistRepository,
+) -> None:
+    from src.application.use_cases.playlist.actions import RegenerateVideoUseCase
+    from src.domain.exceptions import ConflictError
+
+    playlist_pk = await _ingest(repo, ["a"])
+    (video,) = await repo.list_videos(playlist_pk)
+    await repo.update_stage(
+        video.id,
+        Stage.FAILED,
+        failure_type=FailureType.NO_USABLE_LANGUAGE,
+        failure_kind=FailureKind.PERMANENT,
+        failure_reason="No transcript.",
+    )
+    await repo.flag_removed_upstream([video.id])
+
+    with pytest.raises(ConflictError, match="no longer in the YouTube playlist"):
+        await RetryVideoUseCase(repo).execute(video.id)
+    with pytest.raises(ConflictError, match="no longer in the YouTube playlist"):
+        await RegenerateVideoUseCase(repo).execute(video.id)
+    assert (await repo.get_video(video.id)).stage == Stage.FAILED  # untouched, not queued

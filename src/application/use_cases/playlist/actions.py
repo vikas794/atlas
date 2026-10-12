@@ -40,6 +40,16 @@ async def _require_video(repo: PlaylistRepositoryPort, video_pk: int) -> Video:
     return video
 
 
+def _refuse_if_removed_upstream(video: Video, action: str) -> None:
+    """The worker never processes a video flagged "no longer in playlist" (PRD section 20),
+    so queueing one would leave it sitting in ``queued`` forever. Refuse clearly instead."""
+    if video.removed_upstream:
+        raise ConflictError(
+            f"Video {video.id} is no longer in the YouTube playlist, so it cannot be {action}. "
+            "It is kept as is; it is processed again only if it reappears upstream."
+        )
+
+
 class ApproveVideoUseCase:
     def __init__(self, repo: PlaylistRepositoryPort) -> None:
         self.repo = repo
@@ -96,6 +106,7 @@ class RetryVideoUseCase:
     async def execute(self, video_pk: int) -> Video:
         video = await _require_video(self.repo, video_pk)
         assert_transition(video.stage, Stage.QUEUED, is_retry=True)
+        _refuse_if_removed_upstream(video, "retried")
         await self.repo.clear_failure(video_pk)
         await self.repo.update_stage(video_pk, Stage.QUEUED)
         updated = await self.repo.get_video(video_pk)
@@ -120,6 +131,7 @@ class RegenerateVideoUseCase:
             raise ConflictError(
                 f"Video {video_pk} cannot be regenerated while in stage '{video.stage.value}'."
             )
+        _refuse_if_removed_upstream(video, "regenerated")
         await self.repo.request_regenerate(video_pk)
         logger.info(
             "Regenerate queued",
