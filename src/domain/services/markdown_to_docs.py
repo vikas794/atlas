@@ -78,8 +78,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 #: Index at which generated content is inserted. Matches Google's own
-#: "insert at 1 into an empty document" convention and the index already used
-#: by ``GoogleDriveExporter.create_doc_in_folder``.
+#: "insert at 1 into an empty document" convention and the index
+#: ``GoogleDriveExporter.replace_doc_body`` rebuilds the body at.
 DEFAULT_START_INDEX = 1
 
 #: Docs' own named heading styles. Levels deeper than 6 reuse ``HEADING_6``

@@ -24,7 +24,8 @@ class PublishEntry:
     """A single approved video's notes to be published or updated in Drive."""
 
     video_pk: int
-    #: 1-based playlist position (PRD section 19: Doc numbering starts at 001).
+    #: 1-based playlist position, zero-padded in Doc names to the playlist's pad width
+    #: (e.g. "7 - x" in a 9-video playlist, "007 - x" once it has 100+ videos).
     position: int
     title: str
     markdown: str
