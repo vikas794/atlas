@@ -18,6 +18,8 @@ from __future__ import annotations
 import logging
 import logging.handlers
 import sys
+from collections import deque
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, Any
 
@@ -69,6 +71,56 @@ class AtlasFormatter(logging.Formatter):
         return redact_text(line)
 
 
+class RecentErrorsHandler(logging.Handler):
+    """In-memory ring buffer of the latest WARNING+ records, for ``GET /api/diagnostics``.
+
+    Each entry is ``{timestamp, level, logger, message}``; the message is the redacted first
+    line (plus ``extra`` fields and the exception type/message, never a traceback).
+    """
+
+    def __init__(self, capacity: int = 50) -> None:
+        super().__init__(level=logging.WARNING)
+        self._records: deque[dict[str, str]] = deque(maxlen=capacity)
+        self.setFormatter(AtlasFormatter("%(message)s"))
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            exc_info, exc_text = record.exc_info, record.exc_text
+            record.exc_info, record.exc_text = None, None
+            try:
+                message = self.format(record).splitlines()[0] if record.msg else ""
+            finally:
+                record.exc_info, record.exc_text = exc_info, exc_text
+            if exc_info and exc_info[1] is not None:
+                message = f"{message} ({type(exc_info[1]).__name__}: {exc_info[1]})"
+            self._records.append(
+                {
+                    "timestamp": datetime.fromtimestamp(record.created, UTC).isoformat(),
+                    "level": record.levelname,
+                    "logger": record.name,
+                    "message": redact_text(message),
+                }
+            )
+        except Exception:  # pragma: no cover - logging must never raise
+            self.handleError(record)
+
+    def snapshot(self) -> list[dict[str, str]]:
+        """The buffered records, newest first."""
+        return list(reversed(self._records))
+
+    def clear(self) -> None:
+        self._records.clear()
+
+
+#: The process-wide buffer; installed on the root logger by :func:`configure_logging`.
+RECENT_ERRORS = RecentErrorsHandler()
+
+
+def recent_errors() -> list[dict[str, str]]:
+    """The last WARNING+ log records (newest first), redacted."""
+    return RECENT_ERRORS.snapshot()
+
+
 def _level_of(name: str) -> int:
     level = logging.getLevelName(str(name or "INFO").strip().upper())
     return level if isinstance(level, int) else logging.INFO
@@ -118,10 +170,19 @@ def configure_logging(
         setattr(file_handler, _HANDLER_MARK, True)
         root.addHandler(file_handler)
 
+    if RECENT_ERRORS not in root.handlers:
+        root.addHandler(RECENT_ERRORS)
+
     root.setLevel(level)
     for name in _QUIET_LOGGERS:
         logging.getLogger(name).setLevel(max(level, logging.WARNING))
     return console
 
 
-__all__ = ["AtlasFormatter", "configure_logging"]
+__all__ = [
+    "RECENT_ERRORS",
+    "AtlasFormatter",
+    "RecentErrorsHandler",
+    "configure_logging",
+    "recent_errors",
+]
