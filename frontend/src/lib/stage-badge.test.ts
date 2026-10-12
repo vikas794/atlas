@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   attemptLabel,
+  FAILURE_REASONS,
   failureLabel,
   isRetriesExhausted,
   isRetryScheduled,
@@ -18,6 +19,69 @@ const inMinutes = (m: number) => new Date(NOW + m * 60_000).toISOString()
 function transient(extra: Partial<RetryFields> = {}): RetryFields {
   return { stage: 'failed', failure_kind: 'transient', retry_count: 3, ...extra }
 }
+
+/** Backend `Stage` enum (src/domain/models/playlist.py), in order. */
+const BACKEND_STAGES = [
+  'queued',
+  'fetching_transcript',
+  'transcript_ready',
+  'generating_notes',
+  'pending_review',
+  'approved',
+  'published',
+  'failed',
+]
+
+/** Backend `FailureType` enum values. */
+const BACKEND_FAILURE_TYPES = [
+  'video_private',
+  'video_deleted',
+  'age_restricted',
+  'region_blocked',
+  'members_only',
+  'transcripts_disabled',
+  'no_usable_language',
+  'transcript_too_large',
+  'rate_limited',
+  'network_error',
+  'provider_error',
+  'output_malformed',
+  'config_error',
+  'internal_error',
+  'playlist_unavailable',
+  'invalid_url',
+  'drive_error',
+]
+
+describe('stageToBadge matches design.md 3.3 exactly', () => {
+  it('covers exactly the backend stages', () => {
+    expect([...ALL_STAGES]).toEqual(BACKEND_STAGES)
+  })
+
+  it.each([
+    ['queued', undefined, {}, 'Queued', 'neutral', 'clock'],
+    ['fetching_transcript', undefined, {}, 'Fetching transcript', 'progress', 'loader'],
+    ['transcript_ready', undefined, {}, 'Transcript ready', 'neutral', 'file-text'],
+    ['generating_notes', undefined, {}, 'Generating notes', 'progress', 'loader'],
+    ['pending_review', undefined, {}, 'Needs review', 'review', 'eye'],
+    ['approved', undefined, {}, 'Approved', 'success', 'check'],
+    ['published', undefined, {}, 'Published', 'success', 'cloud-check'],
+    ['failed', 'transient', { retryScheduled: true }, 'Retrying', 'warn', 'refresh'],
+    ['failed', 'transient', { retryScheduled: false }, 'Failed – temporary', 'warn', 'refresh'],
+    ['failed', 'permanent', {}, 'Failed', 'error', 'x-circle'],
+  ] as const)('%s + %s %j -> %s', (stage, kind, options, label, tone, icon) => {
+    expect(stageToBadge(stage, kind, options)).toMatchObject({ label, tone, icon })
+  })
+
+  it('has a plain-sentence fallback reason for every backend failure type', () => {
+    expect(Object.keys(FAILURE_REASONS).sort()).toEqual([...BACKEND_FAILURE_TYPES].sort())
+    for (const type of BACKEND_FAILURE_TYPES) {
+      const reason = failureLabel(type as never, null)
+      expect(reason, type).not.toBe('Failed')
+      expect(reason, type).not.toMatch(/_/)
+    }
+  })
+})
 
 describe('stageToBadge', () => {
   it('maps every backend stage to a tone, icon and label', () => {
