@@ -147,6 +147,24 @@ class ProcessVideoUseCase:
         """Give a duplicate row its own copy of the first occurrence's summary."""
         copied = await self.repo.copy_summary(video.duplicate_of, video.id, token=token)
         if copied is None:
+            first = await self.repo.get_video(video.duplicate_of)
+            if first is not None and first.stage == Stage.FAILED and first.next_retry_at is None:
+                # The first occurrence failed for good: show that failure here too rather
+                # than leaving this row queued forever. A manual retry of this row re-checks.
+                await self.repo.update_stage(
+                    video.id,
+                    Stage.FAILED,
+                    failure_type=first.failure_type or FailureType.INTERNAL_ERROR,
+                    failure_kind=first.failure_kind or FailureKind.PERMANENT,
+                    failure_reason=(
+                        f"Same video as #{first.position}, which failed: "
+                        f"{first.failure_reason or 'see that video'}"
+                    ),
+                    next_retry_at=None,
+                    token=token,
+                )
+                logger.info("First occurrence failed; duplicate marked failed", extra=_ctx(video))
+                return await self.repo.get_video(video.id)
             # The first occurrence has no summary yet; stay queued until it does.
             logger.info("First occurrence has no summary yet; waiting", extra=_ctx(video))
             return video

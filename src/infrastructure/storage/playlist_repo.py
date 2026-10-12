@@ -815,7 +815,8 @@ class PlaylistRepository:
         Includes ``transcript_ready`` videos (a task that died after storing the
         transcript; ``ProcessVideoUseCase`` continues at notes). A duplicate row
         (PRD section 20) only becomes runnable once its first occurrence has a
-        summary to reuse.
+        summary to reuse -- or has failed for good (no automatic retry pending), so
+        the duplicate can record that failure instead of sitting queued forever.
         """
         return await asyncio.to_thread(self._list_queued_videos, playlist_pk, limit)
 
@@ -824,7 +825,7 @@ class PlaylistRepository:
             "SELECT v.* FROM videos v WHERE v.stage IN (?, ?) AND v.removed_upstream = 0"
             " AND (v.duplicate_of_video_id IS NULL OR EXISTS ("
             "   SELECT 1 FROM videos o WHERE o.id = v.duplicate_of_video_id"
-            "   AND o.stage IN (?, ?, ?)))"
+            "   AND (o.stage IN (?, ?, ?) OR (o.stage = ? AND o.next_retry_at IS NULL))))"
         )
         params: list[object] = [
             Stage.QUEUED.value,
@@ -832,6 +833,7 @@ class PlaylistRepository:
             Stage.PENDING_REVIEW.value,
             Stage.APPROVED.value,
             Stage.PUBLISHED.value,
+            Stage.FAILED.value,
         ]
         if playlist_pk is not None:
             sql += " AND v.playlist_id = ?"
