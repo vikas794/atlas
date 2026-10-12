@@ -27,6 +27,7 @@ from typing import Any
 import httplib2
 from googleapiclient.errors import HttpError
 
+from google.auth.exceptions import RefreshError, TransportError
 from src.domain.interfaces.drive_publisher import (
     DriveAuthorizationRequired,
     DrivePublisherPort,
@@ -46,6 +47,7 @@ from src.domain.services.markdown_to_docs import markdown_to_docs, render_index_
 from src.infrastructure.google.drive import (
     GoogleDriveAuthorizationRequired,
     GoogleDriveExporter,
+    is_permanent_refresh_error,
 )
 from src.shared.redaction import redact_text
 
@@ -73,8 +75,9 @@ def is_transient_http_error(exc: HttpError) -> bool:
     return status == 403 and bool(_http_reasons(exc) & _RATE_LIMIT_REASONS)
 
 
-#: Network-level failures: connection resets, timeouts, TLS errors, DNS (httplib2).
-_NETWORK_ERRORS = (OSError, httplib2.HttpLib2Error)
+#: Network-level failures: connection resets, timeouts, TLS errors, DNS (httplib2), and a
+#: token refresh that could not reach Google (google-auth ``TransportError``).
+_NETWORK_ERRORS = (OSError, httplib2.HttpLib2Error, TransportError)
 
 
 class _NoProgress:
@@ -112,11 +115,21 @@ class GoogleDrivePublisher(DrivePublisherPort):
         self.backoff_cap = backoff_cap
 
     async def ensure_authorized(self) -> None:
-        """Fail fast (no Drive call) unless a usable Google token exists."""
+        """Fail fast (no Drive call) unless a usable Google token exists.
+
+        A token that needs refreshing is refreshed here; if Google cannot be reached
+        right now, the publish is still accepted -- the background job retries the
+        refresh with backoff like any other transient Drive failure.
+        """
         try:
             await asyncio.to_thread(self.exporter.ensure_authorized)
         except GoogleDriveAuthorizationRequired as exc:
             raise DriveAuthorizationRequired(str(exc)) from exc
+        except (RefreshError, *_NETWORK_ERRORS) as exc:
+            logger.warning(
+                "Could not refresh the Google token now (%s); the publish job will retry",
+                type(exc).__name__,
+            )
 
     async def _retry_call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Run a blocking Google API call in a thread, retrying transient failures."""
@@ -126,6 +139,21 @@ class GoogleDrivePublisher(DrivePublisherPort):
                 return await asyncio.to_thread(func, *args, **kwargs)
             except GoogleDriveAuthorizationRequired as exc:
                 raise DriveAuthorizationRequired(str(exc)) from exc
+            except RefreshError as exc:
+                # Raised mid-call when the access token expires and its refresh fails.
+                if is_permanent_refresh_error(exc):
+                    # invalid_grant: revoked/expired consent. Retrying cannot help.
+                    raise DriveAuthorizationRequired(
+                        str(self.exporter.mark_token_revoked(exc))
+                    ) from None
+                if attempt <= self.max_retries:
+                    await self._backoff(attempt, "token refresh")
+                    attempt += 1
+                    continue
+                raise PipelineError(
+                    failure_type=FailureType.DRIVE_ERROR,
+                    reason=f"Google token refresh kept failing: {redact_text(str(exc))}",
+                ) from None
             except HttpError as exc:
                 status_code = int(getattr(exc.resp, "status", 500) or 500)
                 if is_transient_http_error(exc) and attempt <= self.max_retries:
