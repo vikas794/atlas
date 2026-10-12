@@ -6,6 +6,14 @@ import { vi } from 'vitest'
 import { routes } from '../routes'
 import type { Playlist, Summary, Video } from '../lib/types'
 
+// The routes load their screens lazily. Importing the screens here moves their
+// (slow, cold) transform into test collection, so the first `findBy*` of a file
+// does not time out while Vite is still compiling the screen on a busy machine.
+import '../features/playlists/playlists-home'
+import '../features/playlists/playlist-detail'
+import '../features/playlists/review-screen'
+import '../features/settings/settings-screen'
+
 /* ------------------------------------------------------------------ fetch mock */
 
 export interface RecordedCall {
