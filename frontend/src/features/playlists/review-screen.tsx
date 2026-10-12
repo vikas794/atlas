@@ -11,6 +11,7 @@ import {
   ExternalLink,
   Loader,
   RotateCcw,
+  RotateCw,
   Save,
 } from 'lucide-react'
 
@@ -49,6 +50,7 @@ import { useToast } from '../../components/shared/toast'
 import { Button } from '../../components/ui/button'
 import { ClearTranscriptDialog } from './clear-transcript-dialog'
 import { usePublishJob } from './use-publish-job'
+import { useRetryVideo } from './use-retry-video'
 
 type Mode = 'preview' | 'edit'
 
@@ -171,6 +173,7 @@ export function ReviewScreen() {
   })
 
   const publishJob = usePublishJob(playlistId)
+  const retryMut = useRetryVideo(playlistId)
 
   // Async regenerate finished (or failed): report it and refresh.
   const regenPhase = regeneratePhase(currentVideo, videosQuery.dataUpdatedAt, regenWatch)
@@ -442,12 +445,23 @@ export function ReviewScreen() {
           {detail?.reason && currentVideo?.stage === 'failed' && (
             <div
               className={cn(
-                'border-b border-border px-4 py-2 text-label',
+                'flex items-center justify-between gap-3 border-b border-border px-4 py-2 text-label',
                 TONE_TEXT[detail.tone === 'muted' ? 'neutral' : detail.tone],
               )}
             >
-              {detail.reason}
-              {detail.note ? ` · ${detail.note}` : ''}
+              <span>
+                {detail.reason}
+                {detail.note ? ` · ${detail.note}` : ''}
+              </span>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => retryMut.mutate(currentVideo)}
+                disabled={retryMut.isPending}
+              >
+                <RotateCw aria-hidden="true" className="size-icon" />
+                Retry
+              </Button>
             </div>
           )}
 
@@ -549,7 +563,7 @@ export function ReviewScreen() {
                 {isRegenerating
                   ? 'New notes are being generated for this video.'
                   : currentVideo?.stage === 'failed'
-                    ? 'Generation failed for this video. Use Retry on the playlist page.'
+                    ? 'Processing failed for this video. Use Retry above to try again.'
                     : 'They will appear here once this video has been processed.'}
               </EmptyState>
             ) : summaryQuery.isError ? (

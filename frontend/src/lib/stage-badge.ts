@@ -195,7 +195,7 @@ function defaultReasonFor(failureType: FailureType | null | undefined): string {
 export interface VideoDetailSpec {
   /** Plain-text failure reason, or null when there is nothing to explain. */
   reason: string | null
-  /** Retry status line: "Retrying in 2m (attempt 3/5)" or "Retries exhausted - use Retry". */
+  /** Retry status line: "Retrying in 2m (attempt 3/5)", "Gave up after 5/5 automatic retries - use Retry"... */
   note: string | null
   /** Transient reasons are warn-coloured, permanent ones error-coloured (design 6.2). */
   tone: 'error' | 'warn' | 'muted'
@@ -228,7 +228,7 @@ export function videoDetail(
   const reason = failureLabel(video.failure_type, video.failure_reason)
 
   if (video.failure_kind !== 'transient') {
-    return { reason, note: null, tone: 'error', edited }
+    return { reason, note: PERMANENT_NOTE, tone: 'error', edited }
   }
 
   if (isRetryScheduled(video)) {
@@ -246,5 +246,22 @@ export function videoDetail(
     }
   }
 
-  return { reason, note: 'Retries exhausted - use Retry', tone: 'warn', edited }
+  return {
+    reason,
+    note: exhaustedNote(video.retry_count, video.max_auto_retries),
+    tone: 'warn',
+    edited,
+  }
+}
+
+/** Permanent failures are never retried automatically (PRD section 8). */
+export const PERMANENT_NOTE = 'Not retried automatically - use Retry'
+
+/** "Gave up after 5/5 automatic retries - use Retry". */
+export function exhaustedNote(retryCount: number, maxRetries?: number | null): string {
+  const tries =
+    typeof maxRetries === 'number' && maxRetries > 0
+      ? `${retryCount}/${maxRetries}`
+      : `${retryCount}`
+  return `Gave up after ${tries} automatic ${retryCount === 1 && !maxRetries ? 'retry' : 'retries'} - use Retry`
 }

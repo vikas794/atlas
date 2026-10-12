@@ -23,13 +23,12 @@ import {
   ingestPlaylist,
   processPlaylist,
   reprocessPlaylist,
-  retryVideo,
 } from '../../lib/api'
 import { failureMessage, isNotFound } from '../../lib/errors'
 import { formatPosition, pluralize } from '../../lib/format'
 import { pollInterval } from '../../lib/polling'
 import { filterCount, type StageFilter } from '../../lib/progress'
-import { invalidatePlaylist, invalidateVideo, queryKeys } from '../../lib/query-keys'
+import { invalidatePlaylist, queryKeys } from '../../lib/query-keys'
 import { isRetriesExhausted, isRetryScheduled, videoDetail } from '../../lib/stage-badge'
 import { TONE_TEXT } from '../../lib/tone'
 import type { Playlist, Video, VideoListResponse } from '../../lib/types'
@@ -54,6 +53,7 @@ import { Button } from '../../components/ui/button'
 import { buttonClasses } from '../../components/ui/button-styles'
 import { ClearTranscriptDialog } from './clear-transcript-dialog'
 import { usePublishJob } from './use-publish-job'
+import { useRetryVideo } from './use-retry-video'
 
 const PAGE_SIZE = 50
 const SEARCH_DEBOUNCE_MS = 300
@@ -205,14 +205,7 @@ export function PlaylistDetail() {
     onError: (err) => toast(failureMessage('Could not clean up the transcripts', err), 'error'),
   })
 
-  const retryMut = useMutation({
-    mutationFn: (video: Video) => retryVideo(video.id),
-    onSuccess: (_result, video) => {
-      toast(`#${formatPosition(video.position)} queued for retry.`)
-      void invalidateVideo(queryClient, playlistId, video.id)
-    },
-    onError: (err) => toast(failureMessage('Could not retry the video', err), 'error'),
-  })
+  const retryMut = useRetryVideo(playlistId)
 
   // ---- Loading / error / not found states -------------------------------------------------
   if (!validId || (playlistQuery.isError && isNotFound(playlistQuery.error))) {

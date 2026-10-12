@@ -387,6 +387,37 @@ describe('ReviewScreen actions', () => {
     expect(await screen.findByText('Notes regenerated.', {}, { timeout: 8000 })).toBeInTheDocument()
   }, 20000)
 
+  it('shows the failure reason, retry state and a Retry button for a failed video', async () => {
+    const api = setup({
+      videos: [
+        makeVideo(1, {
+          stage: 'failed',
+          failure_type: 'rate_limited',
+          failure_kind: 'transient',
+          failure_reason: 'Rate limited by YouTube',
+          retry_count: 5,
+          max_auto_retries: 5,
+        }),
+      ],
+    })
+    api.on('GET', /\/api\/videos\/1\/summary/, {
+      status: 404,
+      body: { code: 'NOT_FOUND', message: 'Summary not found for video', details: {} },
+    })
+    api.on('POST', '/api/videos/1/retry', makeVideo(1, { stage: 'queued' }))
+    const user = userEvent.setup()
+    renderRoute('/playlists/1/review/1')
+
+    expect(
+      await screen.findByText(
+        'Rate limited by YouTube · Gave up after 5/5 automatic retries - use Retry',
+      ),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(api.callsTo('POST', '/api/videos/1/retry')).toHaveLength(1))
+    expect(await screen.findByText('#001 queued for retry.')).toBeInTheDocument()
+  })
+
   it('clears the transcript of this video after confirmation (FR11)', async () => {
     const api = setup()
     api.on('DELETE', '/api/videos/1/transcript', { status: 'ok', message: 'cleared' })

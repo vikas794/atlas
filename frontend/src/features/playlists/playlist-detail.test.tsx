@@ -179,8 +179,31 @@ describe('PlaylistDetail table', () => {
     renderRoute('/playlists/1')
 
     expect(await screen.findByText('Failed – temporary')).toBeInTheDocument()
-    expect(screen.getByText('Retries exhausted - use Retry')).toBeInTheDocument()
+    expect(screen.getByText(/Gave up after .* automatic retries - use Retry/)).toBeInTheDocument()
     expect(screen.queryByText('Retrying')).not.toBeInTheDocument()
+  })
+
+  it('shows a permanent failure reason in plain text with a Retry button', async () => {
+    setup({
+      videos: [
+        makeVideo(1, {
+          stage: 'failed',
+          failure_type: 'transcripts_disabled',
+          failure_kind: 'permanent',
+          failure_reason: 'Transcripts disabled by uploader',
+        }),
+        makeVideo(2, { stage: 'failed', failure_type: 'video_private', failure_kind: 'permanent' }),
+      ],
+    })
+    renderRoute('/playlists/1')
+
+    const row = (await screen.findByText('Transcripts disabled by uploader')).closest('tr')!
+    expect(within(row).getByText('Failed')).toBeInTheDocument()
+    expect(within(row).getByText('Not retried automatically - use Retry')).toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: 'Retry #001' })).toBeEnabled()
+    // No reason from the backend: a sentence derived from failure_type, never the raw code.
+    const second = screen.getByText('Video is private').closest('tr')!
+    expect(within(second).queryByText('video_private')).not.toBeInTheDocument()
   })
 
   it('shows the edited tag and the removed-upstream badge next to the real stage', async () => {

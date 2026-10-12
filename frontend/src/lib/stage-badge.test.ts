@@ -168,7 +168,7 @@ describe('videoDetail', () => {
       }),
     ).toEqual({
       reason: 'Transcripts are disabled by the uploader',
-      note: null,
+      note: 'Not retried automatically - use Retry',
       tone: 'error',
       edited: false,
     })
@@ -188,7 +188,10 @@ describe('videoDetail', () => {
 
   it('says retries are exhausted when nothing is scheduled', () => {
     const detail = videoDetail(transient({ next_retry_at: null }), NOW)
-    expect(detail.note).toBe('Retries exhausted - use Retry')
+    expect(detail.note).toBe('Gave up after 3 automatic retries - use Retry')
+    expect(
+      videoDetail(transient({ next_retry_at: null, max_auto_retries: 5, retry_count: 5 })).note,
+    ).toBe('Gave up after 5/5 automatic retries - use Retry')
     expect(detail.tone).toBe('warn')
   })
 
