@@ -179,7 +179,10 @@ class GeminiNotesGenerator:
             text = ""
         usage = getattr(response, "usage_metadata", None)
         input_tokens = int(getattr(usage, "prompt_token_count", 0) or 0)
-        output_tokens = int(getattr(usage, "candidates_token_count", 0) or 0)
+        # Thinking tokens are billed as output but reported separately from the answer.
+        output_tokens = int(getattr(usage, "candidates_token_count", 0) or 0) + int(
+            getattr(usage, "thoughts_token_count", 0) or 0
+        )
         candidates = getattr(response, "candidates", None) or []
         finish = getattr(candidates[0], "finish_reason", None) if candidates else None
         if finish is None:

@@ -283,3 +283,34 @@ def test_classifier_never_echoes_provider_text_in_the_reason() -> None:
 @pytest.mark.parametrize("finish", [None, "STOP", "stop", "FINISH_REASON_UNSPECIFIED"])
 def test_normal_finish_reasons_pass(finish: Any) -> None:
     check_finish_reason(finish, provider_label="Gemini")
+
+
+# ------------------------------------------------------------------ metering
+
+
+async def test_gemini_usage_counts_thinking_tokens_and_prices_the_default_model() -> None:
+    from src.infrastructure.llm.cost import CostCalculator
+
+    class Ledger:
+        def __init__(self) -> None:
+            self.records: list[Any] = []
+
+        async def record_usage(self, record: Any) -> None:
+            self.records.append(record)
+
+    response = _Response(GOOD_NOTES)
+    response.usage_metadata = type(
+        "Usage",
+        (),
+        {"prompt_token_count": 1000, "candidates_token_count": 200, "thoughts_token_count": 800},
+    )()
+    ledger = Ledger()
+    generator = GeminiNotesGenerator(
+        _settings(), usage_ledger=ledger, client_factory=lambda: GeminiDouble(response=response)
+    )
+    await generator.generate_notes(title="Loops", transcript="short transcript")
+
+    (record,) = ledger.records
+    assert record.output_tokens == 1000  # 200 answer + 800 thinking, both billed as output
+    assert record.cost_usd > 0
+    assert CostCalculator.calculate_cost("gemini", "gemini-2.5-flash-lite", 10**6, 0) == 0.10

@@ -36,6 +36,12 @@ class CostCalculator:
     }
 
     GEMINI_PRICING: ClassVar[dict[str, ModelPricing]] = {
+        # Gemini 2.5 (paid tier, text, prompts <= 200k tokens). gemini-2.5-flash is the
+        # Atlas default; without it every notes call was recorded at $0. "-lite" is listed
+        # before its prefix so prefix matching cannot price it as the bigger model.
+        "gemini-2.5-flash-lite": ModelPricing(input_cost_per_million=0.10, output_cost_per_million=0.40),
+        "gemini-2.5-flash": ModelPricing(input_cost_per_million=0.30, output_cost_per_million=2.50),
+        "gemini-2.5-pro": ModelPricing(input_cost_per_million=1.25, output_cost_per_million=10.00),
         "gemini-1.5-pro": ModelPricing(input_cost_per_million=3.50, output_cost_per_million=10.50),
         "gemini-1.5-pro-002": ModelPricing(input_cost_per_million=3.50, output_cost_per_million=10.50),
         "gemini-1.5-flash": ModelPricing(input_cost_per_million=0.075, output_cost_per_million=0.30),
