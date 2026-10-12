@@ -93,6 +93,8 @@ class SaveSummaryEditUseCase:
             provider=existing_summary.provider,
             model=existing_summary.model,
             prompt_version=existing_summary.prompt_version,
+            # An edit is not a generation: keep when the model produced the notes.
+            generated_at=existing_summary.generated_at or None,
         )
         await self.repo.mark_edited(video_pk)
         updated = await self.repo.get_summary(video_pk)

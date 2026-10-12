@@ -756,3 +756,18 @@ async def test_retry_or_regenerate_of_a_removed_upstream_video_is_refused_not_st
     with pytest.raises(ConflictError, match="no longer in the YouTube playlist"):
         await RegenerateVideoUseCase(repo).execute(video.id)
     assert (await repo.get_video(video.id)).stage == Stage.FAILED  # untouched, not queued
+
+
+async def test_an_inline_edit_keeps_the_generation_timestamp(repo: PlaylistRepository) -> None:
+    from src.application.use_cases.playlist.actions import SaveSummaryEditUseCase
+
+    playlist_pk = await _ingest(repo, ["a"])
+    (video,) = await repo.list_videos(playlist_pk)
+    await repo.upsert_summary(video.id, GOOD_NOTES, generated_at="2026-01-01T00:00:00+00:00")
+    await repo.update_stage(video.id, Stage.PENDING_REVIEW)
+
+    edited = await SaveSummaryEditUseCase(repo).execute(video.id, GOOD_NOTES + "\n- mine")
+
+    assert edited.edited is True
+    assert edited.content.endswith("- mine")
+    assert edited.generated_at == "2026-01-01T00:00:00+00:00"
