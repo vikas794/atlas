@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "atlas",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "--locked", "python", "-m", "backend"],
+      "port": 8000
+    },
+    {
+      "name": "atlas-api-dev",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "--locked", "python", "-m", "backend", "--reload"],
+      "port": 8000
+    },
+    {
+      "name": "atlas-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
+      "port": 5173
+    }
+  ]
+}

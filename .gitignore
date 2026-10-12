@@ -1,103 +1,90 @@
-# Python
+# --- Secrets (never commit) ---------------------------------------------------
+.env
+.env.*
+!.env.example
+credentials.json
+token.json
+client_secret*.json
+secrets/
+
+# --- Local runtime data (repository root only; anchored so source folders named
+#     data/, db/ or summaries/ are never silently ignored) ------------------------
+/data/
+/db/
+/transcripts/
+/summaries/
+/pipeline_output/
+/srt_files/
+/logs/
+/.runtime/
+*.log
+*.log.[0-9]*
+*.sqlite3
+*.sqlite3-*
+*.db
+*.bak
+
+# --- Python ---------------------------------------------------------------------
 __pycache__/
 *.py[cod]
 *.so
 *.egg
 *.egg-info/
-dist/
-build/
+/build/
 .eggs/
-*.pyo
-*.pyd
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# Virtual environments
 .venv/
 venv/
 ENV/
 env/
-env.bak/
-venv.bak/
+.mypy_cache/
+.dmypy.json
+.pyre/
+.ruff_cache/
+cython_debug/
+.ipynb_checkpoints
 
-# VS Code
-.vscode/
-
-# PyCharm
-.idea/
-
-# macOS
-.DS_Store
-
-# Lock files
-*.lock
-!uv.lock
-
-# Test, coverage, and profiling
+# --- Tests and coverage -------------------------------------------------------------
+.pytest_cache/
+.pytest_tmp/
+pytestdebug.log
 htmlcov/
 .tox/
 .nox/
 .coverage
 .coverage.*
 .cache
+.hypothesis/
 nosetests.xml
 coverage.xml
 *.cover
-.hypothesis/
-.pytest_cache/
-.pytest_tmp/
-pytestdebug.log
 
-# Logs
-*.log
-
-# MyPy
-.mypy_cache/
-.dmypy.json
-.pyre/
-
-# Cython debug symbols
-cython_debug/
-
-# Other
-*.sqlite3
-*.db
-*.bak
-*.tmp
-*.swp
-*.swo
-
-# Local data and output
-db
-summaries
-transcripts
-pipeline_output
-srt_files
-temp*
-.env
-*.xlsx
-*.pdf
-*output*
-data
-tutorial*
-# Google OAuth secrets (explicit names, so new tracked JSON such as package.json or tsconfig
-# files is never silently ignored by a blanket *.json rule).
-credentials.json
-token.json
-client_secret*.json
-secrets/
-# SQLite backups made automatically before a migration (data/atlas.sqlite3.pre-<version>.bak)
-*.sqlite3.pre-*.bak
+# --- Frontend -------------------------------------------------------------------------
 frontend/node_modules/
 frontend/dist/
-# End of Selection
+frontend/coverage/
 
-.claude/
+# --- Lock files (only the committed ones) ---------------------------------------------
+*.lock
+!uv.lock
+
+# --- Editors / OS -------------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*.tmp
+
+# --- Local exports that should not be committed ------------------------------------
+*.xlsx
+*.pdf
+
+# --- Tooling ---------------------------------------------------------------------------
+# Claude Code: only the shared launch configuration is committed.
+.claude/*
+!.claude/launch.json
 task.md
-.runtime/
-
-# Generated tooling output (previously hidden by the blanket *.json rule)
 graphify-out/
 .archify/**/*.json
 skills-lock.json
+.gitnexus/
