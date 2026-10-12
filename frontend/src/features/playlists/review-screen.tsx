@@ -377,7 +377,7 @@ export function ReviewScreen() {
                   <a
                     href={`https://www.youtube.com/watch?v=${currentVideo.youtube_video_id}`}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 text-accent hover:underline"
                   >
                     Open video

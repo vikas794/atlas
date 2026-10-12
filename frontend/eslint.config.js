@@ -20,6 +20,10 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // `{ node, ...props }` is how a prop is dropped before spreading the rest onto the DOM.
+      '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true }],
+    },
   },
   // Formatting is Prettier's job; turn off the stylistic rules that would fight it.
   prettier,

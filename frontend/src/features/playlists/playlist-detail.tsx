@@ -292,7 +292,7 @@ export function PlaylistDetail() {
             <a
               href={playlist.source_url}
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="shrink-0 text-text-muted transition hover:text-accent"
               aria-label="Open playlist on YouTube"
               title="Open playlist on YouTube"

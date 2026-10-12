@@ -37,15 +37,18 @@ export function MarkdownBody({ markdown, className }: { markdown: string; classN
     >
       <ReactMarkdown
         components={{
-          a: ({ className: anchorClassName, ...props }) => (
+          // Notes are AI output: react-markdown never renders raw HTML (no rehype-raw) and its
+          // default urlTransform drops javascript:/data: URLs. rel/target come last so the
+          // Markdown cannot override them.
+          a: ({ className: anchorClassName, node, ...props }) => (
             <a
-              className={cn('text-accent underline underline-offset-4', anchorClassName)}
-              rel="noreferrer"
-              target="_blank"
               {...props}
+              className={cn('text-accent underline underline-offset-4', anchorClassName)}
+              rel="noopener noreferrer"
+              target="_blank"
             />
           ),
-          pre: ({ children, className: preClassName, ...props }) => {
+          pre: ({ children, className: preClassName, node, ...props }) => {
             const language = fenceLanguage(children)
             return (
               <div className="relative">
@@ -67,7 +70,7 @@ export function MarkdownBody({ markdown, className }: { markdown: string; classN
               </div>
             )
           },
-          code: ({ className: codeClassName, ...props }) => {
+          code: ({ className: codeClassName, node, ...props }) => {
             const isFenced = /language-/.test(codeClassName ?? '')
             return (
               <code
