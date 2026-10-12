@@ -2,18 +2,17 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { getPlaylist, publishPlaylist } from '../../lib/api'
-import { describePublish, hasPublishCounts, publishPhase, type JobWatch } from '../../lib/jobs'
+import { describePublish, publishPhase, type JobWatch } from '../../lib/jobs'
 import { FAST_POLL_MS } from '../../lib/polling'
 import { invalidatePlaylist, queryKeys } from '../../lib/query-keys'
 import { useToast } from '../../components/shared/toast'
 
 /**
- * Publish to Drive, for both backend flavours:
- * - sync (200): the response carries counts and the toast reports them;
- * - async (202): the playlist goes to `status: 'publishing'`; this hook polls
- *   the playlist until it settles, then toasts the real outcome
- *   (`publish_failed` shows the stored error, otherwise the counts or
- *   "Nothing new to publish").
+ * Publish to Drive. The backend answers 202 immediately (its counts are always
+ * 0) and runs the publish in the worker, so the POST itself never counts as
+ * success: the playlist goes to `status: 'publishing'` and is polled until it
+ * settles, then the real outcome is toasted (`publish_failed` shows the stored
+ * error, otherwise how many videos were published).
  */
 export function usePublishJob(playlistId: number) {
   const queryClient = useQueryClient()
@@ -40,15 +39,18 @@ export function usePublishJob(playlistId: number) {
     if (phase !== 'succeeded' && phase !== 'failed') return
     const { playlist: current, watch: started } = latest.current
     if (phase === 'failed') {
-      toast(current?.last_publish_error || 'Publishing to Drive failed.', 'error')
+      toast(
+        `Publishing to Drive failed: ${current?.last_publish_error || 'no reason was recorded.'}`,
+        'error',
+      )
     } else {
       const delta = Math.max(
         0,
         (current?.stage_counts?.published ?? 0) - (started?.publishedBefore ?? 0),
       )
-      toast(describePublish(current?.last_publish ?? null, delta))
+      toast(describePublish(delta))
     }
-    // The async job is over: stop watching and refresh everything it touched.
+    // The job is over: stop watching and refresh everything it touched.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setWatch(null)
     void invalidatePlaylist(queryClient, playlistId)
@@ -56,24 +58,19 @@ export function usePublishJob(playlistId: number) {
   }, [phase, toast, queryClient, playlistId])
 
   const mutation = useMutation({
-    mutationFn: async (publishedBefore: number) => ({
-      response: await publishPlaylist(playlistId),
-      publishedBefore,
-    }),
-    onSuccess: ({ response, publishedBefore }) => {
-      if (hasPublishCounts(response)) {
-        toast(describePublish(response))
-        void queryClient.invalidateQueries({ queryKey: ['video-summary'] })
-      } else {
-        setWatch({ startedAt: Date.now(), publishedBefore })
-      }
+    mutationFn: async (publishedBefore: number) => {
+      await publishPlaylist(playlistId)
+      return publishedBefore
+    },
+    onSuccess: (publishedBefore) => {
+      setWatch({ startedAt: Date.now(), publishedBefore })
       void invalidatePlaylist(queryClient, playlistId)
     },
     onError: (err: Error) => toast(err.message || 'Publishing to Drive failed.', 'error'),
   })
 
   return {
-    /** Start publishing; `publishedBefore` is the current published count (for the async delta). */
+    /** Start publishing; `publishedBefore` is the current published count (for the delta). */
     publish: (publishedBefore: number) => mutation.mutate(publishedBefore),
     isPublishing: mutation.isPending || phase === 'running',
   }

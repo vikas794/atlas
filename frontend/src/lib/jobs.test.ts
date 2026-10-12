@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { describePublish, hasPublishCounts, publishPhase, regeneratePhase } from './jobs'
+import { describePublish, publishPhase, regeneratePhase } from './jobs'
 
 const watch = { startedAt: 1000 }
 
@@ -31,25 +31,12 @@ describe('regeneratePhase', () => {
 })
 
 describe('describePublish', () => {
-  it('reports real counts', () => {
-    expect(describePublish({ created: 3, updated: 1 })).toBe(
-      'Published 3 new Docs, updated 1 Doc in Drive.',
-    )
-    expect(describePublish({ created: 0, updated: 2 })).toBe('Updated 2 Docs in Drive.')
+  it('reports how many videos the finished publish added', () => {
+    expect(describePublish(4)).toBe('Published 4 videos to Drive.')
+    expect(describePublish(1)).toBe('Published 1 video to Drive.')
   })
 
-  it('never says "Published 0 new Docs"', () => {
-    expect(describePublish({ created: 0, updated: 0, skipped: 5 })).toBe('Nothing new to publish.')
-    expect(describePublish(null, 0)).toBe('Nothing new to publish.')
-  })
-
-  it('falls back to the published-count delta for async publishes', () => {
-    expect(describePublish(null, 4)).toBe('Published 4 videos to Drive.')
-  })
-
-  it('tells sync (200) responses from async (202) ones', () => {
-    expect(hasPublishCounts({ created: 1, updated: 0 })).toBe(true)
-    expect(hasPublishCounts({})).toBe(false)
-    expect(hasPublishCounts(undefined)).toBe(false)
+  it('never says "Published 0"', () => {
+    expect(describePublish(0)).toBe('Publish finished. Nothing new to publish.')
   })
 })

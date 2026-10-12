@@ -155,11 +155,14 @@ export function makePlaylist(overrides: Partial<Playlist> = {}): Playlist {
       published: 0,
       failed: 0,
     },
+    last_publish_error: null,
     ...overrides,
   }
 }
 
 export function makeVideo(id: number, overrides: Partial<Video> = {}): Video {
+  // Same derivation as the backend's Video.auto_retry / retries_exhausted.
+  const transientFailure = overrides.stage === 'failed' && overrides.failure_kind === 'transient'
   return {
     id,
     playlist_id: 1,
@@ -176,6 +179,12 @@ export function makeVideo(id: number, overrides: Partial<Video> = {}): Video {
     removed_upstream: false,
     created_at: STAMP,
     updated_at: STAMP,
+    auto_retry: transientFailure && Boolean(overrides.next_retry_at),
+    retries_exhausted: transientFailure && !overrides.next_retry_at,
+    duplicate_of: null,
+    regenerating: false,
+    max_auto_retries: 5,
+    edited: false,
     ...overrides,
   }
 }
@@ -195,8 +204,22 @@ export function makeSummary(videoId: number, overrides: Partial<Summary> = {}): 
     published: false,
     published_at: null,
     published_digest: null,
+    needs_republish: false,
     ...overrides,
   }
+}
+
+/** The real body of POST /api/playlists/{id}/publish (HTTP 202; counts are always 0). */
+export const PUBLISH_ACCEPTED = {
+  status: 202,
+  body: {
+    folder_id: '',
+    index_doc_id: null,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    status: 'accepted',
+  },
 }
 
 export function videoList(videos: Video[], total = videos.length) {

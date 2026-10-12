@@ -2,9 +2,9 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 
-import { sha256Hex } from '../../lib/digest'
 import type { Summary, Video } from '../../lib/types'
 import {
+  PUBLISH_ACCEPTED,
   makePlaylist,
   makeSummary,
   makeVideo,
@@ -294,24 +294,16 @@ describe('ReviewScreen notes states', () => {
 describe('ReviewScreen "Edited since publishing"', () => {
   const published = [makeVideo(1, { stage: 'published' })]
 
-  it('is shown only when the stored notes differ from the published digest', async () => {
-    const stale = await sha256Hex('# Older notes')
-    setup({
-      videos: published,
-      summary: { content: '# Notes 1', edited: true, published_digest: stale },
-    })
+  it('is shown when the backend says the notes changed since publishing', async () => {
+    setup({ videos: published, summary: { edited: true, needs_republish: true } })
     renderRoute('/playlists/1/review/1')
 
     expect(await screen.findByText('Edited since publishing')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Re-publish' })).toBeInTheDocument()
   })
 
-  it('is NOT shown for an edited note whose digest matches what was published', async () => {
-    const current = await sha256Hex('# Notes 1')
-    setup({
-      videos: published,
-      summary: { content: '# Notes 1', edited: true, published_digest: current },
-    })
+  it('is NOT shown for an edited note that matches what was published', async () => {
+    setup({ videos: published, summary: { edited: true, needs_republish: false } })
     renderRoute('/playlists/1/review/1')
 
     await screen.findByRole('heading', { level: 1, name: /#001/ })
@@ -319,44 +311,44 @@ describe('ReviewScreen "Edited since publishing"', () => {
     expect(screen.queryByText('Edited since publishing')).not.toBeInTheDocument()
   })
 
-  it('prefers the backend needs_republish flag', async () => {
-    setup({
-      videos: published,
-      summary: { edited: true, needs_republish: true, published_digest: 'x' },
-    })
-    renderRoute('/playlists/1/review/1')
-
-    expect(await screen.findByText('Edited since publishing')).toBeInTheDocument()
-  })
-
-  it('disappears after Re-publish succeeds', async () => {
-    const stale = await sha256Hex('# Older notes')
-    const current = await sha256Hex('# Notes 1')
-    let digest = stale
+  it('disappears once the background Re-publish has finished', async () => {
+    let status = 'published'
+    let needsRepublish = true
     const api = setup({ videos: published })
+    api.on('GET', '/api/playlists/1', () => makePlaylist({ status }))
     api.on('GET', '/api/videos/1/summary', () =>
-      makeSummary(1, { content: '# Notes 1', edited: true, published_digest: digest }),
+      makeSummary(1, { edited: true, needs_republish: needsRepublish }),
     )
     api.on('POST', '/api/playlists/1/publish', () => {
-      digest = current
-      return { folder_id: 'f', created: 0, updated: 1, skipped: 0, status: 'ok' }
+      status = 'publishing'
+      return PUBLISH_ACCEPTED
     })
     const user = userEvent.setup()
     renderRoute('/playlists/1/review/1')
 
     await user.click(await screen.findByRole('button', { name: 'Re-publish' }))
+    expect(await screen.findByRole('button', { name: /publishing/i })).toBeDisabled()
 
-    await waitFor(() =>
-      expect(screen.queryByText('Edited since publishing')).not.toBeInTheDocument(),
+    status = 'published'
+    needsRepublish = false
+    await waitFor(
+      () => expect(screen.queryByText('Edited since publishing')).not.toBeInTheDocument(),
+      { timeout: 6000 },
     )
-    expect(await screen.findByText('Updated 1 Doc in Drive.')).toBeInTheDocument()
-  })
+  }, 15000)
 })
 
 describe('ReviewScreen actions', () => {
-  it('Regenerate confirms with the overwrite warning, then regenerates (sync 200)', async () => {
+  it('Regenerate confirms with the overwrite warning, then queues the regeneration', async () => {
+    let stage: Video['stage'] = 'pending_review'
     const api = setup()
-    api.on('POST', '/api/videos/1/regenerate', makeSummary(1, { content: '# Fresh notes' }))
+    api.on('GET', '/api/playlists/1/videos', () =>
+      videoList([makeVideo(1, { stage }), makeVideo(2)]),
+    )
+    api.on('POST', '/api/videos/1/regenerate', () => {
+      stage = 'queued'
+      return { status: 202, body: makeVideo(1, { stage: 'queued', regenerating: true }) }
+    })
     const user = userEvent.setup()
     renderRoute('/playlists/1/review/1')
 
@@ -367,7 +359,9 @@ describe('ReviewScreen actions', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Regenerate notes' }))
 
     await waitFor(() => expect(api.callsTo('POST', '/api/videos/1/regenerate')).toHaveLength(1))
-    expect(await screen.findByText('Notes regenerated.')).toBeInTheDocument()
+    // 202 only means "queued": no success toast until the video settles.
+    expect(await screen.findByRole('button', { name: /regenerating/i })).toBeDisabled()
+    expect(screen.queryByText('Notes regenerated.')).not.toBeInTheDocument()
   })
 
   it('handles an async (202) regenerate: shows Regenerating, polls, then reports completion', async () => {
@@ -378,7 +372,7 @@ describe('ReviewScreen actions', () => {
     )
     api.on('POST', '/api/videos/1/regenerate', () => {
       stage = 'generating_notes'
-      return { status: 202, body: { status: 'accepted', message: 'Regeneration started' } }
+      return { status: 202, body: makeVideo(1, { stage: 'queued', regenerating: true }) }
     })
     const user = userEvent.setup()
     renderRoute('/playlists/1/review/1')

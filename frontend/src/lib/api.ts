@@ -140,7 +140,7 @@ export function getPlaylistVideos(
   params?: { stage?: Stage; search?: string; page?: number; page_size?: number },
 ) {
   const query = new URLSearchParams()
-  // The backend 500s on unknown stages, so never forward anything else.
+  // The backend rejects unknown stages with 422, so never forward anything else.
   if (params?.stage && ALL_STAGES.includes(params.stage)) query.set('stage', params.stage)
   if (params?.search) query.set('search', params.search)
   if (params?.page) query.set('page', String(params.page))
@@ -211,17 +211,11 @@ export function retryVideo(videoId: number) {
 }
 
 /**
- * Sync backends answer 200 with the new summary; async ones answer 202 with an
- * action envelope and the notes arrive later (poll the video stage).
+ * Queue a regeneration (HTTP 202). The video goes back to `queued` with
+ * `regenerating: true`; poll the video until it settles, then refetch notes.
  */
-export type RegenerateResponse = Summary | ActionResponse
-
-export function isSummaryResponse(value: RegenerateResponse | undefined): value is Summary {
-  return Boolean(value) && typeof (value as Summary).content === 'string'
-}
-
 export function regenerateVideo(videoId: number) {
-  return request<RegenerateResponse>(`/api/videos/${videoId}/regenerate`, {
+  return request<Video>(`/api/videos/${videoId}/regenerate`, {
     method: 'POST',
   })
 }

@@ -19,11 +19,9 @@ import {
   approveVideo,
   getPlaylist,
   getVideoSummary,
-  isSummaryResponse,
   regenerateVideo,
   updateVideoSummary,
 } from '../../lib/api'
-import { needsRepublish, sha256Hex } from '../../lib/digest'
 import { formatPosition } from '../../lib/format'
 import { regeneratePhase, type JobWatch } from '../../lib/jobs'
 import { pollInterval } from '../../lib/polling'
@@ -111,20 +109,8 @@ export function ReviewScreen() {
     draft && draft.videoId === currentVideoPk && draft.content !== (summary?.content ?? ''),
   )
 
-  // "Edited since publishing": a real signal, not stage + edited. The backend flag wins;
-  // otherwise compare SHA-256(content) with the published digest the API already returns.
-  const digestNeeded =
-    currentVideo?.stage === 'published' &&
-    summary?.edited === true &&
-    typeof summary.needs_republish !== 'boolean'
-  const digestQuery = useQuery({
-    queryKey: ['content-digest', summary?.content ?? ''],
-    queryFn: () => sha256Hex(summary?.content ?? ''),
-    enabled: digestNeeded,
-    staleTime: Infinity,
-    gcTime: 60_000,
-  })
-  const showRepublish = needsRepublish(currentVideo?.stage, summary, digestQuery.data ?? null)
+  // "Edited since publishing": the backend compares the stored notes with the published digest.
+  const showRepublish = currentVideo?.stage === 'published' && summary?.needs_republish === true
 
   // ---- Unsaved changes guard -------------------------------------------------------------
   const dirtyRef = useRef(false)
@@ -175,18 +161,10 @@ export function ReviewScreen() {
   })
 
   const regenMut = useMutation({
-    mutationFn: (target: number) =>
-      regenerateVideo(target).then((response) => ({ response, target })),
-    onSuccess: ({ response, target }) => {
-      if (isSummaryResponse(response)) {
-        // Sync backend (200): the new notes are in the response.
-        toast('Notes regenerated.')
-        setDraft(null)
-        queryClient.setQueryData(queryKeys.summary(target), response)
-      } else {
-        // Async backend (202): show "Regenerating..." and poll the video stage.
-        setRegenWatch({ startedAt: Date.now() })
-      }
+    mutationFn: (target: number) => regenerateVideo(target).then(() => ({ target })),
+    onSuccess: ({ target }) => {
+      // Regeneration runs in the background (202): show "Regenerating..." and poll the video.
+      setRegenWatch({ startedAt: Date.now() })
       void invalidateVideo(queryClient, playlistId, target)
     },
     onError: (err: Error) => toast(err.message || 'Could not regenerate the notes.', 'error'),

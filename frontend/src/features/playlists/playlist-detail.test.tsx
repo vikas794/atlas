@@ -2,7 +2,14 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 
-import { makePlaylist, makeVideo, mockApi, renderRoute, videoList } from '../../test/harness'
+import {
+  PUBLISH_ACCEPTED,
+  makePlaylist,
+  makeVideo,
+  mockApi,
+  renderRoute,
+  videoList,
+} from '../../test/harness'
 
 const COUNTS = {
   queued: 1,
@@ -364,67 +371,79 @@ describe('PlaylistDetail actions', () => {
 })
 
 describe('PlaylistDetail publishing', () => {
-  it('says "Nothing new to publish" for a sync publish that did nothing', async () => {
-    const api = setup({ counts: { approved: 1 } })
-    api.on('POST', '/api/playlists/1/publish', {
-      folder_id: 'f',
-      created: 0,
-      updated: 0,
-      skipped: 3,
-      status: 'ok',
-    })
-    const user = userEvent.setup()
-    renderRoute('/playlists/1')
-
-    await user.click(await screen.findByRole('button', { name: 'Publish approved to Drive' }))
-
-    expect(await screen.findByText('Nothing new to publish.')).toBeInTheDocument()
-    expect(screen.queryByText(/Published 0/)).not.toBeInTheDocument()
-  })
-
-  it('reports real counts for a sync publish', async () => {
-    const api = setup({ counts: { approved: 1 } })
-    api.on('POST', '/api/playlists/1/publish', {
-      folder_id: 'f',
-      created: 2,
-      updated: 1,
-      skipped: 0,
-      status: 'ok',
-    })
-    const user = userEvent.setup()
-    renderRoute('/playlists/1')
-
-    await user.click(await screen.findByRole('button', { name: 'Publish approved to Drive' }))
-
-    expect(
-      await screen.findByText('Published 2 new Docs, updated 1 Doc in Drive.'),
-    ).toBeInTheDocument()
-  })
-
-  it('handles an async (202) publish: shows Publishing, polls, then toasts the failure', async () => {
+  /** A playlist whose GET reflects the background publish job. */
+  function setupPublish() {
     const api = mockApi()
-    let phase: 'ready' | 'publishing' | 'publish_failed' = 'ready'
+    const state = {
+      status: 'ingested',
+      error: null as string | null,
+      published: 0,
+    }
     api.on('GET', '/api/playlists/1', () =>
       makePlaylist({
-        status: phase,
-        last_publish_error: phase === 'publish_failed' ? 'Drive quota exceeded' : null,
-        stage_counts: { ...COUNTS, approved: 2 } as never,
+        status: state.status,
+        last_publish_error: state.error,
+        stage_counts: { ...COUNTS, approved: 2 - state.published, published: state.published },
       }),
     )
     api.on('GET', '/api/playlists/1/videos', videoList([makeVideo(1)]))
     api.on('POST', '/api/playlists/1/publish', () => {
-      phase = 'publishing'
-      return { status: 202, body: { status: 'accepted', message: 'Publishing started' } }
+      state.status = 'publishing'
+      return PUBLISH_ACCEPTED
     })
+    return { api, state }
+  }
+
+  it('never reports success from the 202 itself: shows Publishing, then the real count', async () => {
+    const { state } = setupPublish()
+    const user = userEvent.setup()
+    renderRoute('/playlists/1')
+
+    await user.click(await screen.findByRole('button', { name: 'Publish approved to Drive' }))
+    expect(await screen.findByRole('button', { name: /publishing/i })).toBeDisabled()
+    // The 202 carries created/updated = 0: no "Nothing new to publish" while the job runs.
+    expect(screen.queryByText(/nothing new to publish/i)).not.toBeInTheDocument()
+
+    state.status = 'published'
+    state.published = 2
+    expect(
+      await screen.findByText('Published 2 videos to Drive.', {}, { timeout: 6000 }),
+    ).toBeInTheDocument()
+  }, 15000)
+
+  it('toasts the stored reason when the background publish fails', async () => {
+    const { state } = setupPublish()
     const user = userEvent.setup()
     renderRoute('/playlists/1')
 
     await user.click(await screen.findByRole('button', { name: 'Publish approved to Drive' }))
     expect(await screen.findByRole('button', { name: /publishing/i })).toBeDisabled()
 
-    phase = 'publish_failed' // the next poll (3s) sees the failure
-    const alerts = await screen.findAllByText('Drive quota exceeded', {}, { timeout: 6000 })
-    expect(alerts.length).toBeGreaterThan(0)
+    state.status = 'publish_failed' // the next poll (3s) sees the failure
+    state.error = 'Drive quota exceeded'
+    const alert = await screen.findByText(
+      'Publishing to Drive failed: Drive quota exceeded',
+      {},
+      { timeout: 6000 },
+    )
+    expect(alert.closest('[role="alert"]')).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Publish approved to Drive' })).toBeEnabled()
   }, 15000)
+
+  it('shows the backend error when the publish request itself is rejected', async () => {
+    const { api } = setupPublish()
+    api.on('POST', '/api/playlists/1/publish', {
+      status: 409,
+      body: {
+        code: 'DRIVE_AUTH_REQUIRED',
+        message: 'Google Drive is not authorized.',
+        details: {},
+      },
+    })
+    const user = userEvent.setup()
+    renderRoute('/playlists/1')
+
+    await user.click(await screen.findByRole('button', { name: 'Publish approved to Drive' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Google Drive is not authorized.')
+  })
 })

@@ -2,10 +2,10 @@ import type { Playlist, Video } from './types'
 import { ACTIVE_STAGES } from './types'
 
 /**
- * Publish and regenerate may be synchronous (200, old backend) or asynchronous
- * (202, new backend). For the async case the UI "watches" the resource it
- * polls until the job is done. `startedAt` is when the request returned; data
- * fetched before that moment is stale and never counts as "finished".
+ * Publish and regenerate run in the backend worker (HTTP 202), so the UI
+ * "watches" the resource it polls until the job is done. `startedAt` is when
+ * the request returned; data fetched before that moment is stale and never
+ * counts as "finished".
  */
 export interface JobWatch {
   startedAt: number
@@ -39,34 +39,10 @@ export function regeneratePhase(
   return 'succeeded'
 }
 
-export interface PublishCounts {
-  created: number
-  updated: number
-  skipped?: number
-}
-
-/** True when the response of POST /publish already carries counts (sync, 200). */
-export function hasPublishCounts(
-  response: Partial<PublishCounts> | undefined,
-): response is PublishCounts {
-  return typeof response?.created === 'number' && typeof response?.updated === 'number'
-}
-
-/** Toast text for a finished publish, with real counts and no "0 new Docs!". */
-export function describePublish(counts: PublishCounts | null, publishedDelta = 0): string {
-  if (counts) {
-    const parts: string[] = []
-    if (counts.created > 0)
-      parts.push(`Published ${counts.created} new ${counts.created === 1 ? 'Doc' : 'Docs'}`)
-    if (counts.updated > 0) {
-      parts.push(
-        `${parts.length ? 'updated' : 'Updated'} ${counts.updated} ${counts.updated === 1 ? 'Doc' : 'Docs'}`,
-      )
-    }
-    return parts.length ? `${parts.join(', ')} in Drive.` : 'Nothing new to publish.'
-  }
+/** Toast text for a finished publish: how many more videos are now published. */
+export function describePublish(publishedDelta: number): string {
   if (publishedDelta > 0) {
     return `Published ${publishedDelta} ${publishedDelta === 1 ? 'video' : 'videos'} to Drive.`
   }
-  return 'Nothing new to publish.'
+  return 'Publish finished. Nothing new to publish.'
 }

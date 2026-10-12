@@ -177,6 +177,10 @@ function defaultReasonFor(failureType: FailureType | null | undefined): string {
       return 'The provider returned an error'
     case 'output_malformed':
       return 'The model returned an unusable response'
+    case 'config_error':
+      return 'Atlas is not configured for this step (check Diagnostics)'
+    case 'internal_error':
+      return 'Unexpected error inside Atlas'
     case 'playlist_unavailable':
       return 'Playlist is unavailable'
     case 'invalid_url':
