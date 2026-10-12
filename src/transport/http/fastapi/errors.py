@@ -44,6 +44,13 @@ class HTTPError(Exception):
         super().__init__(detail)
 
 
+def _log(status_code: int, msg: str, *args: Any, exc_info: bool = False) -> None:
+    """Server faults (5xx) are warnings and reach /api/diagnostics; client errors (4xx such as
+    a 404 or a 409 "already publishing") are routine and logged at INFO."""
+    level = logging.WARNING if status_code >= 500 else logging.INFO
+    logger.log(level, msg, *args, exc_info=exc_info)
+
+
 def _redact(value: Any) -> Any:
     """Redact every string inside a JSON-ready structure."""
     if isinstance(value, str):
@@ -122,7 +129,8 @@ def domain_error_to_http(exc: DomainError) -> HTTPError:
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     """FastAPI exception handler for DomainError."""
     http_error = domain_error_to_http(exc)
-    logger.warning(
+    _log(
+        http_error.status_code,
         "Domain error in %s %s: %s",
         request.method,
         request.url.path,
@@ -141,7 +149,8 @@ async def domain_error_handler(request: Request, exc: DomainError) -> JSONRespon
 
 async def http_error_handler(request: Request, exc: HTTPError) -> JSONResponse:
     """FastAPI exception handler for HTTPError."""
-    logger.warning(
+    _log(
+        exc.status_code,
         "HTTP error in %s %s: %s",
         request.method,
         request.url.path,
@@ -159,13 +168,15 @@ async def http_error_handler(request: Request, exc: HTTPError) -> JSONResponse:
 
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     """FastAPI exception handler for validation errors."""
-    logger.warning(
+    errors = exc.errors()
+    # Field locations and messages only: the rejected input can be a whole note or transcript.
+    _log(
+        422,
         "Validation error in %s %s: %s",
         request.method,
         request.url.path,
-        exc.errors(),
+        [(".".join(map(str, e.get("loc", ()))), e.get("msg")) for e in errors],
     )
-    errors = exc.errors()
     message = "Request validation failed"
     if errors:
         first = errors[0]
@@ -210,7 +221,8 @@ async def starlette_http_error_handler(
             status_code=exc.status_code,
             content=error_envelope(f"HTTP_{exc.status_code}", message, detail),
         )
-    logger.warning(
+    _log(
+        exc.status_code,
         "HTTP %s in %s %s: %s",
         exc.status_code,
         request.method,
@@ -233,12 +245,6 @@ def _reason(status_code: int) -> str:
 
 async def pipeline_error_handler(request: Request, exc: PipelineError) -> JSONResponse:
     """FastAPI exception handler for PipelineError."""
-    logger.warning(
-        "Pipeline error in %s %s: %s",
-        request.method,
-        request.url.path,
-        exc,
-    )
     status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
     if exc.failure_type == FailureType.INVALID_URL:
         status_code = status.HTTP_400_BAD_REQUEST
@@ -249,6 +255,7 @@ async def pipeline_error_handler(request: Request, exc: PipelineError) -> JSONRe
     elif exc.failure_kind == FailureKind.PERMANENT:
         status_code = status.HTTP_400_BAD_REQUEST
 
+    _log(status_code, "Pipeline error in %s %s: %s", request.method, request.url.path, exc)
     return JSONResponse(
         status_code=status_code,
         content=error_envelope(

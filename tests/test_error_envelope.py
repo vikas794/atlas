@@ -109,6 +109,21 @@ def test_method_not_allowed_is_an_envelope(probe) -> None:
     assert_envelope(probe.delete("/body"), 405, "HTTP_405")
 
 
+def test_only_server_errors_reach_the_recent_errors_buffer(probe) -> None:
+    from src.shared.logging_setup import RECENT_ERRORS, configure_logging
+
+    configure_logging()
+    RECENT_ERRORS.clear()
+    probe.get("/raise/not-found")
+    probe.post("/body", json={"count": "many"})
+    assert RECENT_ERRORS.snapshot() == []
+
+    probe.get("/raise/boom")
+    messages = [entry["message"] for entry in RECENT_ERRORS.snapshot()]
+    assert any("Unhandled error in GET /raise/boom" in m for m in messages)
+    assert all(KEY not in m for m in messages)
+
+
 def test_correlation_id_is_echoed_only_when_safe(probe) -> None:
     ok = probe.get("/raise/not-found", headers={"X-Correlation-ID": "abc-123"})
     assert ok.headers["X-Correlation-ID"] == "abc-123"

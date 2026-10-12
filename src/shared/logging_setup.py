@@ -32,6 +32,7 @@ _STANDARD_ATTRS = frozenset(logging.LogRecord("", 0, "", 0, "", (), None).__dict
     "message",
     "asctime",
     "taskName",
+    "color_message",  # uvicorn's ANSI-coloured duplicate of the message
 }
 
 #: Third-party loggers that are chatty at INFO.
