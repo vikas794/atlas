@@ -11,10 +11,7 @@ from src.config import load_settings
 from src.shared.logging_setup import configure_logging
 from src.transport.http.fastapi.dependencies import get_usage_ledger, get_worker
 from src.transport.http.fastapi.errors import register_error_handlers
-from src.transport.http.fastapi.middleware import (
-    CorrelationIdMiddleware,
-    RequestLoggingMiddleware,
-)
+from src.transport.http.fastapi.middleware import RequestLoggingMiddleware
 from src.transport.http.fastapi.routers import drive_auth, playlists, usage, videos
 
 # Under uvicorn only uvicorn's own loggers are configured; without this, every src.* log line
@@ -57,7 +54,6 @@ app.add_middleware(
 )
 
 # Add custom middleware
-app.add_middleware(CorrelationIdMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 
 # Register error handlers

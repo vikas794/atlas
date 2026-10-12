@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from http import HTTPStatus
+from typing import Any
 
 from fastapi import FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
@@ -20,6 +22,7 @@ from src.domain.exceptions import (
 from src.domain.interfaces.drive_publisher import DriveAuthorizationRequired
 from src.domain.models.playlist import FailureKind, FailureType, PipelineError
 from src.domain.services.stage_machine import InvalidTransitionError
+from src.shared.redaction import redact_text
 
 logger = logging.getLogger(__name__)
 
@@ -41,17 +44,28 @@ class HTTPError(Exception):
         super().__init__(detail)
 
 
-def error_envelope(
-    code: str, message: str, details: dict | None = None
-) -> dict[str, object]:
+def _redact(value: Any) -> Any:
+    """Redact every string inside a JSON-ready structure."""
+    if isinstance(value, str):
+        return redact_text(value)
+    if isinstance(value, dict):
+        return {key: _redact(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact(item) for item in value]
+    return value
+
+
+def error_envelope(code: str, message: str, details: dict | None = None) -> dict[str, object]:
     """Build the PRD error body: ``{code, message, details}``.
 
-    ``details`` is always present; callers without extra context pass ``{}``.
+    ``details`` is always present; callers without extra context pass ``{}``. Message and
+    details are passed through the secret redactor: many of them quote provider errors,
+    which can contain request URLs with ``key=...``.
     """
     return {
         "code": code,
-        "message": message,
-        "details": jsonable_encoder(details or {}),
+        "message": redact_text(message),
+        "details": _redact(jsonable_encoder(details or {})),
     }
 
 
@@ -151,13 +165,15 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
         request.url.path,
         exc.errors(),
     )
+    errors = exc.errors()
+    message = "Request validation failed"
+    if errors:
+        first = errors[0]
+        where = ".".join(str(part) for part in first.get("loc", ()))
+        message = f"{message}: {where}: {first.get('msg', 'invalid value')}"
     return JSONResponse(
         status_code=422,
-        content=error_envelope(
-            "VALIDATION_ERROR",
-            "Request validation failed",
-            {"errors": exc.errors()},
-        ),
+        content=error_envelope("VALIDATION_ERROR", message, {"errors": errors}),
     )
 
 
@@ -188,10 +204,11 @@ async def starlette_http_error_handler(
     """
     detail = exc.detail
     if isinstance(detail, dict):
-        # Preserve structured detail as-is; it already carries the real message.
+        # Preserve structured detail; lift its message (if any) so ``message`` is never empty.
+        message = str(detail.get("message") or detail.get("detail") or _reason(exc.status_code))
         return JSONResponse(
             status_code=exc.status_code,
-            content=error_envelope(f"HTTP_{exc.status_code}", "", detail),
+            content=error_envelope(f"HTTP_{exc.status_code}", message, detail),
         )
     logger.warning(
         "HTTP %s in %s %s: %s",
@@ -202,8 +219,17 @@ async def starlette_http_error_handler(
     )
     return JSONResponse(
         status_code=exc.status_code,
-        content=error_envelope(f"HTTP_{exc.status_code}", str(detail)),
+        content=error_envelope(f"HTTP_{exc.status_code}", str(detail or _reason(exc.status_code))),
+        headers=getattr(exc, "headers", None),
     )
+
+
+def _reason(status_code: int) -> str:
+    try:
+        return HTTPStatus(status_code).phrase
+    except ValueError:
+        return "HTTP error"
+
 
 async def pipeline_error_handler(request: Request, exc: PipelineError) -> JSONResponse:
     """FastAPI exception handler for PipelineError."""
@@ -246,4 +272,3 @@ def register_error_handlers(app: FastAPI) -> None:
     # Registered before the catch-all so framework 404/405 use the same envelope.
     app.add_exception_handler(StarletteHTTPException, starlette_http_error_handler)
     app.add_exception_handler(Exception, generic_error_handler)
-
