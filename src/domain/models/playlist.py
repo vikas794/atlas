@@ -27,19 +27,11 @@ class Stage(StrEnum):
     FAILED = "failed"
 
     @property
-    def is_active(self) -> bool:
-        """True while an external call is in flight for this stage."""
-        return self in _ACTIVE_STAGES
-
-    @property
     def is_terminal(self) -> bool:
         """True for stages that require no further pipeline work."""
         return self in _TERMINAL_STAGES
 
 
-_ACTIVE_STAGES = frozenset(
-    {Stage.FETCHING_TRANSCRIPT, Stage.TRANSCRIPT_READY, Stage.GENERATING_NOTES}
-)
 _TERMINAL_STAGES = frozenset({Stage.PUBLISHED})
 
 
@@ -213,11 +205,6 @@ class Video:
             and self.failure_kind == FailureKind.TRANSIENT
             and self.next_retry_at is None
         )
-
-    @property
-    def has_transcript(self) -> bool:
-        """Whether a non-deleted transcript row exists (drives skip-completed)."""
-        return self.stage not in {Stage.QUEUED, Stage.FETCHING_TRANSCRIPT}
 
     @property
     def display_position(self) -> str:

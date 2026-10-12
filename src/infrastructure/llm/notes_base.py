@@ -400,7 +400,7 @@ class NotesPromptSource:
 
     @property
     def prompt_name(self) -> str:
-        return str(self._settings("notes_prompt_name", "notes_v1.yaml"))
+        return str(self._settings("notes_prompt_name", "notes_v1_1.yaml"))
 
     @property
     def base_dir(self) -> Path:

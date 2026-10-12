@@ -253,7 +253,6 @@ class YtDlpTranscriptProvider(TranscriptProviderPort):
         provider = YtDlpTranscriptProvider(settings, usage_ledger)
         result = await provider.fetch_transcript("dQw4w9WgXcQ")   # raises TranscriptError
         batch = await provider.fetch_transcripts(["id1", "id2"])
-        await provider.aclose()
 
     ``result.language`` is the language actually delivered (which may differ
     from the requested one when a fallback track is used), ``result.raw_srt``
@@ -376,15 +375,6 @@ class YtDlpTranscriptProvider(TranscriptProviderPort):
             if isinstance(outcome, BaseException):
                 raise outcome
         return [outcome for outcome in outcomes if isinstance(outcome, TranscriptResult)]
-
-    async def aclose(self) -> None:
-        """Release provider resources.
-
-        Every per-attempt working directory is removed in ``fetch_transcript``'s
-        ``finally`` block, so there is nothing left to clean up here. The hook
-        exists so callers can treat transcript providers uniformly.
-        """
-        return None
 
     # ------------------------------------------------------------------
     # Internals
