@@ -46,7 +46,9 @@ export interface PublishCounts {
 }
 
 /** True when the response of POST /publish already carries counts (sync, 200). */
-export function hasPublishCounts(response: Partial<PublishCounts> | undefined): response is PublishCounts {
+export function hasPublishCounts(
+  response: Partial<PublishCounts> | undefined,
+): response is PublishCounts {
   return typeof response?.created === 'number' && typeof response?.updated === 'number'
 }
 
@@ -54,9 +56,12 @@ export function hasPublishCounts(response: Partial<PublishCounts> | undefined): 
 export function describePublish(counts: PublishCounts | null, publishedDelta = 0): string {
   if (counts) {
     const parts: string[] = []
-    if (counts.created > 0) parts.push(`Published ${counts.created} new ${counts.created === 1 ? 'Doc' : 'Docs'}`)
+    if (counts.created > 0)
+      parts.push(`Published ${counts.created} new ${counts.created === 1 ? 'Doc' : 'Docs'}`)
     if (counts.updated > 0) {
-      parts.push(`${parts.length ? 'updated' : 'Updated'} ${counts.updated} ${counts.updated === 1 ? 'Doc' : 'Docs'}`)
+      parts.push(
+        `${parts.length ? 'updated' : 'Updated'} ${counts.updated} ${counts.updated === 1 ? 'Doc' : 'Docs'}`,
+      )
     }
     return parts.length ? `${parts.join(', ')} in Drive.` : 'Nothing new to publish.'
   }

@@ -15,11 +15,15 @@ const COUNTS = {
   failed: 1,
 }
 
-function setup(options: { counts?: Partial<typeof COUNTS>; videos?: ReturnType<typeof makeVideo>[] } = {}) {
+function setup(
+  options: { counts?: Partial<typeof COUNTS>; videos?: ReturnType<typeof makeVideo>[] } = {},
+) {
   const counts = { ...COUNTS, ...options.counts }
   const videos = options.videos ?? [makeVideo(1), makeVideo(2)]
   const api = mockApi()
-  api.on('GET', '/api/playlists/1', () => makePlaylist({ video_count: 8, stage_counts: counts as never }))
+  api.on('GET', '/api/playlists/1', () =>
+    makePlaylist({ video_count: 8, stage_counts: counts as never }),
+  )
   api.on('GET', '/api/playlists/1/videos', (call) => {
     const stage = call.search.get('stage')
     return videoList(stage ? videos.filter((video) => video.stage === stage) : videos)
@@ -60,7 +64,9 @@ describe('PlaylistDetail summary strip', () => {
     // The table shows exactly the in-progress rows, merged in playlist order.
     await waitFor(() => expect(screen.getByText('Video 3')).toBeInTheDocument())
     expect(screen.queryByText('Video 4')).not.toBeInTheDocument()
-    const stages = api.callsTo('GET', '/api/playlists/1/videos').map((call) => call.search.get('stage'))
+    const stages = api
+      .callsTo('GET', '/api/playlists/1/videos')
+      .map((call) => call.search.get('stage'))
     expect(stages).toEqual(
       expect.arrayContaining(['fetching_transcript', 'transcript_ready', 'generating_notes']),
     )
@@ -190,10 +196,14 @@ describe('PlaylistDetail table', () => {
 
     await waitFor(() =>
       expect(
-        api.callsTo('GET', '/api/playlists/1/videos').some((call) => call.search.get('search') === 'abc'),
+        api
+          .callsTo('GET', '/api/playlists/1/videos')
+          .some((call) => call.search.get('search') === 'abc'),
       ).toBe(true),
     )
-    const searches = api.callsTo('GET', '/api/playlists/1/videos').map((call) => call.search.get('search'))
+    const searches = api
+      .callsTo('GET', '/api/playlists/1/videos')
+      .map((call) => call.search.get('search'))
     expect(searches).not.toContain('a')
     expect(searches).not.toContain('ab')
   })
@@ -255,7 +265,11 @@ describe('PlaylistDetail actions', () => {
 
   it('confirms Approve all with the count, then approves', async () => {
     const api = setup({ counts: { pending_review: 2 } })
-    api.on('POST', '/api/playlists/1/approve-all', { status: 'ok', message: 'Approved 2 videos', count: 2 })
+    api.on('POST', '/api/playlists/1/approve-all', {
+      status: 'ok',
+      message: 'Approved 2 videos',
+      count: 2,
+    })
     const user = userEvent.setup()
     renderRoute('/playlists/1')
 
@@ -298,7 +312,9 @@ describe('PlaylistDetail actions', () => {
 
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByRole('heading', { name: 'Delete playlist' })).toBeInTheDocument()
-    expect(dialog).toHaveTextContent('Delete "Complete Java" and all 8 stored videos, transcripts and notes?')
+    expect(dialog).toHaveTextContent(
+      'Delete "Complete Java" and all 8 stored videos, transcripts and notes?',
+    )
     expect(dialog).toHaveTextContent('This does not delete Google Docs already in Drive.')
 
     await user.click(within(dialog).getByRole('button', { name: 'Delete playlist' }))
@@ -380,7 +396,9 @@ describe('PlaylistDetail publishing', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Publish approved to Drive' }))
 
-    expect(await screen.findByText('Published 2 new Docs, updated 1 Doc in Drive.')).toBeInTheDocument()
+    expect(
+      await screen.findByText('Published 2 new Docs, updated 1 Doc in Drive.'),
+    ).toBeInTheDocument()
   })
 
   it('handles an async (202) publish: shows Publishing, polls, then toasts the failure', async () => {

@@ -1,5 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, CheckCircle2, Link2, LoaderCircle, LogIn, RefreshCw, UploadCloud } from 'lucide-react'
+import {
+  AlertCircle,
+  CheckCircle2,
+  Link2,
+  LoaderCircle,
+  LogIn,
+  RefreshCw,
+  UploadCloud,
+} from 'lucide-react'
 import { useRef, useState, type ChangeEvent } from 'react'
 
 import { Button } from '../../components/ui/button'
@@ -93,9 +101,7 @@ export function GoogleAuthPanel() {
         {isBusy ? <p className="mt-4 text-body text-text-muted">Checking Drive status…</p> : null}
 
         {driveStatusQuery.isError ? (
-          <p className="mt-4 text-body text-st-error-fg">
-            {driveStatusQuery.error.message}
-          </p>
+          <p className="mt-4 text-body text-st-error-fg">{driveStatusQuery.error.message}</p>
         ) : null}
 
         {driveStatusQuery.isSuccess && !isConfigured ? (
@@ -131,7 +137,10 @@ export function GoogleAuthPanel() {
             </Button>
             {uploadStatus ? (
               <p
-                className={cn('mt-2 text-label', uploadOk ? 'text-st-success-fg' : 'text-st-error-fg')}
+                className={cn(
+                  'mt-2 text-label',
+                  uploadOk ? 'text-st-success-fg' : 'text-st-error-fg',
+                )}
                 role="status"
               >
                 {uploadStatus}
@@ -142,7 +151,8 @@ export function GoogleAuthPanel() {
           <div className="rounded border border-border bg-surface-muted p-4">
             <h3 className="text-body font-medium text-text">Step 2: Authenticate</h3>
             <p className="mt-1 text-label text-text-muted">
-              Opens the Google consent screen in your local browser and stores a token for publishing.
+              Opens the Google consent screen in your local browser and stores a token for
+              publishing.
             </p>
             <Button
               className="mt-3 w-full justify-start"

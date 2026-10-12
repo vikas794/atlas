@@ -40,7 +40,9 @@ describe('ReviewScreen header', () => {
     setup()
     renderRoute('/playlists/1/review/1')
 
-    expect(await screen.findByRole('heading', { level: 1, name: '#001 Video 1' })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { level: 1, name: '#001 Video 1' }),
+    ).toBeInTheDocument()
     expect(await screen.findByText(/Generated/)).toBeInTheDocument()
     expect(screen.getByText('Model: gemini-test')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /open video/i })).toHaveAttribute(
@@ -64,7 +66,9 @@ describe('ReviewScreen header', () => {
     const api = setup({ videos: many })
     renderRoute('/playlists/1/review/580')
 
-    expect(await screen.findByRole('heading', { level: 1, name: '#580 Video 580' })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { level: 1, name: '#580 Video 580' }),
+    ).toBeInTheDocument()
     expect(api.callsTo('GET', '/api/playlists/1/videos').length).toBeGreaterThanOrEqual(2)
   })
 })
@@ -72,7 +76,11 @@ describe('ReviewScreen header', () => {
 describe('ReviewScreen approve', () => {
   it('Approve saves the dirty draft first, then approves, then opens the next video', async () => {
     const api = setup()
-    api.on('PUT', '/api/videos/1/summary', makeSummary(1, { content: '# Notes 1 more', edited: true }))
+    api.on(
+      'PUT',
+      '/api/videos/1/summary',
+      makeSummary(1, { content: '# Notes 1 more', edited: true }),
+    )
     api.on('POST', '/api/videos/1/approve', makeVideo(1, { stage: 'approved' }))
     const user = userEvent.setup()
     const { router } = renderRoute('/playlists/1/review/1')
@@ -83,14 +91,21 @@ describe('ReviewScreen approve', () => {
     await waitFor(() => expect(api.callsTo('POST', '/api/videos/1/approve')).toHaveLength(1))
     const order = api.calls.map((call) => `${call.method} ${call.path}`)
     expect(order.indexOf('PUT /api/videos/1/summary')).toBeGreaterThan(-1)
-    expect(order.indexOf('PUT /api/videos/1/summary')).toBeLessThan(order.indexOf('POST /api/videos/1/approve'))
-    expect(api.callsTo('PUT', '/api/videos/1/summary')[0].body).toEqual({ content: '# Notes 1 more' })
+    expect(order.indexOf('PUT /api/videos/1/summary')).toBeLessThan(
+      order.indexOf('POST /api/videos/1/approve'),
+    )
+    expect(api.callsTo('PUT', '/api/videos/1/summary')[0].body).toEqual({
+      content: '# Notes 1 more',
+    })
     await waitFor(() => expect(router.state.location.pathname).toBe('/playlists/1/review/2'))
   })
 
   it('does not approve or navigate when saving fails, and keeps the draft', async () => {
     const api = setup()
-    api.on('PUT', '/api/videos/1/summary', { status: 500, body: { code: 'server_error', message: 'Disk full' } })
+    api.on('PUT', '/api/videos/1/summary', {
+      status: 500,
+      body: { code: 'server_error', message: 'Disk full' },
+    })
     api.on('POST', '/api/videos/1/approve', makeVideo(1, { stage: 'approved' }))
     const user = userEvent.setup()
     const { router } = renderRoute('/playlists/1/review/1')
@@ -152,7 +167,11 @@ describe('ReviewScreen unsaved changes', () => {
     await user.click(screen.getByRole('button', { name: 'Keep editing' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
 
-    await user.click(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', { name: 'Playlists' }))
+    await user.click(
+      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+        name: 'Playlists',
+      }),
+    )
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Keep editing' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
@@ -277,7 +296,10 @@ describe('ReviewScreen "Edited since publishing"', () => {
 
   it('is shown only when the stored notes differ from the published digest', async () => {
     const stale = await sha256Hex('# Older notes')
-    setup({ videos: published, summary: { content: '# Notes 1', edited: true, published_digest: stale } })
+    setup({
+      videos: published,
+      summary: { content: '# Notes 1', edited: true, published_digest: stale },
+    })
     renderRoute('/playlists/1/review/1')
 
     expect(await screen.findByText('Edited since publishing')).toBeInTheDocument()
@@ -286,7 +308,10 @@ describe('ReviewScreen "Edited since publishing"', () => {
 
   it('is NOT shown for an edited note whose digest matches what was published', async () => {
     const current = await sha256Hex('# Notes 1')
-    setup({ videos: published, summary: { content: '# Notes 1', edited: true, published_digest: current } })
+    setup({
+      videos: published,
+      summary: { content: '# Notes 1', edited: true, published_digest: current },
+    })
     renderRoute('/playlists/1/review/1')
 
     await screen.findByRole('heading', { level: 1, name: /#001/ })
@@ -295,7 +320,10 @@ describe('ReviewScreen "Edited since publishing"', () => {
   })
 
   it('prefers the backend needs_republish flag', async () => {
-    setup({ videos: published, summary: { edited: true, needs_republish: true, published_digest: 'x' } })
+    setup({
+      videos: published,
+      summary: { edited: true, needs_republish: true, published_digest: 'x' },
+    })
     renderRoute('/playlists/1/review/1')
 
     expect(await screen.findByText('Edited since publishing')).toBeInTheDocument()
@@ -318,7 +346,9 @@ describe('ReviewScreen "Edited since publishing"', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Re-publish' }))
 
-    await waitFor(() => expect(screen.queryByText('Edited since publishing')).not.toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.queryByText('Edited since publishing')).not.toBeInTheDocument(),
+    )
     expect(await screen.findByText('Updated 1 Doc in Drive.')).toBeInTheDocument()
   })
 })
@@ -343,7 +373,9 @@ describe('ReviewScreen actions', () => {
   it('handles an async (202) regenerate: shows Regenerating, polls, then reports completion', async () => {
     let stage: Video['stage'] = 'pending_review'
     const api = setup()
-    api.on('GET', '/api/playlists/1/videos', () => videoList([makeVideo(1, { stage }), makeVideo(2)]))
+    api.on('GET', '/api/playlists/1/videos', () =>
+      videoList([makeVideo(1, { stage }), makeVideo(2)]),
+    )
     api.on('POST', '/api/videos/1/regenerate', () => {
       stage = 'generating_notes'
       return { status: 202, body: { status: 'accepted', message: 'Regeneration started' } }

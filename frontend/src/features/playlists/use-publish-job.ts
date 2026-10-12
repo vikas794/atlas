@@ -42,7 +42,10 @@ export function usePublishJob(playlistId: number) {
     if (phase === 'failed') {
       toast(current?.last_publish_error || 'Publishing to Drive failed.', 'error')
     } else {
-      const delta = Math.max(0, (current?.stage_counts?.published ?? 0) - (started?.publishedBefore ?? 0))
+      const delta = Math.max(
+        0,
+        (current?.stage_counts?.published ?? 0) - (started?.publishedBefore ?? 0),
+      )
       toast(describePublish(current?.last_publish ?? null, delta))
     }
     // The async job is over: stop watching and refresh everything it touched.

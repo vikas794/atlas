@@ -41,7 +41,12 @@ import { ConfirmDialog } from '../../components/shared/confirm-dialog'
 import { DisabledReason } from '../../components/shared/disabled-reason'
 import { RelativeTime } from '../../components/shared/relative-time'
 import { SegmentedProgressBar } from '../../components/shared/segmented-progress-bar'
-import { EmptyState, ErrorState, SkeletonBar, SkeletonTableRows } from '../../components/shared/state-panels'
+import {
+  EmptyState,
+  ErrorState,
+  SkeletonBar,
+  SkeletonTableRows,
+} from '../../components/shared/state-panels'
 import { StatusBadge } from '../../components/shared/status-badge'
 import { useToast } from '../../components/shared/toast'
 import { Badge } from '../../components/ui/badge'
@@ -57,7 +62,11 @@ const SEARCH_DEBOUNCE_MS = 300
 const STRIP_CARDS: { filter: StageFilter; label: string; tone: string }[] = [
   { filter: 'all', label: 'All videos', tone: 'border-border text-text' },
   { filter: 'queued', label: 'Queued', tone: 'border-border text-st-neutral-fg' },
-  { filter: 'in_progress', label: 'In progress', tone: 'border-st-progress-fg/40 text-st-progress-fg' },
+  {
+    filter: 'in_progress',
+    label: 'In progress',
+    tone: 'border-st-progress-fg/40 text-st-progress-fg',
+  },
   {
     filter: 'pending_review',
     label: 'Needs review',
@@ -65,7 +74,11 @@ const STRIP_CARDS: { filter: StageFilter; label: string; tone: string }[] = [
   },
   { filter: 'approved', label: 'Approved', tone: 'border-st-success-fg/40 text-st-success-fg' },
   { filter: 'published', label: 'Published', tone: 'border-st-success-fg/40 text-st-success-fg' },
-  { filter: 'failed', label: 'Failed', tone: 'border-st-error-fg/40 bg-st-error-bg/30 text-st-error-fg' },
+  {
+    filter: 'failed',
+    label: 'Failed',
+    tone: 'border-st-error-fg/40 bg-st-error-bg/30 text-st-error-fg',
+  },
 ]
 
 /** New videos found by a re-sync: video_count difference, never negative. */
@@ -202,7 +215,12 @@ export function PlaylistDetail() {
   })
 
   // ---- Loading / error / not found states -------------------------------------------------
-  if (!validId || (playlistQuery.isError && playlistQuery.error instanceof ApiError && playlistQuery.error.status === 404)) {
+  if (
+    !validId ||
+    (playlistQuery.isError &&
+      playlistQuery.error instanceof ApiError &&
+      playlistQuery.error.status === 404)
+  ) {
     return (
       <div className="space-y-3">
         <h1 className="text-page text-text">Playlist not found</h1>
@@ -242,7 +260,10 @@ export function PlaylistDetail() {
         <div className="rounded border border-border bg-surface">
           <table className="w-full">
             <tbody>
-              <SkeletonTableRows rows={6} widths={['w-8', 'w-64', 'w-24', 'w-32', 'w-16', 'w-16']} />
+              <SkeletonTableRows
+                rows={6}
+                widths={['w-8', 'w-64', 'w-24', 'w-32', 'w-16', 'w-16']}
+              />
             </tbody>
           </table>
         </div>
@@ -298,7 +319,11 @@ export function PlaylistDetail() {
           <p className="mt-1 text-label text-text-muted">
             <code className="font-mono">{playlist.playlist_id}</code>
             {' · '}
-            <RelativeTime iso={playlist.last_synced_at} prefix="Last synced" fallback="Never synced" />
+            <RelativeTime
+              iso={playlist.last_synced_at}
+              prefix="Last synced"
+              fallback="Never synced"
+            />
             {playlist.status === 'publish_failed' && playlist.last_publish_error ? (
               <span className="text-st-error-fg">
                 {' · '}Last publish failed: {playlist.last_publish_error}
@@ -479,7 +504,10 @@ export function PlaylistDetail() {
             </thead>
             <tbody>
               {!videos ? (
-                <SkeletonTableRows rows={8} widths={['w-8', 'w-64', 'w-24', 'w-32', 'w-16', 'w-16']} />
+                <SkeletonTableRows
+                  rows={8}
+                  widths={['w-8', 'w-64', 'w-24', 'w-32', 'w-16', 'w-16']}
+                />
               ) : videos.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="p-5 text-center text-text-muted">
@@ -529,12 +557,22 @@ export function PlaylistDetail() {
                       </td>
                       <td className="px-3 py-1 text-label">
                         {detail.reason ? (
-                          <span className={cn('block', TONE_TEXT[detail.tone === 'muted' ? 'neutral' : detail.tone])}>
+                          <span
+                            className={cn(
+                              'block',
+                              TONE_TEXT[detail.tone === 'muted' ? 'neutral' : detail.tone],
+                            )}
+                          >
                             {detail.reason}
                           </span>
                         ) : null}
                         {detail.note ? (
-                          <span className={cn('block', TONE_TEXT[detail.tone === 'muted' ? 'neutral' : detail.tone])}>
+                          <span
+                            className={cn(
+                              'block',
+                              TONE_TEXT[detail.tone === 'muted' ? 'neutral' : detail.tone],
+                            )}
+                          >
                             {detail.note}
                           </span>
                         ) : null}
@@ -558,7 +596,11 @@ export function PlaylistDetail() {
                               }}
                               disabled={retryMut.isPending}
                               aria-label={`Retry #${formatPosition(video.position)}`}
-                              title={isRetriesExhausted(video) ? 'Retries exhausted. Retry now.' : 'Retry this video'}
+                              title={
+                                isRetriesExhausted(video)
+                                  ? 'Retries exhausted. Retry now.'
+                                  : 'Retry this video'
+                              }
                             >
                               <RotateCw aria-hidden="true" className="size-icon" />
                               Retry

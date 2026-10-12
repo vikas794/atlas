@@ -135,7 +135,11 @@ export function PlaylistsHome() {
           Paste a YouTube playlist link to fetch its videos and generate study notes.
         </p>
 
-        <form onSubmit={handleAddSubmit} noValidate className="mt-4 flex flex-col gap-2 sm:flex-row">
+        <form
+          onSubmit={handleAddSubmit}
+          noValidate
+          className="mt-4 flex flex-col gap-2 sm:flex-row"
+        >
           <div className="flex-1">
             <input
               ref={inputRef}
@@ -191,12 +195,24 @@ export function PlaylistsHome() {
             <table className="w-full text-left text-body">
               <thead className="border-b border-border bg-surface-muted text-label text-text-muted">
                 <tr className="h-row">
-                  <th scope="col" className="px-3">Title</th>
-                  <th scope="col" className="px-3 text-right">Videos</th>
-                  <th scope="col" className="min-w-48 px-3">Progress</th>
-                  <th scope="col" className="px-3 text-right">Needs review</th>
-                  <th scope="col" className="px-3 text-right">Failed</th>
-                  <th scope="col" className="px-3">Last synced</th>
+                  <th scope="col" className="px-3">
+                    Title
+                  </th>
+                  <th scope="col" className="px-3 text-right">
+                    Videos
+                  </th>
+                  <th scope="col" className="min-w-48 px-3">
+                    Progress
+                  </th>
+                  <th scope="col" className="px-3 text-right">
+                    Needs review
+                  </th>
+                  <th scope="col" className="px-3 text-right">
+                    Failed
+                  </th>
+                  <th scope="col" className="px-3">
+                    Last synced
+                  </th>
                   <th scope="col" className="w-12 px-3">
                     <span className="sr-only">Actions</span>
                   </th>
@@ -204,7 +220,10 @@ export function PlaylistsHome() {
               </thead>
               <tbody>
                 {!playlists ? (
-                  <SkeletonTableRows rows={4} widths={['w-48', 'w-8', 'w-48', 'w-8', 'w-8', 'w-16', 'w-8']} />
+                  <SkeletonTableRows
+                    rows={4}
+                    widths={['w-48', 'w-8', 'w-48', 'w-8', 'w-8', 'w-16', 'w-8']}
+                  />
                 ) : (
                   playlists.map((playlist) => {
                     const counts = playlist.stage_counts ?? {}
@@ -235,7 +254,9 @@ export function PlaylistsHome() {
                           <SegmentedProgressBar counts={counts} total={playlist.video_count} />
                         </td>
                         <td className="px-3 py-1 text-right tabular-nums">
-                          <span className={needsReview > 0 ? 'text-st-review-fg' : 'text-text-muted'}>
+                          <span
+                            className={needsReview > 0 ? 'text-st-review-fg' : 'text-text-muted'}
+                          >
                             {needsReview}
                           </span>
                         </td>
@@ -308,7 +329,9 @@ export function PlaylistsHome() {
         description={`Reprocess "${reprocessTarget?.title}"? All ${pluralize(reprocessTarget?.video_count ?? 0, 'video')} go back to the queue and their transcripts and notes are discarded and regenerated, including your edits and approvals. Google Docs already in Drive are not deleted.`}
         confirmLabel="Reprocess playlist"
         isDestructive
-        onConfirm={() => (reprocessTarget ? reprocessMutation.mutateAsync(reprocessTarget) : undefined)}
+        onConfirm={() =>
+          reprocessTarget ? reprocessMutation.mutateAsync(reprocessTarget) : undefined
+        }
       />
     </div>
   )

@@ -40,7 +40,12 @@ import { ConfirmDialog } from '../../components/shared/confirm-dialog'
 import { DisabledReason } from '../../components/shared/disabled-reason'
 import { MarkdownBody } from '../../components/shared/markdown-body'
 import { RelativeTime } from '../../components/shared/relative-time'
-import { EmptyState, ErrorState, SkeletonBar, SkeletonListRows } from '../../components/shared/state-panels'
+import {
+  EmptyState,
+  ErrorState,
+  SkeletonBar,
+  SkeletonListRows,
+} from '../../components/shared/state-panels'
 import { StageDot, StatusBadge } from '../../components/shared/status-badge'
 import { useToast } from '../../components/shared/toast'
 import { Button } from '../../components/ui/button'
@@ -98,8 +103,7 @@ export function ReviewScreen() {
     retry: shouldRetry,
   })
   const summary = summaryQuery.data
-  const notesMissing =
-    summaryQuery.error instanceof ApiError && summaryQuery.error.status === 404
+  const notesMissing = summaryQuery.error instanceof ApiError && summaryQuery.error.status === 404
 
   const editedContent =
     draft && draft.videoId === currentVideoPk ? draft.content : (summary?.content ?? '')
@@ -346,7 +350,9 @@ export function ReviewScreen() {
                     aria-current={isActive ? 'page' : undefined}
                     className={cn(
                       'flex h-row items-center gap-2 border-b border-l-2 border-border px-3 text-label transition',
-                      video.stage === 'pending_review' ? 'border-l-st-review-fg' : 'border-l-transparent',
+                      video.stage === 'pending_review'
+                        ? 'border-l-st-review-fg'
+                        : 'border-l-transparent',
                       isActive ? 'bg-accent-soft text-accent' : 'text-text hover:bg-surface-muted',
                     )}
                   >
@@ -428,7 +434,11 @@ export function ReviewScreen() {
               </Button>
 
               <DisabledReason reason={nextReason}>
-                <Button variant="secondary" onClick={goToNextNeedingReview} disabled={nextId === null}>
+                <Button
+                  variant="secondary"
+                  onClick={goToNextNeedingReview}
+                  disabled={nextId === null}
+                >
                   Next needing review
                   <ChevronRight aria-hidden="true" className="size-icon" />
                 </Button>
@@ -452,7 +462,12 @@ export function ReviewScreen() {
 
           {/* Failure reason for a failed video */}
           {detail?.reason && currentVideo?.stage === 'failed' && (
-            <div className={cn('border-b border-border px-4 py-2 text-label', TONE_TEXT[detail.tone === 'muted' ? 'neutral' : detail.tone])}>
+            <div
+              className={cn(
+                'border-b border-border px-4 py-2 text-label',
+                TONE_TEXT[detail.tone === 'muted' ? 'neutral' : detail.tone],
+              )}
+            >
               {detail.reason}
               {detail.note ? ` · ${detail.note}` : ''}
             </div>
@@ -483,7 +498,11 @@ export function ReviewScreen() {
 
           {/* Preview / Edit switch and save bar */}
           <div className="flex items-center justify-between border-b border-border bg-surface-muted px-4 py-2">
-            <div role="tablist" aria-label="Notes view" className="flex rounded border border-border bg-surface p-1">
+            <div
+              role="tablist"
+              aria-label="Notes view"
+              className="flex rounded border border-border bg-surface p-1"
+            >
               {(['preview', 'edit'] as const).map((option) => (
                 <button
                   key={option}
@@ -495,7 +514,9 @@ export function ReviewScreen() {
                   onClick={() => setMode(option)}
                   className={cn(
                     'rounded px-3 text-label transition',
-                    mode === option ? 'bg-surface-muted text-text' : 'text-text-muted hover:text-text',
+                    mode === option
+                      ? 'bg-surface-muted text-text'
+                      : 'text-text-muted hover:text-text',
                   )}
                 >
                   {option === 'preview' ? 'Preview' : 'Edit'}
@@ -527,12 +548,19 @@ export function ReviewScreen() {
           >
             {videos && !currentVideo ? (
               <EmptyState title="This video is not in the playlist.">
-                <Link to={`/playlists/${playlistId}`} className="text-accent underline underline-offset-4">
+                <Link
+                  to={`/playlists/${playlistId}`}
+                  className="text-accent underline underline-offset-4"
+                >
                   Back to playlist
                 </Link>
               </EmptyState>
             ) : summaryQuery.isPending ? (
-              <div className="mx-auto max-w-3xl space-y-3" aria-busy="true" aria-label="Loading notes">
+              <div
+                className="mx-auto max-w-3xl space-y-3"
+                aria-busy="true"
+                aria-label="Loading notes"
+              >
                 <SkeletonBar className="h-4 w-1/2" />
                 <SkeletonBar className="w-full" />
                 <SkeletonBar className="w-11/12" />
@@ -549,7 +577,9 @@ export function ReviewScreen() {
             ) : summaryQuery.isError ? (
               <ErrorState
                 title="Could not load the notes"
-                message={summaryQuery.error instanceof Error ? summaryQuery.error.message : undefined}
+                message={
+                  summaryQuery.error instanceof Error ? summaryQuery.error.message : undefined
+                }
                 onRetry={() => void summaryQuery.refetch()}
               />
             ) : mode === 'preview' ? (
@@ -559,7 +589,9 @@ export function ReviewScreen() {
             ) : (
               <textarea
                 value={editedContent}
-                onChange={(event) => setDraft({ videoId: currentVideoPk, content: event.target.value })}
+                onChange={(event) =>
+                  setDraft({ videoId: currentVideoPk, content: event.target.value })
+                }
                 aria-label="Edit notes (Markdown)"
                 className="h-full min-h-96 w-full resize-none bg-transparent font-notes text-notes leading-notes text-text"
                 placeholder="Markdown notes"

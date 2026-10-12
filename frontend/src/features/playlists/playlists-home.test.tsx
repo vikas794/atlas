@@ -107,7 +107,9 @@ describe('PlaylistsHome', () => {
     expect(await screen.findByText('Synced "Complete Java": 3 new videos.')).toBeInTheDocument()
     expect(screen.queryByText(/added successfully/i)).not.toBeInTheDocument()
     expect(input).toHaveValue('half typed')
-    expect(api.callsTo('POST', '/api/playlists')[0].body).toEqual({ url: makePlaylist().source_url })
+    expect(api.callsTo('POST', '/api/playlists')[0].body).toEqual({
+      url: makePlaylist().source_url,
+    })
   })
 
   it('states the consequence and count before deleting', async () => {
@@ -130,7 +132,10 @@ describe('PlaylistsHome', () => {
   })
 
   it('states the consequence and count before reprocessing', async () => {
-    mockApi().on('GET', '/api/playlists', { playlists: [makePlaylist({ video_count: 12 })], total: 1 })
+    mockApi().on('GET', '/api/playlists', {
+      playlists: [makePlaylist({ video_count: 12 })],
+      total: 1,
+    })
     const user = userEvent.setup()
     renderRoute('/')
 

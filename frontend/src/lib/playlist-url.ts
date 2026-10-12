@@ -1,4 +1,10 @@
-const YOUTUBE_HOSTS = new Set(['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be'])
+const YOUTUBE_HOSTS = new Set([
+  'youtube.com',
+  'www.youtube.com',
+  'm.youtube.com',
+  'music.youtube.com',
+  'youtu.be',
+])
 
 /**
  * Client-side check that a pasted link looks like a YouTube playlist link
@@ -17,7 +23,10 @@ export function validatePlaylistUrl(input: string): string | null {
     return 'That does not look like a link.'
   }
 
-  if (!['http:', 'https:'].includes(url.protocol) || !YOUTUBE_HOSTS.has(url.hostname.toLowerCase())) {
+  if (
+    !['http:', 'https:'].includes(url.protocol) ||
+    !YOUTUBE_HOSTS.has(url.hostname.toLowerCase())
+  ) {
     return 'Only YouTube links are supported.'
   }
 

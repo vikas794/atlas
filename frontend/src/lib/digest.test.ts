@@ -29,7 +29,9 @@ describe('needsRepublish', () => {
   })
 
   it('does not show the banner for edited-but-in-sync notes (after Re-publish)', () => {
-    expect(needsRepublish('published', { edited: true, published_digest: 'ccc' }, 'ccc')).toBe(false)
+    expect(needsRepublish('published', { edited: true, published_digest: 'ccc' }, 'ccc')).toBe(
+      false,
+    )
   })
 
   it('stays hidden when the digest cannot be computed', () => {

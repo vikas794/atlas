@@ -188,7 +188,6 @@ function defaultReasonFor(failureType: FailureType | null | undefined): string {
   }
 }
 
-
 export interface VideoDetailSpec {
   /** Plain-text failure reason, or null when there is nothing to explain. */
   reason: string | null
@@ -230,7 +229,11 @@ export function videoDetail(
 
   if (isRetryScheduled(video)) {
     const countdown = video.next_retry_at ? formatCountdown(video.next_retry_at, now) : ''
-    const when = !countdown ? 'Retrying' : countdown === 'now' ? 'Retrying now' : `Retrying in ${countdown}`
+    const when = !countdown
+      ? 'Retrying'
+      : countdown === 'now'
+        ? 'Retrying now'
+        : `Retrying in ${countdown}`
     return {
       reason,
       note: `${when} (${attemptLabel(video.retry_count, video.max_auto_retries)})`,

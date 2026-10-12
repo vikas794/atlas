@@ -137,7 +137,7 @@ export function ingestPlaylist(url: string) {
 
 export function getPlaylistVideos(
   playlistId: number,
-  params?: { stage?: Stage; search?: string; page?: number; page_size?: number }
+  params?: { stage?: Stage; search?: string; page?: number; page_size?: number },
 ) {
   const query = new URLSearchParams()
   // The backend 500s on unknown stages, so never forward anything else.
@@ -272,7 +272,8 @@ export function getUsageAggregate(params?: UsageQueryParams) {
   if (params?.operation) searchParams.set('operation', params.operation)
   if (params?.since) searchParams.set('since', params.since)
   if (params?.until) searchParams.set('until', params.until)
-  if (params?.cache_status !== undefined) searchParams.set('cache_status', String(params.cache_status))
+  if (params?.cache_status !== undefined)
+    searchParams.set('cache_status', String(params.cache_status))
 
   const query = searchParams.toString()
   return request<UsageAggregateResponse>(`/api/usage${query ? `?${query}` : ''}`)

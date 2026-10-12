@@ -32,7 +32,9 @@ describe('regeneratePhase', () => {
 
 describe('describePublish', () => {
   it('reports real counts', () => {
-    expect(describePublish({ created: 3, updated: 1 })).toBe('Published 3 new Docs, updated 1 Doc in Drive.')
+    expect(describePublish({ created: 3, updated: 1 })).toBe(
+      'Published 3 new Docs, updated 1 Doc in Drive.',
+    )
     expect(describePublish({ created: 0, updated: 2 })).toBe('Updated 2 Docs in Drive.')
   })
 

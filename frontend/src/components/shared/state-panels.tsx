@@ -68,13 +68,7 @@ export function SkeletonBar({ className }: { className?: string }) {
  * design.md 6.4: skeleton rows while a table loads. Renders `<tr>`s for tables.
  * `widths` sets one bar width class per column.
  */
-export function SkeletonTableRows({
-  rows = 5,
-  widths,
-}: {
-  rows?: number
-  widths: string[]
-}) {
+export function SkeletonTableRows({ rows = 5, widths }: { rows?: number; widths: string[] }) {
   return (
     <>
       {Array.from({ length: rows }, (_, row) => (

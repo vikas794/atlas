@@ -102,10 +102,16 @@ describe('retry state', () => {
   })
 
   it('is not scheduled when exhausted, auto_retry is false or nothing is set', () => {
-    expect(isRetryScheduled(transient({ next_retry_at: inMinutes(2), retries_exhausted: true }))).toBe(false)
-    expect(isRetryScheduled(transient({ next_retry_at: inMinutes(2), auto_retry: false }))).toBe(false)
+    expect(
+      isRetryScheduled(transient({ next_retry_at: inMinutes(2), retries_exhausted: true })),
+    ).toBe(false)
+    expect(isRetryScheduled(transient({ next_retry_at: inMinutes(2), auto_retry: false }))).toBe(
+      false,
+    )
     expect(isRetryScheduled(transient({ next_retry_at: null }))).toBe(false)
-    expect(isRetryScheduled({ stage: 'failed', failure_kind: 'permanent', retry_count: 0 })).toBe(false)
+    expect(isRetryScheduled({ stage: 'failed', failure_kind: 'permanent', retry_count: 0 })).toBe(
+      false,
+    )
   })
 
   it('treats an unscheduled transient failure as exhausted', () => {
@@ -169,10 +175,7 @@ describe('videoDetail', () => {
   })
 
   it('shows a countdown and attempt N/M for a scheduled transient retry', () => {
-    const detail = videoDetail(
-      transient({ next_retry_at: inMinutes(2), max_auto_retries: 5 }),
-      NOW,
-    )
+    const detail = videoDetail(transient({ next_retry_at: inMinutes(2), max_auto_retries: 5 }), NOW)
     expect(detail.note).toBe('Retrying in 2m (attempt 3/5)')
     expect(detail.tone).toBe('warn')
   })

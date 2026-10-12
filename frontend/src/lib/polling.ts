@@ -10,7 +10,9 @@ const BUSY_STAGES: readonly Stage[] = ['queued', ...ACTIVE_STAGES]
 
 /** True while any video is queued/running or has an automatic retry pending. */
 export function videosAreBusy(videos: ReadonlyArray<RetryFields> | undefined): boolean {
-  return (videos ?? []).some((video) => BUSY_STAGES.includes(video.stage) || isRetryScheduled(video))
+  return (videos ?? []).some(
+    (video) => BUSY_STAGES.includes(video.stage) || isRetryScheduled(video),
+  )
 }
 
 /** True when the counts show queued or active videos, or a publish is running. */

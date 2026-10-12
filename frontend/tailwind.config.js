@@ -15,7 +15,8 @@
  */
 
 /** Alpha-aware colour over a CSS custom property. */
-const color = (token) => `color-mix(in srgb, var(--${token}) calc(<alpha-value> * 100%), transparent)`
+const color = (token) =>
+  `color-mix(in srgb, var(--${token}) calc(<alpha-value> * 100%), transparent)`
 
 /** @type {import('tailwindcss').Config} */
 export default {
@@ -58,8 +59,14 @@ export default {
       },
 
       fontSize: {
-        page: ['var(--size-page-title)', { lineHeight: 'var(--leading-page-title)', fontWeight: '600' }],
-        section: ['var(--size-section-title)', { lineHeight: 'var(--leading-section-title)', fontWeight: '600' }],
+        page: [
+          'var(--size-page-title)',
+          { lineHeight: 'var(--leading-page-title)', fontWeight: '600' },
+        ],
+        section: [
+          'var(--size-section-title)',
+          { lineHeight: 'var(--leading-section-title)', fontWeight: '600' },
+        ],
         body: ['var(--size-body)', { lineHeight: 'var(--leading-body)', fontWeight: '400' }],
         label: ['var(--size-label)', { lineHeight: 'var(--leading-label)', fontWeight: '500' }],
         notes: ['var(--size-notes)', { lineHeight: 'var(--leading-notes)', fontWeight: '400' }],

@@ -13,6 +13,7 @@ export function findNextNeedingReview(
   const index = videos.findIndex((video) => video.id === currentId)
   const after = videos.slice(index + 1).find((video) => video.stage === 'pending_review')
   if (after) return after.id
-  const before = index < 0 ? undefined : videos.slice(0, index).find((video) => video.stage === 'pending_review')
+  const before =
+    index < 0 ? undefined : videos.slice(0, index).find((video) => video.stage === 'pending_review')
   return before ? before.id : null
 }

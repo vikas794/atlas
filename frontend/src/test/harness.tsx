@@ -92,10 +92,13 @@ export function mockApi() {
           : candidate.match.test(url.pathname)),
     )
     if (!route) {
-      return new Response(JSON.stringify({ code: 'not_found', message: `No mock for ${method} ${url.pathname}` }), {
-        status: 404,
-        headers: { 'Content-Type': 'application/json' },
-      })
+      return new Response(
+        JSON.stringify({ code: 'not_found', message: `No mock for ${method} ${url.pathname}` }),
+        {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      )
     }
     return toResponse(await route.respond(call))
   })

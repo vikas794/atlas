@@ -1,7 +1,7 @@
-import type { RouteObject } from "react-router-dom";
+import type { RouteObject } from 'react-router-dom'
 
-import App from "./App";
-import { NotFound } from "./components/shared/not-found";
+import App from './App'
+import { NotFound } from './components/shared/not-found'
 
 /**
  * Route table. Declared as data (not <Routes>) so the app runs on a data
@@ -12,34 +12,30 @@ export const routes: RouteObject[] = [
     element: <App />,
     children: [
       {
-        path: "/",
+        path: '/',
         lazy: async () => ({
-          Component: (await import("./features/playlists/playlists-home"))
-            .PlaylistsHome,
+          Component: (await import('./features/playlists/playlists-home')).PlaylistsHome,
         }),
       },
       {
-        path: "/playlists/:id",
+        path: '/playlists/:id',
         lazy: async () => ({
-          Component: (await import("./features/playlists/playlist-detail"))
-            .PlaylistDetail,
+          Component: (await import('./features/playlists/playlist-detail')).PlaylistDetail,
         }),
       },
       {
-        path: "/playlists/:id/review/:videoId",
+        path: '/playlists/:id/review/:videoId',
         lazy: async () => ({
-          Component: (await import("./features/playlists/review-screen"))
-            .ReviewScreen,
+          Component: (await import('./features/playlists/review-screen')).ReviewScreen,
         }),
       },
       {
-        path: "/settings",
+        path: '/settings',
         lazy: async () => ({
-          Component: (await import("./features/settings/settings-screen"))
-            .SettingsScreen,
+          Component: (await import('./features/settings/settings-screen')).SettingsScreen,
         }),
       },
-      { path: "*", element: <NotFound /> },
+      { path: '*', element: <NotFound /> },
     ],
   },
-];
+]

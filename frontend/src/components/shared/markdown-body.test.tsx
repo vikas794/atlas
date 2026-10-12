@@ -5,9 +5,7 @@ import { MarkdownBody } from './markdown-body'
 
 describe('MarkdownBody', () => {
   it('labels fenced code blocks with the fence tag in the top-right corner', () => {
-    const { container } = render(
-      <MarkdownBody markdown={'```python\nprint("hi")\n```'} />,
-    )
+    const { container } = render(<MarkdownBody markdown={'```python\nprint("hi")\n```'} />)
 
     expect(screen.getByText('python')).toBeInTheDocument()
 
