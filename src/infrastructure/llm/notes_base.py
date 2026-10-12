@@ -1,14 +1,16 @@
 """Shared logic for every notes-generation adapter.
 
-Everything in here is provider-agnostic and has three jobs:
+Everything in here is provider-agnostic and has three jobs (retries are *not* one of
+them: ``ProcessVideoUseCase`` is the single owner of retry and backoff):
 
 1. **Prompt handling** -- :func:`render_prompt` substitutes the two placeholders
    in the versioned prompt file, and :class:`NotesPromptSource` loads that file.
 2. **Guardrails** -- :func:`check_input_size` refuses an oversized transcript
    *before* paying for the call, and :func:`validate_notes` rejects output the
    pipeline cannot use (PRD section 18).
-3. **Retry policy** -- :class:`RetryableNotesGenerator` retries *only* transient
-   failures, using the same backoff the rest of the pipeline uses.
+3. **Failure classification** -- :func:`classify_provider_exception` and
+   :func:`check_finish_reason` turn SDK errors and abnormal stops into the PRD
+   section 8 taxonomy, so a bad key fails permanently instead of being retried.
 
 Two rules hold throughout:
 
@@ -33,7 +35,7 @@ import logging
 import math
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import yaml
 
@@ -43,12 +45,9 @@ from src.domain.models.playlist import (
     FailureType,
     NotesGenerationError,
 )
+from src.domain.services.failure_classifier import safe_diagnostic
 from src.infrastructure.llm.base import SettingsLoader
 from src.shared.redaction import redact_text
-
-if TYPE_CHECKING:
-
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +206,181 @@ def validate_notes(content: str) -> str:
     return cleaned
 
 
+#: Provider text meaning "your credential is wrong", whatever HTTP status carried it.
+#: Gemini answers an invalid key with HTTP 400 ``API_KEY_INVALID``, not 401.
+_AUTH_TEXT = re.compile(
+    r"api[ _]?key[ _]?(?:not[ _]valid|invalid|expired)|invalid[ _]api[ _]?key"
+    r"|\bunauthori[sz]ed\b|\bunauthenticated\b|permission[ _]denied|\bforbidden\b"
+    r"|incorrect api key|no auth credentials",
+    re.IGNORECASE,
+)
+#: Provider text meaning "the request (prompt) is larger than the model accepts".
+_TOO_LARGE_TEXT = re.compile(
+    r"exceeds the maximum number of tokens|input token count|maximum context length"
+    r"|context[ _]length[ _]exceeded|context window|too many tokens|prompt is too long",
+    re.IGNORECASE,
+)
+#: Provider text meaning "a content filter refused this request".
+_BLOCKED_TEXT = re.compile(r"\bflagged\b|moderation|\bsafety\b|content[ _]filter", re.IGNORECASE)
+_RATE_TEXT = re.compile(
+    r"\b429\b|too many requests|rate[ _-]?limit|resource[ _]exhausted|quota", re.IGNORECASE
+)
+_NETWORK_TEXT = re.compile(
+    r"timed? ?out|timeout|connection|connect error|name resolution|getaddrinfo"
+    r"|network|temporarily unreachable|\bssl\b|remote ?protocol",
+    re.IGNORECASE,
+)
+#: Exception class names (anywhere in the MRO) that are network trouble, not provider answers.
+_NETWORK_EXCEPTION_NAMES = frozenset(
+    {
+        "TimeoutError",
+        "TimeoutException",
+        "ConnectError",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "NetworkError",
+        "RemoteProtocolError",
+        "APIConnectionError",
+        "APITimeoutError",
+        "ConnectionError",
+    }
+)
+
+
+def _status_code(exc: BaseException) -> int | None:
+    """HTTP status carried by an SDK exception, if any.
+
+    ``google.genai.errors.APIError`` exposes ``code``; ``openai.APIStatusError`` exposes
+    ``status_code``. Anything else (a network error, a plain ``RuntimeError``) has none.
+    """
+    for attribute in ("status_code", "code"):
+        value = getattr(exc, attribute, None)
+        if isinstance(value, int) and 100 <= value <= 599:
+            return value
+    return None
+
+
+def classify_provider_exception(
+    exc: BaseException,
+    *,
+    provider_label: str,
+    api_key_env: str,
+    model: str,
+    secrets: tuple[str | None, ...] = (),
+) -> Exception:
+    """Map an LLM SDK exception onto Atlas' failure taxonomy (PRD sections 8 and 18).
+
+    Returns (never raises) the exception the adapter must raise:
+
+    * :class:`NotesGeneratorConfigError` -- a rejected/unauthorised key (401/403, or
+      Gemini's HTTP 400 ``API_KEY_INVALID``), an unknown model (404) or exhausted
+      credits (402). No retry can fix these, so the pipeline records a permanent
+      ``config_error`` instead of burning the retry budget.
+    * ``TRANSCRIPT_TOO_LARGE`` (permanent) -- the provider says the prompt does not fit.
+    * ``RATE_LIMITED`` / ``NETWORK_ERROR`` / ``PROVIDER_ERROR`` (transient) -- 429,
+      connection trouble and 5xx (or anything unrecognised), retried with backoff.
+    * ``OUTPUT_MALFORMED`` (transient, PRD 18) -- a content filter refused the request.
+
+    The user-facing reason names the provider and status but never contains provider
+    text; the redacted first line of that text travels only as ``diagnostic``.
+    """
+    raw = str(exc) or type(exc).__name__
+    diagnostic = safe_diagnostic(redact_text(raw, *secrets))
+    status = _status_code(exc)
+    shown = f" (HTTP {status})" if status else ""
+    mro_names = {cls.__name__ for cls in type(exc).__mro__}
+
+    def failure(failure_type: FailureType, reason: str) -> NotesGenerationError:
+        return NotesGenerationError(failure_type, reason, diagnostic=diagnostic)
+
+    def config_error(message: str) -> NotesGeneratorConfigError:
+        error = NotesGeneratorConfigError(message)
+        error.diagnostic = diagnostic  # type: ignore[attr-defined]  # log-only, redacted
+        return error
+
+    if (status in (401, 403) and not _BLOCKED_TEXT.search(raw)) or _AUTH_TEXT.search(raw):
+        return config_error(
+            f"{provider_label} rejected the API key{shown}. Check that {api_key_env} in .env "
+            "holds a valid key with access to this model."
+        )
+    if status == 402:
+        return config_error(
+            f"{provider_label} refused the request for lack of credits{shown}; top up the "
+            f"account behind {api_key_env}."
+        )
+    if status == 404:
+        return config_error(
+            f"{provider_label} does not know the model {model!r}{shown}. Check NOTES_MODEL "
+            "(or the provider-specific model setting)."
+        )
+    if _TOO_LARGE_TEXT.search(raw):
+        return failure(
+            FailureType.TRANSCRIPT_TOO_LARGE,
+            f"The transcript is too large for {model}: {provider_label} rejected the "
+            "prompt as over its input limit.",
+        )
+    if status == 429 or (status is None and _RATE_TEXT.search(raw)):
+        return failure(
+            FailureType.RATE_LIMITED,
+            f"{provider_label} is rate-limiting requests{shown}.",
+        )
+    if status is not None and status >= 500:
+        return failure(
+            FailureType.PROVIDER_ERROR,
+            f"{provider_label} returned a server error{shown}.",
+        )
+    if status is not None and _BLOCKED_TEXT.search(raw):
+        return failure(
+            FailureType.OUTPUT_MALFORMED,
+            f"{provider_label} refused to generate notes for this transcript (content filter).",
+        )
+    if status is None and (mro_names & _NETWORK_EXCEPTION_NAMES or _NETWORK_TEXT.search(raw)):
+        return failure(
+            FailureType.NETWORK_ERROR,
+            f"A network error interrupted the request to {provider_label}.",
+        )
+    return failure(
+        FailureType.PROVIDER_ERROR,
+        f"{provider_label} returned an error{shown}.",
+    )
+
+
+def check_finish_reason(finish_reason: object, *, provider_label: str) -> None:
+    """Refuse a response the model did not finish normally (PRD section 18).
+
+    A response cut off at the output limit can still be long enough to pass
+    :func:`validate_notes`, so it is checked explicitly instead of being shipped
+    half-written. A safety/content-filter stop is reported as such. Both are
+    ``OUTPUT_MALFORMED`` (transient, within the retry limit).
+
+    Accepts Gemini's ``FinishReason`` enum (``MAX_TOKENS``, ``SAFETY`` ...) and
+    OpenAI-style strings (``length``, ``content_filter``); ``None`` means unknown.
+    """
+    if finish_reason is None:
+        return
+    value = str(getattr(finish_reason, "value", finish_reason) or "").strip().upper()
+    if value in {"MAX_TOKENS", "LENGTH"}:
+        raise NotesGenerationError(
+            FailureType.OUTPUT_MALFORMED,
+            f"{provider_label} stopped at its output limit, so the notes were cut off.",
+            diagnostic=f"finish_reason={value}",
+        )
+    if value in {
+        "SAFETY",
+        "RECITATION",
+        "BLOCKLIST",
+        "PROHIBITED_CONTENT",
+        "SPII",
+        "IMAGE_SAFETY",
+        "CONTENT_FILTER",
+    }:
+        raise NotesGenerationError(
+            FailureType.OUTPUT_MALFORMED,
+            f"{provider_label} blocked the response ({value.lower()}), so no notes came back.",
+            diagnostic=f"finish_reason={value}",
+        )
+
+
 def redact_secrets(text: str, *secrets: str | None) -> str:
     """Replace any known secret (and credential-shaped text) in ``text``.
 
@@ -289,6 +463,8 @@ __all__ = [
     "TITLE_PLACEHOLDER",
     "TRANSCRIPT_PLACEHOLDER",
     "NotesGeneratorConfigError",
+    "check_finish_reason",
+    "classify_provider_exception",
     "NotesPromptSource",
     "check_input_size",
     "estimate_tokens",

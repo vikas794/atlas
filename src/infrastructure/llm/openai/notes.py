@@ -15,19 +15,14 @@ from typing import TYPE_CHECKING, Any
 
 from src.domain.interfaces.notes_generator import GeneratedNotes
 from src.domain.interfaces.usage_ledger import UsageRecord
-from src.domain.models.playlist import NotesGenerationError
-from src.domain.services.failure_classifier import (
-    classify_output_error,
-    human_reason,
-    safe_diagnostic,
-)
 from src.infrastructure.llm.base import SettingsLoader
 from src.infrastructure.llm.cost import CostCalculator
 from src.infrastructure.llm.notes_base import (
     NotesGeneratorConfigError,
     NotesPromptSource,
+    check_finish_reason,
     check_input_size,
-    redact_secrets,
+    classify_provider_exception,
     render_prompt,
     validate_notes,
 )
@@ -152,7 +147,8 @@ class OpenRouterNotesGenerator:
         check_input_size(transcript, self.input_token_limit)
 
         model = self.model
-        text, input_tokens, output_tokens = await self._call_model(model, prompt_text)
+        text, input_tokens, output_tokens, finish = await self._call_model(model, prompt_text)
+        check_finish_reason(finish, provider_label="OpenRouter")
         content = validate_notes(text)
         await self._emit_usage(model=model, input_tokens=input_tokens, output_tokens=output_tokens)
 
@@ -164,8 +160,10 @@ class OpenRouterNotesGenerator:
             prompt_version=self.prompt_version,
         )
 
-    async def _call_model(self, model: str, prompt_text: str) -> tuple[str, int, int]:
-        """Single provider call; returns ``(text, input_tokens, output_tokens)``."""
+    async def _call_model(
+        self, model: str, prompt_text: str
+    ) -> tuple[str, int, int, object | None]:
+        """Single provider call; returns ``(text, input_tokens, output_tokens, finish)``."""
         client = self._client_or_default()
         try:
             response = await client.chat.completions.create(
@@ -177,27 +175,37 @@ class OpenRouterNotesGenerator:
 
         choices = getattr(response, "choices", None) or []
         content = ""
+        finish = None
         if choices:
             content = getattr(choices[0].message, "content", None) or ""
+            finish = getattr(choices[0], "finish_reason", None)
 
         usage = getattr(response, "usage", None)
         input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
         output_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
-        return content, input_tokens, output_tokens
+        return content, input_tokens, output_tokens, finish
 
-    def _classify(self, exc: Exception) -> NotesGenerationError:
+    def _classify(self, exc: Exception) -> Exception:
         """Map an SDK exception onto the PRD section 8 taxonomy.
 
-        The raw message is kept only as a redacted, truncated diagnostic; the
-        reason the dashboard shows is the fixed ``human_reason`` sentence.
+        A rejected key, unknown model or missing credits becomes a permanent
+        ``NotesGeneratorConfigError``; 429/5xx/network trouble stay transient. The
+        user-facing reason never contains raw provider text, and the redacted
+        diagnostic is logged here because a config error carries none.
         """
-        detail = redact_secrets(str(exc), self._api_key())
-        failure_type = classify_output_error(str(exc))
-        return NotesGenerationError(
-            failure_type,
-            human_reason(failure_type),
-            diagnostic=safe_diagnostic(detail),
+        error = classify_provider_exception(
+            exc,
+            provider_label="OpenRouter",
+            api_key_env=self._api_key_env(),
+            model=self.model,
+            secrets=(self._api_key(),),
         )
+        logger.warning(
+            "OpenRouter call failed (%s): %s",
+            type(exc).__name__,
+            getattr(error, "diagnostic", None) or error,
+        )
+        return error
 
     async def _emit_usage(self, *, model: str, input_tokens: int, output_tokens: int) -> None:
         """Write one usage row; a ledger failure must never fail the call."""

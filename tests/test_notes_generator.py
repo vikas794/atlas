@@ -701,12 +701,13 @@ class TestSecretHygiene:
             openrouter_settings, usage_ledger=ledger, client_factory=lambda: client
         )
 
-        with caplog.at_level(logging.DEBUG), pytest.raises(NotesGenerationError) as excinfo:
+        # "Unauthorized" is a rejected key: a permanent config error, not a retryable one.
+        with caplog.at_level(logging.DEBUG), pytest.raises(NotesGeneratorConfigError) as excinfo:
             await generator.generate_notes(title="t", transcript="a secret transcript line")
 
         error = excinfo.value
         assert FAKE_OPENROUTER_KEY not in str(error)
-        assert FAKE_OPENROUTER_KEY not in (error.diagnostic or "")
+        assert FAKE_OPENROUTER_KEY not in (getattr(error, "diagnostic", None) or "")
         assert FAKE_OPENROUTER_KEY not in caplog.text
         for record in ledger.records:
             assert FAKE_OPENROUTER_KEY not in repr(asdict(record))

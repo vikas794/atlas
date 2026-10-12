@@ -15,19 +15,14 @@ from typing import TYPE_CHECKING, Any
 
 from src.domain.interfaces.notes_generator import GeneratedNotes
 from src.domain.interfaces.usage_ledger import UsageRecord
-from src.domain.models.playlist import NotesGenerationError
-from src.domain.services.failure_classifier import (
-    classify_output_error,
-    human_reason,
-    safe_diagnostic,
-)
 from src.infrastructure.llm.base import SettingsLoader
 from src.infrastructure.llm.cost import CostCalculator
 from src.infrastructure.llm.notes_base import (
     NotesGeneratorConfigError,
     NotesPromptSource,
+    check_finish_reason,
     check_input_size,
-    redact_secrets,
+    classify_provider_exception,
     render_prompt,
     validate_notes,
 )
@@ -44,6 +39,11 @@ NOTES_OPERATION = "generate_notes"
 #: Fallback when ``gemini_input_token_limit`` is not set. Gemini 2.5 models
 #: accept 1M tokens; the configured default in AtlasSettings is the same.
 _FALLBACK_INPUT_TOKEN_LIMIT = 1_000_000
+
+#: Per-request timeout. The SDK default is *no* timeout, so one hung connection would
+#: hold a worker slot (and its video in ``generating_notes``) forever. Long transcripts
+#: legitimately take minutes; the OpenRouter adapter uses the same bound.
+_REQUEST_TIMEOUT_SECONDS = 300.0
 
 
 class GeminiNotesGenerator:
@@ -119,8 +119,14 @@ class GeminiNotesGenerator:
             return self._client_factory()
         if self._client is None:
             from google import genai  # imported lazily: keeps module import cheap
+            from google.genai import types
 
-            self._client = genai.Client(api_key=self._require_api_key())
+            self._client = genai.Client(
+                api_key=self._require_api_key(),
+                # HttpOptions.timeout is in milliseconds. No retry_options: the SDK then
+                # makes exactly one attempt, and ProcessVideoUseCase owns retries.
+                http_options=types.HttpOptions(timeout=int(_REQUEST_TIMEOUT_SECONDS * 1000)),
+            )
         return self._client
 
     # --- generation ------------------------------------------------------
@@ -134,7 +140,8 @@ class GeminiNotesGenerator:
         check_input_size(transcript, self.input_token_limit)
 
         model = self.model
-        text, input_tokens, output_tokens = await self._call_model(model, prompt_text)
+        text, input_tokens, output_tokens, finish = await self._call_model(model, prompt_text)
+        check_finish_reason(finish, provider_label="Gemini")
         content = validate_notes(text)
         await self._emit_usage(model=model, input_tokens=input_tokens, output_tokens=output_tokens)
 
@@ -146,8 +153,13 @@ class GeminiNotesGenerator:
             prompt_version=self.prompt_version,
         )
 
-    async def _call_model(self, model: str, prompt_text: str) -> tuple[str, int, int]:
-        """Single provider call; returns ``(text, input_tokens, output_tokens)``.
+    async def _call_model(
+        self, model: str, prompt_text: str
+    ) -> tuple[str, int, int, object | None]:
+        """Single provider call; returns ``(text, input_tokens, output_tokens, finish)``.
+
+        ``finish`` is the first candidate's finish reason, or the prompt's block
+        reason when Gemini refused the prompt outright (then there is no candidate).
 
         Token counts are 0 when the SDK does not report them -- an undercount in
         the ledger is better than a guess, and never a reason to fail a call.
@@ -161,27 +173,42 @@ class GeminiNotesGenerator:
         except Exception as exc:
             raise self._classify(exc) from exc
 
-        text = getattr(response, "text", None) or ""
+        try:
+            text = getattr(response, "text", None) or ""
+        except Exception:  # the SDK raises from .text on some blocked/odd responses
+            text = ""
         usage = getattr(response, "usage_metadata", None)
         input_tokens = int(getattr(usage, "prompt_token_count", 0) or 0)
         output_tokens = int(getattr(usage, "candidates_token_count", 0) or 0)
-        return text, input_tokens, output_tokens
+        candidates = getattr(response, "candidates", None) or []
+        finish = getattr(candidates[0], "finish_reason", None) if candidates else None
+        if finish is None:
+            feedback = getattr(response, "prompt_feedback", None)
+            blocked = getattr(feedback, "block_reason", None)
+            finish = "SAFETY" if blocked else None
+        return text, input_tokens, output_tokens, finish
 
-    def _classify(self, exc: Exception) -> NotesGenerationError:
+    def _classify(self, exc: Exception) -> Exception:
         """Map an SDK exception onto the PRD section 8 taxonomy.
 
-        ``classify_output_error`` splits rate limits from everything else, and
-        both outcomes are transient, so either way the retry decorator decides.
-        The user-facing reason is the fixed sentence from ``human_reason`` -- raw
-        provider text never reaches it.
+        A rejected key, unknown model or missing credits becomes a permanent
+        ``NotesGeneratorConfigError``; 429/5xx/network trouble stay transient. The
+        user-facing reason never contains raw provider text, and the redacted
+        diagnostic is logged here because a config error carries none.
         """
-        detail = redact_secrets(str(exc), self._api_key())
-        failure_type = classify_output_error(str(exc))
-        return NotesGenerationError(
-            failure_type,
-            human_reason(failure_type),
-            diagnostic=safe_diagnostic(detail),
+        error = classify_provider_exception(
+            exc,
+            provider_label="Gemini",
+            api_key_env=self._api_key_env(),
+            model=self.model,
+            secrets=(self._api_key(),),
         )
+        logger.warning(
+            "Gemini call failed (%s): %s",
+            type(exc).__name__,
+            getattr(error, "diagnostic", None) or error,
+        )
+        return error
 
     async def _emit_usage(self, *, model: str, input_tokens: int, output_tokens: int) -> None:
         """Write one usage row; a ledger failure must never fail the call."""
