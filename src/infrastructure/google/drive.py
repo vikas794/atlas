@@ -27,10 +27,10 @@ STATE_CREDENTIALS_MISSING = "credentials_missing"
 STATE_NEEDS_CONSENT = "needs_consent"
 STATE_AUTHORIZED = "authorized"
 
+#: Shown to the user (UI error toasts, publish errors, diagnostics), so it names the
+#: screen to use, not API paths.
 _REAUTH_HINT = (
-    "Google Drive is not authorized. Upload OAuth client credentials via "
-    "POST /api/drive/credentials, then run POST /api/drive/auth to grant access "
-    "(complete the consent once on the machine that runs Atlas)."
+    "Open Settings in Atlas and authorize Google Drive (once, on the machine that runs Atlas)."
 )
 
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
@@ -68,12 +68,15 @@ def is_permanent_refresh_error(exc: BaseException) -> bool:
 
 
 def reauthorize_message(exc: BaseException) -> str:
-    """The user-facing message for a revoked/expired refresh token."""
-    return (
-        "Google Drive access has expired or was revoked "
-        f"({type(exc).__name__}: {str(exc).splitlines()[0][:120] if str(exc) else 'no detail'}). "
-        f"Re-authorize Drive. {_REAUTH_HINT}"
+    """The user-facing message for a revoked/expired refresh token.
+
+    The raw ``RefreshError`` text is logged, not shown: it means nothing to the user.
+    """
+    detail = str(exc).splitlines()[0][:120] if str(exc) else "no detail"
+    logging.getLogger(__name__).warning(
+        "Google token refresh failed permanently (%s: %s)", type(exc).__name__, detail
     )
+    return f"Google Drive access has expired or was revoked. Re-authorize Drive: {_REAUTH_HINT}"
 
 
 class GoogleDriveExporter:

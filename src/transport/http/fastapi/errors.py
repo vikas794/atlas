@@ -84,8 +84,7 @@ def domain_error_to_http(exc: DomainError) -> HTTPError:
             detail=str(exc),
             error_code="DRIVE_AUTH_REQUIRED",
             details={
-                "hint": "Authorize Google Drive first: upload credentials with "
-                "POST /api/drive/credentials, then run POST /api/drive/auth."
+                "hint": "Open Settings and authorize Google Drive, then publish again."
             },
         )
     if isinstance(exc, ConfigurationError):

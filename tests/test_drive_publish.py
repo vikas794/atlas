@@ -998,7 +998,7 @@ async def test_ensure_authorized_without_a_token_raises_the_domain_error(tmp_pat
     with pytest.raises(DriveAuthorizationRequired) as excinfo:
         await publisher.ensure_authorized()
 
-    assert "POST /api/drive/auth" in str(excinfo.value)
+    assert "Open Settings in Atlas and authorize Google Drive" in str(excinfo.value)
 
 
 def test_drive_auth_state_distinguishes_missing_credentials_from_needing_consent(
