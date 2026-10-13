@@ -686,3 +686,18 @@ SRT_CLEANED = (
     "Welcome back to the channel. Today we look at how pipelines stay responsive. "
     "The trick is to keep the loop free. That is the whole lesson for today."
 )
+
+
+def test_a_relative_output_folder_is_under_the_repo_root_not_the_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cleanup resolves the folder against the repo root; writes must use the same place."""
+    from src.config.settings import get_storage_settings, repo_root
+
+    monkeypatch.chdir(tmp_path)
+    provider = YtDlpTranscriptProvider(make_settings(Path("transcripts")))
+
+    assert Path(provider._output_folder).resolve() == (repo_root() / "transcripts").resolve()
+    assert Path(get_storage_settings()["transcripts_dir"]).resolve() == (
+        repo_root() / "transcripts"
+    ).resolve()

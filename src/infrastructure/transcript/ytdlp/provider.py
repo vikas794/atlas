@@ -36,7 +36,7 @@ from uuid import uuid4
 
 from yt_dlp import YoutubeDL
 
-from src.config.settings import SettingsLoader
+from src.config.settings import SettingsLoader, repo_root
 from src.domain.interfaces.transcript_provider import TranscriptProviderPort, TranscriptResult
 from src.domain.interfaces.usage_ledger import UsageLedgerPort, UsageRecord
 from src.domain.models.playlist import FailureType, TranscriptError
@@ -269,9 +269,12 @@ class YtDlpTranscriptProvider(TranscriptProviderPort):
         self._settings = settings
         self._usage_ledger = usage_ledger
         self._default_language = str(settings("transcript_language", "en") or "en")
-        self._output_folder = ensure_output_folder(
-            str(settings("transcript_output_folder", "transcripts"))
-        )
+        # Relative to the repo root, like the transcript cleanup that deletes these
+        # files (get_storage_settings); the working directory must not matter.
+        folder = Path(str(settings("transcript_output_folder", "transcripts") or "transcripts"))
+        if not folder.is_absolute():
+            folder = repo_root() / folder
+        self._output_folder = ensure_output_folder(str(folder))
 
     # ------------------------------------------------------------------
     # Public API

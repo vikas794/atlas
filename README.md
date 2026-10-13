@@ -54,8 +54,8 @@ Ctrl+C stops it; the worker shuts down gracefully and resumes interrupted work o
 proxies `/api` to the configured backend port (the script passes it as `ATLAS_API_URL`).
 
 Health: the **Diagnostics** screen in the UI (`/diagnostics`; JSON at `GET /api/diagnostics`) shows configuration, database, keys
-set or not, Drive files and token, frontend build, last 50 warnings and errors; never secret
-values).
+set or not, Drive files and token, frontend build, last 50 warnings and errors, never secret
+values.
 
 ## Google Drive consent (once)
 
