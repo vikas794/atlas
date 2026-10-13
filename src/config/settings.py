@@ -109,6 +109,7 @@ class AtlasSettings:
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_input_token_limit: int = 128000
     notes_prompt_name: str = "notes_v1_1.yaml"  # the prompt file's own `version` is recorded
+    notes_request_timeout_seconds: float = 300.0  # a hung LLM call must not hold a slot forever
 
     # --- Pipeline concurrency & retries ----------------------------------
     max_concurrent_videos: int = 2
@@ -193,6 +194,8 @@ class AtlasSettings:
              "must be at least backoff_base_seconds")  # fmt: skip
         need(self.drive_backoff_cap_seconds >= self.drive_backoff_base_seconds,
              "drive_backoff_cap_seconds", "must be at least drive_backoff_base_seconds")  # fmt: skip
+        need(self.notes_request_timeout_seconds > 0, "notes_request_timeout_seconds",
+             "must be greater than 0")  # fmt: skip
         need(self.worker_poll_interval_seconds > 0, "worker_poll_interval_seconds",
              "must be greater than 0")  # fmt: skip
         for name in ("gemini_input_token_limit", "openrouter_input_token_limit"):

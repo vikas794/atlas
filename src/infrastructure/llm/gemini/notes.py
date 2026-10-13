@@ -24,6 +24,7 @@ from src.infrastructure.llm.notes_base import (
     check_input_size,
     classify_provider_exception,
     render_prompt,
+    request_timeout_seconds,
     validate_notes,
 )
 
@@ -40,10 +41,6 @@ NOTES_OPERATION = "generate_notes"
 #: accept 1M tokens; the configured default in AtlasSettings is the same.
 _FALLBACK_INPUT_TOKEN_LIMIT = 1_000_000
 
-#: Per-request timeout. The SDK default is *no* timeout, so one hung connection would
-#: hold a worker slot (and its video in ``generating_notes``) forever. Long transcripts
-#: legitimately take minutes; the OpenRouter adapter uses the same bound.
-_REQUEST_TIMEOUT_SECONDS = 300.0
 
 
 class GeminiNotesGenerator:
@@ -125,7 +122,9 @@ class GeminiNotesGenerator:
                 api_key=self._require_api_key(),
                 # HttpOptions.timeout is in milliseconds. No retry_options: the SDK then
                 # makes exactly one attempt, and ProcessVideoUseCase owns retries.
-                http_options=types.HttpOptions(timeout=int(_REQUEST_TIMEOUT_SECONDS * 1000)),
+                http_options=types.HttpOptions(
+                    timeout=int(request_timeout_seconds(self._settings) * 1000)
+                ),
             )
         return self._client
 

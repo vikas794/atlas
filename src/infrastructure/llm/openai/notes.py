@@ -24,6 +24,7 @@ from src.infrastructure.llm.notes_base import (
     check_input_size,
     classify_provider_exception,
     render_prompt,
+    request_timeout_seconds,
     validate_notes,
 )
 
@@ -55,9 +56,6 @@ NOTES_OPERATION = "generate_notes"
 #: Override with ``openrouter_input_token_limit`` when you pin a bigger model.
 _FALLBACK_INPUT_TOKEN_LIMIT = 128_000
 
-#: Long transcripts take minutes. The SDK's own default is far shorter, and the
-#: retry decorator (not the SDK) owns retries, so the SDK is told to do none.
-_REQUEST_TIMEOUT_SECONDS = 300.0
 
 
 class OpenRouterNotesGenerator:
@@ -132,7 +130,7 @@ class OpenRouterNotesGenerator:
             self._client = AsyncOpenAI(
                 api_key=self._require_api_key(),
                 base_url=self.base_url,
-                timeout=_REQUEST_TIMEOUT_SECONDS,
+                timeout=request_timeout_seconds(self._settings),
                 # Atlas owns the retry policy; a second, invisible SDK retry loop
                 # would double every wait and hide real failure counts.
                 max_retries=0,

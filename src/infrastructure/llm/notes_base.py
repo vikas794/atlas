@@ -117,6 +117,18 @@ def render_prompt(template: str, *, title: str, transcript: str) -> str:
     return _PLACEHOLDER_PATTERN.sub(lambda match: values[match.group(0)], template)
 
 
+#: Per-request timeout when ``notes_request_timeout_seconds`` is unset. Both SDKs
+#: would otherwise wait far too long (Gemini: forever), holding a worker slot and
+#: leaving the video in ``generating_notes``; long transcripts legitimately take minutes.
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 300.0
+
+
+def request_timeout_seconds(settings: SettingsLoader) -> float:
+    """The configured per-call LLM timeout, in seconds."""
+    raw = settings("notes_request_timeout_seconds", DEFAULT_REQUEST_TIMEOUT_SECONDS)
+    return float(raw or DEFAULT_REQUEST_TIMEOUT_SECONDS)
+
+
 def estimate_tokens(text: str) -> int:
     """Rough token count for ``text``, assuming ~4 characters per token.
 

@@ -45,6 +45,7 @@ openrouter_model: ""
 openrouter_base_url: "https://openrouter.ai/api/v1"
 openrouter_input_token_limit: 128000
 notes_prompt_name: "notes_v1_1.yaml"  # the recorded prompt version is this file's own `version`
+notes_request_timeout_seconds: 300.0  # one LLM call; a timeout is retried like a network error
 
 # --- Pipeline concurrency & retries --------------------------------------------
 max_concurrent_videos: 2

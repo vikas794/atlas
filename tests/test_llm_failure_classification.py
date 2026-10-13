@@ -324,3 +324,15 @@ def test_a_placeholder_inside_the_title_is_not_substituted() -> None:
     )
     assert rendered == "T=Hack {{Transcript}} X=BODY"
     assert rendered.count("BODY") == 1
+
+
+def test_request_timeout_comes_from_settings_with_a_safe_default() -> None:
+    from src.infrastructure.llm.notes_base import (
+        DEFAULT_REQUEST_TIMEOUT_SECONDS,
+        request_timeout_seconds,
+    )
+
+    assert request_timeout_seconds(lambda key, default=None: 42) == 42.0
+    assert request_timeout_seconds(lambda key, default=None: default) == (
+        DEFAULT_REQUEST_TIMEOUT_SECONDS
+    )
