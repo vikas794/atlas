@@ -100,13 +100,10 @@ class GoogleDriveExporter:
     ) -> None:
         self.logger = logging.getLogger(__name__)
 
-        if creds_path is None:
-            creds_path = os.getenv("ATLAS_GOOGLE_CREDS_PATH") or "credentials.json"
-        if token_path is None:
-            token_path = os.getenv("ATLAS_GOOGLE_TOKEN_PATH") or "token.json"
-
-        self.creds_path = Path(creds_path)
-        self.token_path = Path(token_path)
+        # Paths come from Settings (the composition root passes them); the bare
+        # defaults only serve tests and scripts that build an exporter directly.
+        self.creds_path = Path(creds_path or "credentials.json")
+        self.token_path = Path(token_path or "token.json")
 
         self._credentials: Credentials | None = None
         self._creds_lock = threading.Lock()
