@@ -412,7 +412,7 @@ def test_publish_without_drive_consent_is_409_with_a_hint(
     assert resp.status_code == 409
     body = resp.json()
     assert body["code"] == "DRIVE_AUTH_REQUIRED"
-    assert "/api/drive/auth" in body["details"]["hint"]
+    assert "authorize Google Drive" in body["details"]["hint"]
     assert client.get(f"/api/playlists/{playlist['id']}").json()["status"] == "ingested"
 
 
