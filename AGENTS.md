@@ -50,3 +50,10 @@ This project is indexed by GitNexus as **atlas** (2437 symbols, 5162 relationshi
 - For any required implementation, check both files first. Backend/pipeline/API work follows `Atlas_PRD.md`; UI work follows `design.md` and the PRD sections it references (6, 7, 8, 15, 16).
 - If the code, the PRD and `design.md` disagree, or a requirement is ambiguous, stop and ask the user. Do not silently pick one, and do not edit either document unless asked.
 - Build in PRD milestone order (M1 to M6) unless the user directs otherwise.
+
+# Documentation Rules
+
+- All project documentation lives in the `docs/` folder (e.g. `docs/ARCHITECTURE.md`, `docs/CONFIG.md`, `docs/TROUBLESHOOTING.md`, `docs/AUDIT_REPORT.md`). New docs go there, not the repo root. `README.md`, `CLAUDE.md`, `AGENTS.md`, `Atlas_PRD.md` and `design.md` stay at the root.
+- **Before making any change**, read the docs relevant to it (`docs/`, `Atlas_PRD.md`, `design.md`) and verify they match the current code. If they disagree with the code, flag it to the user before proceeding.
+- **After every change**, update the affected docs in the same change so they stay accurate to the code (behavior, config/env vars, API, architecture, troubleshooting). Never leave docs stale. Do not finish a task until the docs are checked.
+- `Atlas_PRD.md` and `design.md` are still only edited when the user asks; if a change makes them out of date, tell the user instead of editing them.
