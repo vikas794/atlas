@@ -178,7 +178,7 @@ _REASONS: Final[dict[FailureType, str]] = {
     FailureType.TRANSCRIPTS_DISABLED: "Transcripts are disabled by the uploader.",
     FailureType.NO_USABLE_LANGUAGE: "No transcript is available in a usable language.",
     FailureType.TRANSCRIPT_TOO_LARGE: "The transcript is too large to process.",
-    FailureType.RATE_LIMITED: "YouTube is rate-limiting requests; retrying shortly.",
+    FailureType.RATE_LIMITED: "YouTube is rate-limiting requests.",
     FailureType.NETWORK_ERROR: "A network error interrupted the request.",
     FailureType.PROVIDER_ERROR: "The transcript provider returned an error.",
     FailureType.OUTPUT_MALFORMED: "The provider returned output that could not be read.",

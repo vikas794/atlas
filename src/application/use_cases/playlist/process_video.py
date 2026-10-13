@@ -293,7 +293,9 @@ class ProcessVideoUseCase:
 
             # Permanent, or transient with the automatic retry budget used up. Exhausted
             # transient failures keep failure_kind=transient but have no next_retry_at,
-            # so they are manual-retry only.
+            # so they are manual-retry only -- and the reason must say so.
+            if failure_kind == FailureKind.TRANSIENT:
+                reason = f"{reason} Automatic retries are used up; press Retry to try again."
             await self.repo.update_stage(
                 video_pk,
                 Stage.FAILED,

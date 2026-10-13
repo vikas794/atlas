@@ -436,7 +436,10 @@ async def test_429_until_exhaustion_leaves_a_visible_transient_failure(
     assert video.failure_type == FailureType.RATE_LIMITED
     assert video.failure_kind == FailureKind.TRANSIENT
     assert video.retries_exhausted is True
-    assert video.failure_reason == "Gemini is rate-limiting requests (HTTP 429)."
+    assert video.failure_reason == (
+        "Gemini is rate-limiting requests (HTTP 429)."
+        " Automatic retries are used up; press Retry to try again."
+    )
     assert client.calls == 3  # 1 attempt + 2 automatic retries, then manual only
 
     # The manual retry button runs it again with a fresh budget.
