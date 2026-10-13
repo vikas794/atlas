@@ -50,7 +50,7 @@ describe('DiagnosticsScreen', () => {
     renderRoute('/diagnostics')
 
     const row = (await screen.findByText('Video 12 failed: rate_limited')).closest('tr')!
-    expect(within(row).getByText('ERROR')).toBeInTheDocument()
+    expect(within(row).getByText('Error')).toBeInTheDocument()
     expect(within(row).getByText('src.application.worker')).toBeInTheDocument()
     expect(within(row).getByRole('time')).toHaveAttribute('title')
   })

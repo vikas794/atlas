@@ -53,6 +53,11 @@ function levelTone(level: string): Tone {
   return 'neutral'
 }
 
+/** design.md 4: sentence case everywhere ("WARNING" -> "Warning"). */
+function levelLabel(level: string): string {
+  return level ? level.charAt(0).toUpperCase() + level.slice(1).toLowerCase() : level
+}
+
 function CheckRow({ check }: { check: DiagnosticCheck }) {
   const spec = checkStatus(check.status)
   const { Icon } = spec
@@ -77,7 +82,7 @@ function ErrorRow({ entry }: { entry: DiagnosticLogEntry }) {
         <RelativeTime iso={entry.timestamp} />
       </td>
       <td className="px-3 py-2">
-        <Badge tone={levelTone(entry.level)}>{entry.level}</Badge>
+        <Badge tone={levelTone(entry.level)}>{levelLabel(entry.level)}</Badge>
       </td>
       <td className="px-3 py-2 font-mono text-label text-text-muted">{entry.logger}</td>
       <td className="break-words px-3 py-2 text-body text-text">{entry.message}</td>
