@@ -30,6 +30,7 @@ export function MarkdownBody({ markdown, className }: { markdown: string; classN
         '[&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-5',
         '[&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-5',
         '[&_table]:w-full [&_table]:text-body [&_table]:font-ui [&_th]:border-b [&_th]:border-border [&_th]:bg-surface-muted [&_th]:text-left [&_th]:font-medium [&_th]:text-text [&_td]:border-b [&_td]:border-border [&_td]:align-top',
+        '[&_th]:px-3 [&_th]:py-1 [&_td]:px-3 [&_td]:py-1',
         '[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-text-muted',
         '[&_hr]:border-border',
         className,
