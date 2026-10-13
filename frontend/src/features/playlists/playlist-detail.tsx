@@ -516,7 +516,7 @@ export function PlaylistDetail() {
                     >
                       <td
                         className={cn(
-                          'border-l-2 px-3 py-1 text-right font-mono text-label tabular-nums text-text-muted',
+                          'border-l-2 px-3 py-1 text-right text-label tabular-nums text-text-muted',
                           needsReview ? 'border-l-st-review-fg' : 'border-l-transparent',
                         )}
                       >

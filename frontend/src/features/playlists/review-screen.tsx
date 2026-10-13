@@ -338,7 +338,7 @@ export function ReviewScreen() {
                     )}
                   >
                     <StageDot spec={badge} />
-                    <span className="shrink-0 font-mono tabular-nums text-text-muted">
+                    <span className="shrink-0 tabular-nums text-text-muted">
                       {formatPosition(video.position)}
                     </span>
                     <span className="truncate">{video.title}</span>
