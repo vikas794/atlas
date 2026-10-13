@@ -72,7 +72,7 @@ function CheckRow({ check }: { check: DiagnosticCheck }) {
 
 function ErrorRow({ entry }: { entry: DiagnosticLogEntry }) {
   return (
-    <tr className="border-b border-border align-top last:border-b-0">
+    <tr className="h-row border-b border-border align-top last:border-b-0 hover:bg-surface-muted">
       <td className="whitespace-nowrap px-3 py-2 text-label text-text-muted">
         <RelativeTime iso={entry.timestamp} />
       </td>
