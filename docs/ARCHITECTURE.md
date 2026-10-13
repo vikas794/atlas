@@ -1,641 +1,515 @@
-# Atlas — Target Architecture
+# Atlas architecture
 
-> **Status (post-Wave-D):** Domain ✅, Infrastructure ✅, Application (use cases) ✅, Config ✅, Transport (FastAPI) ✅, Frontend ✅ — **ALL WAVES COMPLETE**
+This describes the code as it is. Requirements live in [`Atlas_PRD.md`](../Atlas_PRD.md), UI rules
+in [`design.md`](../design.md), settings in [`CONFIG.md`](CONFIG.md), failure recipes in
+[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
 
----
+Atlas is a local, single-user tool: one Python process (FastAPI + a background worker) and one
+SQLite file. A YouTube playlist becomes one Google Doc of LLM-written notes per video plus an
+index Doc, in one Drive folder, after a human has reviewed and approved each note.
 
-## 1. Target Directory Structure (with Current Status)
+## 1. Components and layers
 
-```
-src/
-├── domain/                          ✅ IMPLEMENTED (Wave A1)
-│   ├── __init__.py
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── video.py            # VideoId, VideoMetadata, TranscriptRef, SummaryRef
-│   │   ├── transcript.py       # Transcript, TranscriptContent, TranscriptStatus
-│   │   ├── summary.py           # Summary, SummaryData, SummaryStatus
-│   │   ├── comparison.py        # ComparisonRow, InsightsReport, Recommendations
-│   │   ├── assignment.py        # Assignment, AssignmentMetadata
-│   │   └── quiz.py              # QuizResult, PlaylistResult
-│   ├── interfaces/
-│   │   ├── __init__.py
-│   │   ├── transcript_provider.py    # TranscriptProviderPort, TranscriptResult
-│   │   ├── summarizer.py             # SummarizerPort, SummaryContext, SummaryResult
-│   │   ├── insights_provider.py      # InsightsProviderPort, InsightsResult
-│   │   ├── assignment_generator.py   # AssignmentGeneratorPort, AssignmentResult
-│   │   ├── quiz_generator.py         # QuizGeneratorPort, QuizContext, QuizResult
-│   │   ├── cache.py                  # CachePort, CacheKey
-│   │   ├── usage_ledger.py           # UsageLedgerPort, UsageRecord, UsageAggregate
-│   │   └── storage.py                # RunRepositoryPort, ArtifactStorePort, RunRecord, CacheEntry
-│   ├── services/
-│   │   ├── __init__.py
-│   │   ├── comparison_inference.py   # ComparisonInferenceService (difficulty, style, value)
-│   │   ├── hash_computer.py          # RunHashComputer (state hashes for staleness)
-│   │   └── cache_key_builder.py      # CacheKeyBuilder (canonical key construction)
-│   └── exceptions/
-│       ├── __init__.py
-│       └── domain.py                 # DomainError, ProviderError, CacheError, StorageError
-│
-├── application/                     ✅ IMPLEMENTED (Wave B)
-│   ├── __init__.py
-│   ├── use_cases/
-│   │   ├── __init__.py
-│   │   ├── search_pipeline.py        # SearchPipelineUseCase
-│   │   ├── generate_transcripts.py   # GenerateTranscriptsUseCase
-│   │   ├── generate_summaries.py     # GenerateSummariesUseCase
-│   │   ├── generate_comparison.py    # GenerateComparisonUseCase
-│   │   ├── generate_assignments.py   # GenerateAssignmentsUseCase
-│   │   └── generate_quiz.py          # GenerateQuizUseCase
-│   ├── ports/
-│   │   ├── __init__.py
-│   │   └── provider_ports.py         # Re-exports domain interfaces as app ports
-│   ├── dto/
-│   │   ├── __init__.py
-│   │   ├── search.py                 # SearchInput, SearchOutput
-│   │   ├── transcripts.py            # TranscriptGenerationInput, TranscriptGenerationOutput
-│   │   ├── summaries.py              # SummaryGenerationInput, SummaryGenerationOutput
-│   │   ├── comparison.py             # ComparisonGenerationInput, ComparisonGenerationOutput
-│   │   ├── assignments.py            # AssignmentGenerationInput, AssignmentGenerationOutput
-│   │   └── quiz.py                   # QuizGenerationInput, QuizGenerationOutput, VideoQuizResult
-│   └── artifact_readers/             ✅ IMPLEMENTED (Wave C)
-│       ├── __init__.py
-│       # read_videos, read_transcripts, read_summaries, read_assignments,
-│       # build_comparison_artifact, build_run_counts, has_comparison_source_data,
-│       # clean_srt_content, YouTubeOutputComparator
-│
-├── infrastructure/                  ✅ IMPLEMENTED (Waves A2–A8, D)
-│   ├── __init__.py
-│   ├── llm/
-│   │   ├── __init__.py
-│   │   ├── base.py                   # LLMProvider base, RetryPolicy, LLMResponse, TokenUsage
-│   │   │                             # SettingsLoader, UsageLedgerSink, RetryableProvider
-│   │   ├── openai/
-│   │   │   ├── __init__.py
-│   │   │   ├── adapter.py            # OpenAISummarizerAdapter, OpenAIInsightsProvider, OpenAIAssignmentAdapter
-│   │   │   └── retry.py              # OpenAIRetryableProvider (bounded exp backoff + jitter)
-│   │   ├── gemini/
-│   │   │   ├── __init__.py
-│   │   │   └── adapter.py            # GeminiQuizProvider (legacy retry: 2**attempt, max 3)
-│   │   └── cost.py                   # ✅ CostCalculator (pricing for OpenAI, Gemini, Anthropic)
-│   ├── transcript/
-│   │   └── ytdlp/
-│   │       ├── __init__.py
-│   │       └── provider.py            # YtDlpTranscriptProvider (legacy retry [15,30,60,120]+jitter)
-│   ├── storage/
-│   │   ├── __init__.py
-│   │   ├── sql.py                     # SqlRunRepository (delegates to backend.storage.repository.RunRepository),
-│   │   │                             # SqlUsageLedger (record/aggregate/recent + aliases)
-│   │   └── filesystem.py             # ArtifactFileStore (atomic writes via src.utils.atomic_write)
-│   ├── cache/
-│   │   ├── __init__.py               # exports SqlCacheAdapter
-│   │   └── sql_cache.py               # SqlCacheAdapter (zlib-compressed, TTL, hit_count, invalidate*)
-│   ├── youtube/
-│   │   ├── __init__.py               # exports both providers
-│   │   ├── search.py                  # YouTubeDataApiSearchProvider
-│   │   └── playlist.py                # YouTubePlaylistProvider (+ get_playlist_title)
-│   └── google/
-│       ├── __init__.py               # exports GoogleDriveExporter
-│       └── drive.py                   # GoogleDriveExporter (OAuth web→installed rewrite preserved)
-│
-├── config/                            ✅ IMPLEMENTED (Wave C)
-│   ├── __init__.py
-│   ├── settings.py                    # SettingsLoader, AtlasSettings (env + config.yaml), get_storage_settings()
-│   ├── prompts.py                     # PromptRegistry (YAML prompt templates with versioning)
-│   └── models.py                      # ModelRegistry (provider/model configuration)
-│
-├── transport/
-│   └── http/
-│       ├── __init__.py
-│       └── fastapi/
-│           ├── __init__.py
-│           ├── main.py                 # Moved to backend/main.py (entry point), DI wired in dependencies.py
-│           ├── routers/
-│           │   ├── __init__.py
-│   │   ├── pipeline.py         # ✅ /api/pipeline/search, /api/runs/{id}/transcripts|summaries|comparison|assignments
-│   │   ├── runs.py             # ✅ /api/runs, /api/runs/latest, /api/runs/{id} (uses RunRepositoryPort via Depends)
-│   │   ├── quiz.py             # ✅ /api/quiz/playlist, /api/quiz/playlist/stream, /api/quiz/drive-status, /api/quiz/credentials, /api/quiz/auth
-│   │   └── usage.py            # ✅ GET /api/usage (usage aggregation endpoint)
-│           ├── schemas/
-│           │   ├── __init__.py
-│           │   ├── pipeline.py         # ✅ SearchRequest, ArtifactGenerationRequest, PipelineActionResponse
-│           │   ├── runs.py             # ✅ RunManifest, RunListResponse, SearchArtifactResponse, ...
-│           │   └── quiz.py             # ✅ PlaylistQuizRequest, PlaylistQuizStatusResponse, DriveStatusResponse, VideoQuizResult
-│           ├── dependencies.py          # ✅ FastAPI Depends() providers (repo, cache, ledger, all 6 use cases)
-│           ├── errors.py                # ✅ domain-to-HTTP error translation
-│           └── middleware.py            # ✅ CorrelationIdMiddleware, RequestLoggingMiddleware
-│
-└── (legacy `backend/` transport layer REMOVED — routers/, schemas/, services/ deleted;
-     backend/main.py remains as entry point with lifespan + middleware + router mounting)
+```mermaid
+flowchart LR
+  UI["React SPA<br/>frontend/ (built to frontend/dist)"] -- "REST + polling" --> T
+  subgraph Process["One process: python -m backend (uvicorn)"]
+    T["Transport<br/>src/transport/http/fastapi<br/>routers, schemas, errors, middleware"]
+    CR["Composition root<br/>dependencies.py"]
+    A["Application<br/>use cases + PlaylistWorker"]
+    D["Domain<br/>models, stage machine, backoff,<br/>failure classifier, sync diff, Doc naming,<br/>Markdown to Docs, ports"]
+    I["Infrastructure adapters"]
+    T --> A
+    CR -. builds .-> A
+    CR -. builds .-> I
+    A --> D
+    I -. implements ports .-> D
+  end
+  I --> YT["YouTube Data API v3<br/>youtube/playlist.py"]
+  I --> YD["yt-dlp subtitles<br/>transcript/ytdlp/provider.py"]
+  I --> LLM["Gemini / OpenRouter<br/>llm/gemini, llm/openai"]
+  I --> DB[("SQLite (WAL)<br/>storage/")]
+  I --> GD["Google Drive + Docs<br/>google/drive.py, publisher.py"]
 ```
 
-**Legend:** ✅ done · `backend/` = legacy transport layer removed in Wave C; `backend/main.py` is the sole entry point.
+| Layer | Path | What it owns |
+|---|---|---|
+| Transport | `src/transport/http/fastapi/` | Routers (`playlists`, `videos`, `drive_auth`, `usage`), Pydantic schemas, the `{code, message, details}` error envelope (`errors.py`), request logging with `X-Correlation-ID` (`middleware.py`). |
+| Composition root | `src/transport/http/fastapi/dependencies.py` | The only module that knows both ports and adapters. Builds everything lazily, so the app starts without any API key; a missing key surfaces as `ConfigurationError` (HTTP 503 `CONFIG_MISSING`) when the feature is used. |
+| Application | `src/application/` | `IngestPlaylistUseCase`, `ProcessVideoUseCase`, `PublishPlaylistUseCase`, the user actions in `actions.py` (approve, approve-all, edit, retry, regenerate, reprocess, delete, transcript cleanup) and `PlaylistWorker`. Depends only on ports. |
+| Domain | `src/domain/` | `Playlist`, `Video`, `Transcript`, `Summary`, `Stage`, `FailureType`/`FailureKind` (`models/playlist.py`); pure services (`stage_machine`, `backoff`, `failure_classifier`, `sync_diff`, `playlist_url`, `doc_naming`, `markdown_to_docs`); ports in `interfaces/`. |
+| Infrastructure | `src/infrastructure/` | `youtube/playlist.py` (playlist listing), `transcript/ytdlp/provider.py`, `llm/` (Gemini, OpenRouter, `factory.py`, cost table), `storage/` (connection + migration runner, `PlaylistRepository`, `SqlUsageLedger`), `google/` (`GoogleDriveExporter` for OAuth and raw API calls, `GoogleDrivePublisher` for idempotent publishing). |
+| Entry points | `backend/__main__.py`, `backend/main.py`, `backend/spa.py`, `backend/services/diagnostics.py` | Startup checks (config, port), the FastAPI app and lifespan, serving `frontend/dist` with an SPA fallback, `GET /api/diagnostics`. |
+| Config / shared | `src/config/settings.py`, `src/configs/config.yaml`, `src/prompts/`, `src/shared/` | `AtlasSettings` (see CONFIG.md), versioned prompt files, logging, secret redaction, file helpers. |
 
----
+Ports (`src/domain/interfaces/`): `PlaylistProviderPort`, `TranscriptProviderPort`,
+`NotesGeneratorPort`, `PlaylistRepositoryPort`, `DrivePublisherPort`, `UsageLedgerPort`.
 
-## 2. Dependency Rules
+**Single owner of retries.** Adapters make one provider call and raise a classified error
+(yt-dlp runs with `retries: 0`; the Gemini and OpenAI SDKs are built without retry options).
+`ProcessVideoUseCase` decides whether and when to retry and persists that decision, so retries
+survive a restart and are bounded. The one exception is Drive: `GoogleDrivePublisher` retries
+each Drive/Docs call in place (section 5).
 
-### Allowed Directions
+## 2. Data model
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        LAYER LADDERS                             │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  transport/http/fastapi                                          │
-│       │                                                          │
-│       ▼                                                          │
-│  application/use_cases                                           │
-│       │                                                          │
-│       ▼                                                          │
-│  domain/                                                         │
-│       ▲                                                          │
-│       │                                                          │
-│  infrastructure/                                                  │
-│    (implements domain/application ports)                          │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+Migrations are numbered SQL lists in `src/infrastructure/storage/migrations.py`, applied in one
+transaction each by `storage/db.py::initialize` when the repository is first built (app
+startup), and recorded in `schema_migrations`. Migration `0003` drops the legacy search-run
+tables; `0004` rebuilds `videos` (with foreign keys off) to one row per playlist position.
+Before the first pending migration on a database that already has migrations applied, a copy
+is written to `<db>.pre-<version>.bak`.
 
-### Explicit Forbidden Dependencies
+Final schema (verified by migrating an empty database):
 
-| Layer | Forbidden Dependency | Rationale |
-|-------|----------------------|-----------|
-| `domain/` | FastAPI, HTTP, SQLite, yt-dlp, OpenAI SDK, Gemini SDK, filesystem paths, pandas | Domain must be pure, testable without external systems |
-| `domain/` | `src/utils.py` (kitchen-sink module) | Too many mixed concerns; decompose into focused utilities |
-| `application/` | Concrete provider SDKs (OpenAI, Gemini, yt-dlp) | Application orchestrates via ports; infrastructure provides adapters |
-| `application/` | Pydantic models | Application uses plain Python DTOs/dataclasses; transport layer handles serialization |
-| `infrastructure/` | `backend/routers/`, `backend/schemas/` | Infrastructure must not depend on transport layer |
-| `transport/` | `src/youtube_pipeline.py`, `src/summarize_youtube_transcript.py`, etc. | Route handlers must call application use cases, not legacy modules directly (Wave C) |
-| `infrastructure/llm/` | ThreadPoolExecutor for parallelism | Parallelism is an application concern; adapters should be stateless and reentrant |
-| All layers | `os.environ[...] = ...` mutation | Secrets injected via configuration; never mutate global state (Wave B ✅) |
+```mermaid
+erDiagram
+  playlists ||--o{ videos : "playlist_id (ON DELETE CASCADE)"
+  videos ||--o| transcripts : "video_id (CASCADE, UNIQUE)"
+  videos ||--o| summaries : "video_id (CASCADE, UNIQUE)"
+  videos |o--o{ videos : "duplicate_of_video_id (ON DELETE SET NULL)"
 
----
-
-## 3. Interface Contracts
-
-*Implemented as `typing.Protocol` classes in `src/domain/interfaces/`. All domain code is pure Python. Adapters live in `src/infrastructure/` and accept `SettingsLoader` + optional `UsageLedgerSink` via constructor injection.*
-
-### 3.1 Transcript Provider
-
-```python
-class TranscriptProviderPort(Protocol):
-    async def fetch_transcript(self, video_id: str, language: str = "en") -> TranscriptResult: ...
-    async def fetch_transcripts(self, video_ids: list[str], language: str = "en") -> list[TranscriptResult]: ...
-
-@dataclass(frozen=True)
-class TranscriptResult:
-    video_id: str
-    language: str
-    raw_srt: str
-    cleaned_text: str
-    content_hash: str
-    artifact_path: str
-    byte_size: int
-```
-
-Implementation: `YtDlpTranscriptProvider` — preserves legacy retry schedule, rate-limit cooldown, inter-video pacing.
-
-### 3.2 Summarizer
-
-```python
-class SummarizerPort(Protocol):
-    async def summarize(self, context: SummaryContext) -> SummaryResult: ...
-    async def summarize_batch(self, contexts: list[SummaryContext]) -> list[SummaryResult]: ...
-
-@dataclass(frozen=True)
-class SummaryContext:
-    video_id: str
-    title: str
-    channel: str
-    transcript_text: str
-    language: str = "en"
-    prompt_version: str = "v1"
-    model: str = "gpt-4o-mini"
-
-@dataclass(frozen=True)
-class SummaryResult:
-    video_id: str
-    summary_data: dict
-    content_hash: str
-    artifact_path: str
-    byte_size: int
-    prompt_version: str
-    model: str
-```
-
-Implementation: `OpenAISummarizerAdapter` — bounded exp backoff retry, usage ledger emission.
-
-### 3.3 Insights Provider
-
-```python
-class InsightsProviderPort(Protocol):
-    async def generate_insights(self, video_metadata: dict, summary_data: dict, prompt_version: str = "v1", model: str = "gpt-4o-mini") -> InsightsResult: ...
-    async def generate_insights_batch(self, video_metadata_list: list[dict], summary_data_list: list[dict], prompt_version: str = "v1", model: str = "gpt-4o-mini") -> list[InsightsResult]: ...
-
-@dataclass(frozen=True)
-class InsightsResult:
-    video_id: str
-    learning_outcome: str
-    difficulty_level: str
-    teaching_style: str
-    practical_value: str
-    content_depth: str
-    target_audience: str
-    key_differentiators: str
-    time_investment_worth: str
-    prerequisites: str
-    follow_up_recommendations: str
-    content_hash: str
-    artifact_path: str
-    prompt_version: str
-    model: str
-```
-
-Implementation: `OpenAIInsightsProvider` — JSON fallback to `_get_fallback_insights()`.
-
-### 3.4 Assignment Generator
-
-```python
-class AssignmentGeneratorPort(Protocol):
-    async def generate_assignment(self, video_id: str, title: str, channel: str, summary_data: dict, prompt_version: str = "v1", model: str = "gpt-4o-mini") -> AssignmentResult: ...
-    async def generate_assignments_batch(self, videos: list[dict], summaries: list[dict], prompt_version: str = "v1", model: str = "gpt-4o-mini") -> list[AssignmentResult]: ...
-
-@dataclass(frozen=True)
-class AssignmentResult:
-    video_id: str
-    markdown: str
-    sections: list[dict]
-    checklist: list[dict]
-    metadata: dict
-    display_metadata: dict[str, str]
-    content_hash: str
-    artifact_path: str
-    byte_size: int
-    prompt_version: str
-    model: str
+  playlists {
+    INTEGER id PK
+    TEXT playlist_id UK "YouTube list id"
+    TEXT source_url
+    TEXT title
+    INTEGER video_count
+    TEXT status "ingested|publishing|published|publish_failed"
+    TEXT drive_folder_id
+    TEXT drive_index_doc_id
+    TEXT last_publish_error
+    INTEGER pad_width "Doc number width, never shrinks"
+    TEXT index_digest "hash of index text last written"
+    TEXT created_at
+    TEXT updated_at
+    TEXT last_synced_at
+  }
+  videos {
+    INTEGER id PK
+    INTEGER playlist_id FK
+    TEXT youtube_video_id
+    TEXT title
+    INTEGER position "1-based; UNIQUE(playlist_id, position)"
+    TEXT stage
+    TEXT failure_type
+    TEXT failure_kind "transient|permanent"
+    TEXT failure_reason
+    INTEGER retry_count
+    TEXT next_retry_at "NULL = no automatic retry pending"
+    TEXT drive_doc_id
+    INTEGER removed_upstream
+    INTEGER duplicate_of_video_id FK
+    INTEGER run_token "stale-run guard"
+    INTEGER regen_requested
+    TEXT created_at
+    TEXT updated_at
+  }
+  transcripts {
+    INTEGER id PK
+    INTEGER video_id FK
+    TEXT content
+    TEXT language
+    INTEGER byte_size
+    TEXT content_hash
+    TEXT fetched_at
+    TEXT deleted_at "soft delete"
+    TEXT artifact_path "raw subtitle file"
+  }
+  summaries {
+    INTEGER id PK
+    INTEGER video_id FK
+    TEXT content "Markdown notes"
+    TEXT provider
+    TEXT model
+    TEXT prompt_version "the prompt file's own version"
+    TEXT generated_at
+    INTEGER edited
+    INTEGER approved
+    TEXT approved_at
+    INTEGER published
+    TEXT published_at
+    TEXT published_digest "content hash at publish time"
+  }
+  usage_ledger {
+    INTEGER id PK
+    TEXT request_id
+    TEXT run_id "plain TEXT, no FK"
+    TEXT timestamp
+    TEXT provider
+    TEXT model
+    TEXT operation
+    INTEGER input_tokens
+    INTEGER output_tokens
+    INTEGER total_tokens
+    REAL estimated_cost_usd
+    INTEGER success
+    TEXT error_category
+    INTEGER retry_count
+    TEXT metadata
+    TEXT created_at
+  }
+  schema_migrations {
+    TEXT version PK
+    TEXT applied_at
+  }
 ```
 
-Implementation: `OpenAIAssignmentAdapter` — prompt templates loaded from YAML.
+`usage_ledger` also has `currency`, `latency_ms`, `cache_hit`, `cache_key`, `cache_namespace`
+(kept from migration 0002).
 
-### 3.5 Quiz Generator
+Indexes: `idx_playlists_created(created_at)`; `idx_videos_playlist_stage(playlist_id, stage)`,
+`idx_videos_youtube(playlist_id, youtube_video_id)`, `idx_videos_duplicate_of(duplicate_of_video_id)`;
+`idx_transcripts_video(video_id)`; `idx_summaries_video(video_id)`; `idx_usage_timestamp`,
+`idx_usage_provider`, `idx_usage_model`, `idx_usage_operation`, `idx_usage_run_id`,
+`idx_usage_request_id`. Unique constraints: `playlists.playlist_id`,
+`videos(playlist_id, position)`, `transcripts.video_id`, `summaries.video_id`.
 
-```python
-class QuizGeneratorPort(Protocol):
-    async def generate_quiz(self, transcript: TranscriptRef, title: str, context: QuizContext) -> QuizResult: ...
+Why these shapes:
 
-@dataclass(frozen=True)
-class QuizContext:
-    playlist_url: str
-    gemini_api_key: str | None = None
-    max_videos: int | None = None
-    model: str = "gemini-1.5-pro"
+- **One row per position.** A video that appears twice in a playlist gets two rows; the second
+  has `duplicate_of_video_id` set and receives a copy of the first occurrence's summary instead
+  of being processed again, so Doc numbering matches YouTube.
+- **`run_token`.** Retry, regenerate and reprocess bump it. Every write of a running task carries
+  the token it started with; a mismatch raises `StaleRunError` and the stale result is dropped.
+- **`removed_upstream`.** A re-sync never deletes rows: a video gone from YouTube is flagged and
+  skipped by the worker; it is cleared if the video reappears.
+- **`published_digest`.** Lets the UI show "edited since publishing" and lets publish decide
+  whether a published Doc needs rewriting.
 
-@dataclass(frozen=True)
-class QuizResult:
-    video_id: str
-    content: str
-    token_usage: TokenUsage | None
-    success: bool
+## 3. End-to-end flow
+
+```mermaid
+sequenceDiagram
+  actor U as User (browser)
+  participant API as FastAPI routers
+  participant ING as IngestPlaylistUseCase
+  participant YT as YouTube Data API
+  participant DB as SQLite
+  participant W as PlaylistWorker
+  participant PV as ProcessVideoUseCase
+  participant YD as yt-dlp
+  participant LLM as Gemini / OpenRouter
+  participant PUB as PublishPlaylistUseCase
+  participant GD as Google Drive / Docs
+
+  U->>API: POST /api/playlists {url}
+  API->>ING: ingest(url)
+  ING->>ING: parse_playlist_url (400 INVALID_URL)
+  ING->>YT: playlist title + playlistItems (pages of 50)
+  YT-->>ING: entries (private/deleted placeholders skipped, positions 1..n)
+  ING->>DB: create playlist + videos (stage queued), or diff and append on re-sync
+  API-->>U: 201 new / 200 re-synced; worker.wake()
+  loop every tick (wake or poll interval)
+    W->>DB: list_transient_due + list_queued_videos
+    W->>PV: execute(video) (at most max_concurrent_videos at once)
+    PV->>DB: stage fetching_transcript
+    PV->>YD: download subtitles (thread)
+    PV->>DB: store transcript, stage transcript_ready
+    PV->>DB: stage generating_notes
+    PV->>LLM: one generate call with the rendered prompt
+    PV->>DB: store summary, stage pending_review
+  end
+  U->>API: edit (PUT /summary), approve / approve-all
+  API->>DB: stage approved
+  U->>API: POST /api/playlists/{id}/publish
+  API->>GD: ensure_authorized (409 DRIVE_AUTH_REQUIRED if not)
+  API->>DB: status publishing; worker.enqueue_publish
+  API-->>U: 202 accepted (UI polls the playlist status)
+  W->>PUB: run(playlist)
+  PUB->>GD: folder, index Doc, video Docs
+  PUB->>DB: ids as each object exists; videos published; status published / publish_failed
 ```
 
-Implementation: `GeminiQuizProvider` — new `genai.Client` per call (thread-safety), token counts from `usage_metadata`.
+Every stage is written before and after its side effect, so a crash leaves a stage that crash
+recovery understands (section 6). Re-submitting a known playlist URL re-syncs: existing rows
+keep their stage and position, new videos are appended after the current maximum position.
 
-### 3.6 Cache Port
+## 4. Per-video state machine
 
-```python
-class CachePort(Protocol):
-    async def get(self, key: CacheKey) -> bytes | None: ...
-    async def set(self, key: CacheKey, value: bytes, ttl: timedelta) -> None: ...
-    async def delete(self, key: CacheKey) -> None: ...
-    async def exists(self, key: CacheKey) -> bool: ...
-    async def touch(self, key: CacheKey) -> None: ...
+`src/domain/services/stage_machine.py` defines the strict edges that `assert_transition`
+checks. `failed -> queued` is allowed only with `is_retry=True`. Same-stage writes are always
+allowed. Several moves are deliberate shortcuts written directly through
+`PlaylistRepository.update_stage` (or a dedicated repository method) without
+`assert_transition`; they are dashed below.
 
-@dataclass(frozen=True)
-class CacheKey:
-    namespace: str
-    version: str
-    content_hash: str
-    params_hash: str
+```mermaid
+stateDiagram-v2
+  [*] --> queued : ingest / re-sync append
+  queued --> fetching_transcript : no stored transcript
+  fetching_transcript --> transcript_ready : transcript stored (retry_count reset to 0)
+  transcript_ready --> generating_notes
+  generating_notes --> pending_review : summary stored
+  pending_review --> approved : approve / approve-all
+  approved --> published : publish
 
-    def __str__(self) -> str:
-        return f"{self.namespace}:{self.version}:{self.content_hash}:{self.params_hash}"
+  fetching_transcript --> failed : classified error
+  transcript_ready --> failed : classified error
+  generating_notes --> failed : classified error
+  failed --> queued : retry (automatic when next_retry_at is due, or manual Retry)
+
+  note right of queued
+    Shortcuts (direct writes, not assert_transition):
+    queued -> transcript_ready: stored transcript reused (skip fetch)
+    transcript_ready -> queued: transcript was cleaned up, fetch again
+    transcript_ready -> pending_review: summary already exists (skip-completed)
+    queued -> pending_review: duplicate row copies the first occurrence's summary
+    queued -> failed: duplicate whose first occurrence failed with no retry pending
+    pending_review / approved / published / failed -> queued: regenerate (regen_requested=1)
+    any -> queued: reprocess playlist (transcripts and summaries deleted)
+    fetching_transcript / transcript_ready / generating_notes -> queued: crash recovery
+  end note
 ```
 
-Implementation: `SqlCacheAdapter` — zlib-compressed JSON, TTL check, hit_count tracking, default `run_id="global-cache"`.
+Notes on the shortcuts:
 
-### 3.7 Usage Ledger Port
+- **Regenerate** (`POST /api/videos/{id}/regenerate`) is allowed from `pending_review`,
+  `approved`, `published` and `failed` (`REGENERATE_FROM`). The video is re-queued with
+  `regen_requested=1`; the worker reuses the stored transcript (or re-fetches it), generates new
+  notes, then `repo.regenerate` overwrites the summary, clears approval and publish flags,
+  keeps `drive_doc_id` and writes `pending_review`.
+- **Duplicates** are only picked up once their first occurrence is `pending_review`, `approved`,
+  `published`, or `failed` with `next_retry_at IS NULL`. A duplicate marked failed gets the
+  reason "Same video as #N, which failed: ..."; Retry on it re-checks.
+- **Edits** (`PUT /api/videos/{id}/summary`) are allowed in `pending_review`, `approved` and
+  `published` and do not change the stage; they set `summaries.edited`.
+- The worker never processes rows with `removed_upstream = 1`; Retry and Regenerate refuse them.
 
-```python
-class UsageLedgerPort(Protocol):
-    async def record(self, record: UsageRecord) -> None: ...
-    async def aggregate(self, *, provider: str | None = None, model: str | None = None,
-                        operation: str | None = None, since: datetime | None = None,
-                        until: datetime | None = None, cache_status: bool | None = None) -> UsageAggregate: ...
-    async def recent(self, limit: int = 100) -> list[UsageRecord]: ...
+## 5. Failures and retries
 
-@dataclass(frozen=True)
-class UsageRecord:
-    timestamp: datetime
-    provider: str
-    operation: str
-    model: str
-    input_tokens: int
-    output_tokens: int
-    total_tokens: int
-    cost_usd: float
-    cache_hit: bool
-    run_id: str | None = None
-    video_id: str | None = None
+### Classification
 
-@dataclass(frozen=True)
-class UsageAggregate:
-    total_requests: int
-    total_input_tokens: int
-    total_output_tokens: int
-    total_tokens: int
-    total_cost_usd: float
-    cache_hit_rate: float
+Every failure is a `FailureType` with a fixed `FailureKind` (`FAILURE_KINDS` in
+`models/playlist.py`):
+
+| Kind | Types | Behaviour |
+|---|---|---|
+| transient | `rate_limited`, `network_error`, `provider_error`, `output_malformed`, `drive_error` | Retried automatically with backoff (video types) or in place (Drive). |
+| permanent | `video_private`, `video_deleted`, `age_restricted`, `region_blocked`, `members_only`, `transcripts_disabled`, `no_usable_language`, `transcript_too_large`, `config_error`, `internal_error`, `playlist_unavailable`, `invalid_url` | Failed at once with a readable reason; only a manual action helps. |
+
+Where the type comes from:
+
+- **yt-dlp** errors go through `failure_classifier.classify_transcript_error`: ordered regex rules,
+  first match wins. Rate limiting (`HTTP Error 429`, "too many requests", "rate-limited",
+  "try again later") is checked first because a throttled IP gets "Video unavailable ... try
+  again later", which would otherwise read as a deleted video. Anything unrecognised is
+  `provider_error` (transient).
+- **LLM** errors go through `notes_base.classify_provider_exception`: rejected key (401/403, or
+  key-invalid text such as Gemini's HTTP 400 `API_KEY_INVALID`), 402 and 404 become
+  `NotesGeneratorConfigError` (recorded as permanent `config_error`); "prompt too long" text is
+  `transcript_too_large`; 429 is `rate_limited`; 5xx is `provider_error`; content-filter text is
+  `output_malformed`; timeouts and connection errors are `network_error`. A missing key or
+  prompt file is also a `config_error`. Before calling, `check_input_size` estimates tokens as
+  characters / 4 and refuses a transcript over `gemini_input_token_limit` /
+  `openrouter_input_token_limit` (`transcript_too_large`, never truncated).
+  Output checks (`validate_notes`, `check_finish_reason`) raise `output_malformed` for empty,
+  too-short, section-less, cut-off or blocked responses.
+- Any other exception in `ProcessVideoUseCase` is a permanent `internal_error` (traceback logged).
+
+### Automatic retry with backoff
+
+```mermaid
+flowchart TD
+  E["PipelineError / ConfigurationError in ProcessVideoUseCase"] --> K{"transient and<br/>retry_count < max_auto_retries?"}
+  K -- yes --> S["stage failed, next_retry_at = now + compute_delay(retry_count + 1)<br/>retry_count += 1"]
+  S --> D["worker: list_transient_due picks it up<br/>when next_retry_at <= now"]
+  D --> Q["failed -> queued (is_retry) and run again"]
+  Q --> E
+  K -- "no, permanent" --> P["stage failed, next_retry_at NULL"]
+  K -- "no, transient, budget used" --> X["stage failed, failure_kind stays transient,<br/>next_retry_at NULL (retries_exhausted)<br/>reason + ' Automatic retries are used up; press Retry to try again.'"]
+  P --> M["manual Retry: POST /api/videos/{id}/retry<br/>clears failure, retry_count = 0, run_token + 1, stage queued"]
+  X --> M
 ```
 
-Implementation: `SqlUsageLedger` — provides both protocol and legacy (`record_usage`, `get_aggregate`, `get_by_provider`, `get_by_operation`, `get_cache_stats`).
+`src/domain/services/backoff.py::compute_delay(attempt, base, cap, jitter_ratio=0.2)`:
 
-### 3.8 Run Repository Port
-
-```python
-class RunRepositoryPort(Protocol):
-    async def create_run(self, *, run_id: str, cache_key: str | None, search_query: str, normalized_query: str,
-                         max_videos: int, transcript_language: str, is_fallback: bool) -> str: ...
-    async def get_run(self, run_id: str) -> dict | None: ...
-    async def list_runs(self) -> list[dict]: ...
-    async def latest_run(self) -> dict | None: ...
-    async def set_run_status(self, run_id: str, status: str, error: str | None = None) -> None: ...
-    async def set_videos(self, run_id: str, videos: list[dict]) -> None: ...
-    async def get_videos(self, run_id: str) -> list[dict]: ...
-    async def videos_state_hash(self, run_id: str) -> str: ...
-    async def upsert_transcripts(self, run_id: str, transcripts: list[dict], settings: dict | None = None) -> None: ...
-    async def get_transcripts(self, run_id: str) -> list[dict]: ...
-    async def transcripts_state_hash(self, run_id: str) -> str: ...
-    async def upsert_summaries(self, run_id: str, summaries: list[dict], settings: dict | None = None) -> None: ...
-    async def get_summaries(self, run_id: str) -> list[dict]: ...
-    async def summaries_state_hash(self, run_id: str) -> str: ...
-    async def set_comparison(self, run_id: str, rows: list[dict], insights_report: dict, recommendations: dict,
-                             settings: dict | None = None, status: str = "succeeded", error: str | None = None) -> None: ...
-    async def get_comparison(self, run_id: str) -> tuple[list[dict], dict, dict] | None: ...
-    async def upsert_assignments(self, run_id: str, assignments: list[dict], settings: dict | None = None) -> None: ...
-    async def get_assignments(self, run_id: str) -> list[dict]: ...
-    async def set_quiz_result(self, run_id: str, result: dict, settings: dict | None = None) -> None: ...
-    async def get_quiz_result(self, run_id: str) -> dict | None: ...
-    async def recompute_run_hashes(self, run_id: str) -> None: ...
-    async def mark_stale_derived(self, run_id: str) -> None: ...
-    async def purge_expired(self, retention_days: int = 90) -> dict: ...
-    async def stats(self) -> dict: ...
-    async def find_cached_run(self, cache_key: str) -> dict | None: ...
-    async def put_cache_entry(self, cache_key: str, kind: str, run_id: str, normalized_query: str, settings: dict, ttl_days: int) -> None: ...
-    async def touch_cache_hit(self, cache_key: str) -> None: ...
+```
+delay = min(cap, base * 2 ** (attempt - 1))
+delay += uniform(0, 0.2 * delay)        # jitter, so the result can exceed cap by up to 20%
 ```
 
-Implementation: `SqlRunRepository` — delegates to `backend.storage.repository.RunRepository` (no logic rewrite).
+With the defaults (`backoff_base_seconds: 5`, `backoff_cap_seconds: 300`) the waits before
+automatic retries 1-4 are about 5, 10, 20 and 40 seconds (each plus up to 20%). The delay is
+persisted as `next_retry_at` (UTC ISO timestamp), so a restart keeps the schedule.
 
----
+**Per-phase budget.** `retry_count` is reset to 0 when the transcript is stored
+(`update_stage(..., reset_retries=True)`), so the notes phase starts with a full
+`max_auto_retries` budget instead of inheriting what YouTube throttling used up. Each phase
+therefore makes at most `1 + max_auto_retries` attempts. An exhausted transient failure has
+`next_retry_at IS NULL` and is never picked up again by `list_transient_due`; the API exposes
+this as `retries_exhausted: true` and `auto_retry: false`.
 
-## 4. Cache Model Details
+**Drive retries** are separate and in place: `GoogleDrivePublisher._retry_call` retries HTTP
+429, 5xx, 403 with `rateLimitExceeded`/`userRateLimitExceeded`, network errors and retryable
+token-refresh errors up to `drive_max_retries` times (default 3, so up to 4 attempts per call),
+with `compute_delay(attempt, drive_backoff_base_seconds, drive_backoff_cap_seconds)`. A
+permanent refresh failure (`invalid_grant`) raises `DriveAuthorizationRequired` immediately.
+Anything else fails the publish with a redacted `drive_error` reason.
 
-### 4.1 Key Construction
+## 6. Publishing to Google Drive
 
-`CacheKeyBuilder.VERSION = "v2"` — methods: `transcript_key`, `summary_key`, `comparison_key`, `assignment_key`, `quiz_key`, `search_key`. Each builds a `CacheKey(namespace, version, content_hash, params_hash)`.
+```mermaid
+sequenceDiagram
+  participant API as POST /publish
+  participant UC as PublishPlaylistUseCase
+  participant W as PlaylistWorker
+  participant P as GoogleDrivePublisher
+  participant G as Drive / Docs API
+  participant DB as SQLite
 
-### 4.2 TTL Policy
-
-| Namespace | TTL | Invalidation Trigger |
-|-----------|-----|---------------------|
-| `transcript` | 30 days | Video URL changes, language changes, manual refresh |
-| `summary` | 90 days | Prompt version changes, model changes, transcript changes |
-| `comparison` | 90 days | Input summaries change, prompt version changes, model changes |
-| `assignment` | 90 days | Input summary changes, prompt version changes, model changes |
-| `quiz` | 30 days | Transcript changes, prompt version changes, model changes |
-| `search` | 7 days | Query changes, max_videos changes, language changes |
-
-### 4.3 Storage Format
-
-SQLite `cache_entries` extended with `namespace`, `version`, `content_hash`, `params_hash`, `value` (zlib-compressed JSON). Legacy rows remain readable.
-
----
-
-## 5. Usage Ledger Model Details
-
-### 5.1 SQL Schema (Migration 0002 — APPLIED ✅)
-
-```sql
-CREATE TABLE IF NOT EXISTS usage_ledger (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    request_id TEXT NOT NULL,
-    run_id TEXT,
-    timestamp TEXT NOT NULL,
-    provider TEXT NOT NULL,
-    model TEXT NOT NULL,
-    operation TEXT NOT NULL,
-    input_tokens INTEGER NOT NULL DEFAULT 0,
-    output_tokens INTEGER NOT NULL DEFAULT 0,
-    total_tokens INTEGER NOT NULL DEFAULT 0,
-    estimated_cost_usd REAL NOT NULL DEFAULT 0.0,
-    currency TEXT NOT NULL DEFAULT 'USD',
-    latency_ms INTEGER NOT NULL DEFAULT 0,
-    success INTEGER NOT NULL DEFAULT 1,
-    error_category TEXT,
-    cache_hit INTEGER NOT NULL DEFAULT 0,
-    cache_key TEXT,
-    cache_namespace TEXT,
-    retry_count INTEGER NOT NULL DEFAULT 0,
-    metadata TEXT,
-    created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage_ledger(timestamp);
-CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_ledger(provider);
-CREATE INDEX IF NOT EXISTS idx_usage_model ON usage_ledger(model);
-CREATE INDEX IF NOT EXISTS idx_usage_operation ON usage_ledger(operation);
-CREATE INDEX IF NOT EXISTS idx_usage_run_id ON usage_ledger(run_id);
-CREATE INDEX IF NOT EXISTS idx_usage_request_id ON usage_ledger(request_id);
+  API->>P: ensure_authorized() (refreshes token; 409 DRIVE_AUTH_REQUIRED on invalid_grant / no token)
+  API->>DB: begin_publish: status publishing (409 CONFLICT if already publishing)
+  API-->>API: 202, worker.enqueue_publish
+  W->>UC: run(playlist)
+  UC->>UC: select entries: approved videos; published videos edited since publish or without drive_doc_id; rename-only entries if pad width grew
+  UC->>P: publish_playlist(entries, index titles, stored ids, progress sink)
+  alt stored folder id
+    P->>G: file_state(folder)
+    G-->>P: missing / trashed raises DriveFolderMissing
+    Note over UC: forget folder, index and all Doc ids, publish again into a new folder
+  else no folder id
+    P->>G: create folder tagged appProperties {atlasKind: playlist-folder, atlasPlaylist}
+    P->>DB: folder_created -> drive_folder_id
+  end
+  opt no index Doc id
+    P->>G: find tagged index Doc, else create empty Doc
+    P->>DB: index_doc_created -> drive_index_doc_id
+  end
+  opt index text changed (index_digest) or new index Doc
+    P->>G: replace index Doc body
+    P->>DB: index_written -> index_digest
+  end
+  loop entries in position order
+    alt stored drive_doc_id and file_state ok
+      P->>G: replace Doc body in place (or rename only)
+    else missing, trashed or never created
+      P->>G: find Doc tagged {atlasKind: video, atlasVideo}, else create empty Doc
+      P->>DB: doc_created -> drive_doc_id
+      P->>G: replace body (full-body replace, safe to repeat)
+    end
+    P->>DB: doc_published -> drive_doc_id, mark_published (published_digest)
+  end
+  UC->>DB: finish_publish: published, or publish_failed + redacted last_publish_error
 ```
 
-### 5.2 Token Counting & Cost
+Idempotency and resume:
 
-- OpenAI/OpenRouter: `response.usage.*` when available
-- Gemini: `response.usage_metadata.*` when available
-- Cache hit: `input_tokens=0, output_tokens=0, cache_hit=True`
-- Cost calculator not yet wired (adapters emit `cost_usd=0.0`)
+- **Ids are persisted the moment each object exists** (progress sink), before anything else can
+  fail. A failed publish is resumed by publishing again: stored ids are reused, nothing is
+  created twice.
+- **Create and format are separate retried steps.** A failure while writing a Doc's content
+  leaves a Doc whose id is already stored; the next attempt updates it.
+- **Private tags cover lost responses.** Every created object carries `appProperties`
+  (`atlasKind`, `atlasPlaylist` / `atlasVideo`). On a retry of a create (and on the first attempt
+  for Docs) the publisher searches for the tagged object and adopts it instead of creating a
+  duplicate. The folder's first attempt does not search, so a new playlist never adopts the
+  folder of a deleted playlist that had the same database id.
+- **Re-publish in place.** Reprocess and regenerate keep `drive_folder_id`,
+  `drive_index_doc_id` and `drive_doc_id`, so the next publish rewrites the same Docs.
+- **Deleted in Drive.** A stored folder that is missing or trashed makes the whole playlist
+  publish again into a new folder (only approved/published videos qualify). A stored video Doc
+  that is missing or trashed is re-created. The stored index Doc is not state-checked.
+- **Naming.** `doc_naming.doc_name`: the 1-based position zero-padded to the digit count of the
+  largest position (`7 - Title` in a 9-video playlist, `07 - Title` with 12 videos,
+  `007 - Title` with 120), and the same text as Heading 1 in the Doc.
+  The width is stored in `pad_width` and never shrinks; when it grows, already-published Docs
+  are renamed (padding only).
+- **Remaining window.** Between Drive returning a new id and the database write there is a short
+  window; a crash there is covered for Docs by the tag search, not for the folder.
+- **Background run.** `run()` never raises; the playlist ends `published` or `publish_failed`.
+  One publish per playlist runs at a time (`begin_publish` is an atomic conditional update and
+  the worker tracks running publishes).
 
----
+## 7. Startup and crash recovery
 
-## 6. API Compatibility Assessment
+`python -m backend` (`backend/__main__.py`):
 
-**No breaking changes.** All existing endpoint paths, methods, request/response shapes, and status codes preserved.
+1. `load_settings()` validates `config.yaml` and the environment; on any problem it prints the
+   list and exits with status 2.
+2. `port_problem()` binds a probe socket (with `SO_EXCLUSIVEADDRUSE` on Windows); if the port is
+   taken it prints one line and exits with status 1. `--check` stops here and prints
+   "Configuration OK; ... is free."
+3. Logging is configured and uvicorn starts `backend.main:app`. On import, `backend.main`
+   validates settings again and configures logging; the lifespan builds the usage ledger and
+   repository (which runs pending migrations) and starts the worker.
 
-### Preserved Contracts (backend/ legacy transport, unchanged)
+`PlaylistWorker.start()`:
 
-| Endpoint | Method | Request Shape | Response Shape | Status Codes |
-|----------|--------|---------------|----------------|--------------|
-| `/api/pipeline/search` | POST | `SearchRequest` | `PipelineActionResponse` | 200, 400, 404, 502 |
-| `/api/runs/{id}/transcripts` | POST | `ArtifactGenerationRequest` | `PipelineActionResponse` | 200, 400, 404, 502 |
-| `/api/runs/{id}/summaries` | POST | `ArtifactGenerationRequest` | `PipelineActionResponse` | 200, 400, 404, 502 |
-| `/api/runs/{id}/comparison` | POST | `ArtifactGenerationRequest` | `PipelineActionResponse` | 200, 400, 404, 502 |
-| `/api/runs/{id}/assignments` | POST | `ArtifactGenerationRequest` | `PipelineActionResponse` | 200, 400, 404, 502 |
-| `/api/runs` | GET | — | `RunListResponse` | 200, 404 |
-| `/api/runs/latest` | GET | — | `RunManifest` | 200, 404 |
-| `/api/runs/{id}` | GET | — | `RunManifest` | 200, 404 |
-| `/api/runs/{id}/videos` | GET | — | `SearchArtifactResponse` | 200, 404 |
-| `/api/runs/{id}/transcripts` | GET | — | `TranscriptArtifactResponse` | 200, 404 |
-| `/api/runs/{id}/summaries` | GET | — | `SummaryArtifactResponse` | 200, 404 |
-| `/api/runs/{id}/comparison` | GET | — | `ComparisonArtifactResponse` | 200, 404 |
-| `/api/runs/{id}/assignments` | GET | — | `AssignmentArtifactResponse` | 200, 404 |
-| `/api/quiz/playlist` | POST | `PlaylistQuizRequest` | `PlaylistQuizStatusResponse` | 200, 400, 401, 502 |
-| `/api/quiz/playlist/stream` | POST | `PlaylistQuizRequest` | SSE | 200, 400, 401, 502 |
-| `/api/quiz/drive-status` | GET | — | `DriveStatusResponse` | 200 |
-| `/api/quiz/credentials` | POST | UploadFile | `{status, message}` | 200, 400 |
-| `/api/quiz/auth` | POST | — | `{status, message}` | 200, 400 |
+- `recover_in_flight_videos()` moves every `fetching_transcript`, `transcript_ready` and
+  `generating_notes` row to `queued` and logs "Crash recovery reset N in-flight videos to
+  queued". Stored transcripts and summaries are reused (skip-completed), so finished work is not
+  redone.
+- Playlists left `publishing` are re-queued for publish ("Crash recovery re-queued an
+  interrupted publish"); publishing is idempotent, so resuming is safe.
+- Failed videos with a future `next_retry_at` keep their schedule.
 
-### New Endpoint (Additive — IMPLEMENTED ✅)
+Shutdown (Ctrl+C / SIGTERM): the lifespan calls `worker.stop()`, which cancels the loop, waits up
+to `worker_shutdown_timeout_seconds` for running jobs and cancels the rest; their videos are
+recovered on the next start.
 
-| Endpoint | Method | Response | Description |
-|----------|--------|----------|-------------|
-| `/api/usage` | GET | `UsageAggregateResponse` | Aggregated usage/cost data with optional filters |
+## 8. Concurrency model
 
-Router: `src/transport/http/fastapi/routers/usage.py`; schemas: `src/transport/http/fastapi/schemas/usage.py`. Not yet mounted in `backend/main.py` — Wave C.
+- **One process, one event loop.** The worker runs inside the uvicorn process as asyncio tasks
+  (`backend/main.py` lifespan). There is no separate worker process or queue service.
+- **Bounded video work.** At most `max_concurrent_videos` `ProcessVideoUseCase` tasks run at
+  once. The loop wakes on `worker.wake()` (new playlist, retry, regenerate, a finished task) or
+  every `worker_poll_interval_seconds`. Due transient retries are dispatched before queued
+  videos. Publish jobs are separate tasks, not counted against `max_concurrent_videos`.
+- **Blocking work in threads.** SQLite access, yt-dlp, the YouTube Data API client and every
+  Drive/Docs call run in `asyncio.to_thread`. The LLM SDKs are called through their async
+  clients. The interactive OAuth consent runs in a thread behind a lock (one consent at a time,
+  5-minute timeout), so the API stays responsive while it waits for the browser.
+- **SQLite.** Each repository call opens its own connection with `journal_mode=WAL`,
+  `foreign_keys=ON` and `busy_timeout=30000`; writes are short `BEGIN IMMEDIATE` transactions.
+  WAL lets readers (UI polling) run while one writer commits.
+- **Thread-safety of Google clients.** The YouTube provider builds a new service per call and the
+  Drive exporter keeps per-thread services, because `httplib2` is not thread-safe.
+- **Ingest** holds an `asyncio.Lock` per playlist id, so two submissions of the same URL do not
+  race on positions.
+- **Stale writes** are prevented by `run_token` (section 2), not by locks.
 
----
+## 9. HTTP surface
 
-## 7. Data Migration Strategy
+| Route | Purpose |
+|---|---|
+| `POST /api/playlists` | Ingest (201) or re-sync (200) a playlist URL |
+| `GET /api/playlists`, `GET /api/playlists/{id}`, `GET /api/playlists/{id}/videos` | List, detail with `stage_counts`, paged videos (`stage`, `search`, `page`, `page_size`) |
+| `POST /api/playlists/{id}/process` | Wake the worker (202) |
+| `POST /api/playlists/{id}/reprocess` | Delete transcripts and summaries, re-queue every video (202) |
+| `POST /api/playlists/{id}/approve-all` | Approve every `pending_review` video |
+| `POST /api/playlists/{id}/publish` | Queue a publish (202) |
+| `DELETE /api/playlists/{id}`, `DELETE /api/playlists/{id}/transcripts` | Delete a playlist; clear its transcripts |
+| `GET /api/videos/{id}`, `GET/PUT /api/videos/{id}/summary` | Video state; read or edit notes |
+| `POST /api/videos/{id}/approve`, `/retry`, `/regenerate` | User actions (regenerate is 202) |
+| `DELETE /api/videos/{id}/transcript` | Clear one transcript (text and subtitle file) |
+| `GET /api/drive/status`, `POST /api/drive/credentials`, `POST /api/drive/auth` | Drive state, upload the OAuth client JSON, run consent |
+| `GET /api/usage` | Usage ledger aggregates |
+| `GET /api/health`, `GET /api/diagnostics` | Liveness; readiness checks and the last 50 warnings/errors |
 
-### No Data Loss
+Errors use `{code, message, details}` with messages passed through the secret redactor:
+400 `INVALID_URL`, 404 `PLAYLIST_UNAVAILABLE` / `NOT_FOUND`, 409 `CONFLICT` / `INVALID_STATE` /
+`DRIVE_AUTH_REQUIRED`, 422 `VALIDATION_ERROR`, 503 `CONFIG_MISSING` (and 503 for a transient
+pipeline error such as `RATE_LIMITED` during ingest). Unknown `/api/*` paths get the JSON 404
+envelope; other GETs are served from `frontend/dist` with an SPA fallback (`backend/spa.py`).
+The UI polls; there are no websockets.
 
-1. **Existing SQLite database** (`data/atlas.sqlite3`) — preserved; migration `0002` appends `usage_ledger` + extends `cache_entries` ✅ applied
-2. **Existing artifact files** (`data/artifacts/`, `pipeline_output_*/`) — preserved; `ArtifactFileStore` reads/writes under `artifact_root`
-3. **Existing cache entries** — preserved; legacy rows readable (new columns nullable)
+## 10. Adding an LLM provider
 
-### Applied Migrations
+Three places, plus two optional ones:
 
-- `0001_initial` — original schema
-- `0002_usage_ledger_and_extended_cache` — `usage_ledger` table + 6 indexes; `ALTER TABLE cache_entries ADD COLUMN namespace/version/content_hash/params_hash/value`
-
----
-
-## 8. Configuration
-
-| Variable | Purpose | Required |
-|----------|---------|----------|
-| `OPENROUTER_API_KEY` | OpenAI API via OpenRouter | Yes |
-| `YOUTUBE_API_KEY` | YouTube Data API | Yes |
-| `GEMINI_API_KEY` | Google AI Studio / Gemini | Yes |
-| `ATLAS_DB_PATH` | SQLite database path | No (default: `data/atlas.sqlite3`) |
-| `ATLAS_ARTIFACT_ROOT` | Artifact storage root | No (default: `data/artifacts`) |
-| `ATLAS_CACHE_TTL_DAYS` | Default cache TTL | No (default: 30) |
-| `ATLAS_GOOGLE_CREDS_PATH` | Google OAuth credentials JSON | No (default: `credentials.json`) |
-| `ATLAS_GOOGLE_TOKEN_PATH` | Google OAuth token JSON | No (default: `token.json`) |
-| `ATLAS_DEV_SHUTDOWN_TOKEN` | Dev server shutdown token | No |
-| `ATLAS_RETENTION_DAYS` | Artifact retention | No (default: 90) |
-
----
-
-## 9. Testing Strategy
-
-> **Current state:** no tests exist yet for new layers. Test suite to be added alongside Waves C–D.
-
-### Unit Tests
-- Domain models and services (pure Python)
-- Cache key builder determinism
-- Usage ledger aggregation correctness
-- Comparison inference logic
-
-### Integration Tests
-- Each adapter with real/fixture external systems:
-  - `SqlRunRepository`, `SqlCacheAdapter` with in-memory SQLite
-  - LLM adapters with recorded HTTP fixtures (httpx)
-  - `YtDlpTranscriptProvider` with mock responses
-
-### API Tests
-- Existing endpoint contracts verified (pytest + httpx)
-- New `/api/usage` endpoint tested
-- SSE streaming endpoint tested
-
----
-
-## 10. Performance Targets
-
-| Path | Current Behavior | Target After Refactor |
-|------|------------------|-----------------------|
-| Repeated summary request | Re-calls OpenAI every time | Cache hit → zero LLM calls, <50ms |
-| Repeated comparison request | Re-calls OpenAI N times | Cache hit → zero LLM calls, <100ms |
-| Repeated transcript request | Re-runs yt-dlp | Cache hit → zero network I/O, <10ms |
-| Repeated assignment request | Re-calls OpenAI N times | Cache hit → zero LLM calls, <50ms |
-| OpenAI client creation | New client per call | Reuse via DI |
-| Gemini client creation | New client per request | Reuse via DI |
-| Config loading | Reloads YAML on first call | Single load at startup |
-
----
-
-## 11. Migration Checklist — **ALL COMPLETED ✅**
-
-- [x] Create `docs/ARCHITECTURE.md` (this document)
-- [x] Define all domain models and ports (`src/domain/`, 18 files)
-- [x] Implement `SqlRunRepository` + `SqlUsageLedger` (`src/infrastructure/storage/sql.py`)
-- [x] Implement `SqlCacheAdapter` with content-derived keys (`src/infrastructure/cache/sql_cache.py`)
-- [x] Implement OpenAI adapters with retry/backoff and instrumentation (`src/infrastructure/llm/openai/`)
-- [x] Implement Gemini adapter with retry/backoff and instrumentation (`src/infrastructure/llm/gemini/`)
-- [x] Implement yt-dlp transcript provider (`src/infrastructure/transcript/ytdlp/`)
-- [x] Implement YouTube search/playlist adapters (`src/infrastructure/youtube/`)
-- [x] Implement Google Drive exporter + ArtifactFileStore (`src/infrastructure/google/`, `src/infrastructure/storage/filesystem.py`)
-- [x] Add `/api/usage` endpoint + schemas (`src/transport/http/fastapi/routers/usage.py`, `schemas/usage.py`)
-- [x] Apply migration `0002_usage_ledger_and_extended_cache`
-- [x] Delete `app.py` (Gradio legacy)
-- [x] Remove stale build artifacts (`src/atlas.egg-info/`, all `__pycache__/`)
-- [x] Make Google OAuth paths configurable (`ATLAS_GOOGLE_CREDS_PATH`, `ATLAS_GOOGLE_TOKEN_PATH`)
-- [x] **Implement application use cases (Wave B)** — 6 use cases + DTOs + ports
-- [x] **Remove `os.environ[...]` mutations** from `backend/services/pipeline_service.py` + `backend/services/quiz_service.py`
-- [x] **Implement `src/config/` layer (settings, prompts, models)** — Wave C ✅
-- [x] **Slim FastAPI routers to use application layer (Wave C)** — ✅ moved to `src/transport/http/fastapi/routers/`
-- [x] **Mount `/api/usage` router into app + wire DI container (Wave C)** — ✅ in `backend/main.py`
-- [x] **Add correlation-ID middleware + error mapping (Wave C)** — ✅ `middleware.py`, `errors.py`
-- [x] **Delete legacy `src/*.py` modules** — ✅ all 7 removed
-- [x] **Add frontend usage dashboard (Wave D)** — ✅ `frontend/src/features/usage/usage-dashboard.tsx`
-- [x] **Wire `CostCalculator` into ledger** — ✅ `src/infrastructure/llm/cost.py`, wired in OpenAI & Gemini adapters
-- [ ] Add tests (domain/cache/usage/API) — *future*
-- [ ] Run `uv run ruff check .` — *future*
-- [ ] Run `uv run pytest` — *future*
-- [x] Verify `pipeline_output_*` artifacts intact
-- [x] Verify `data/atlas.sqlite3` migrated successfully
-
----
-
-## 12. Implementation Plan Summary
-
-### Wave A — Foundation (✅ COMPLETED)
-- Domain models, interfaces, exceptions
-- Infrastructure adapters (LLM, transcript, storage, cache, YouTube, Google)
-- Migration `0002`, `/api/usage` router, cleanup
-
-### Wave B — Application Layer (✅ COMPLETED)
-- `src/application/dto/` — 6 DTO modules
-- `src/application/ports/provider_ports.py` — domain interface re-exports
-- `src/application/use_cases/` — 6 use cases orchestrating via ports
-- Removed `os.environ` mutations from backend services
-
-### Wave C — Transport Slimming (✅ COMPLETED)
-1. Implemented `src/config/` (settings, prompts, models)
-2. Wired DI in `backend/main.py` → inject use cases into FastAPI via `dependencies.py`
-3. Replaced `PipelineService`/`QuizService`/`RunService` calls with use cases (`SearchPipelineUseCase`, etc.)
-4. Mounted `/api/usage` router
-5. Added correlation-ID middleware (`middleware.py`), error mapping (`errors.py`)
-6. Deleted legacy `src/*.py` modules (all 7)
-7. Moved artifact readers to `src/application/artifact_readers/`
-8. Moved schemas/routers to `src/transport/http/fastapi/`
-
-### Wave D — Frontend & Polish (✅ COMPLETED)
-- Frontend usage dashboard (`frontend/src/features/usage/usage-dashboard.tsx`)
-- Wired `CostCalculator` into ledger (`src/infrastructure/llm/cost.py`)
-- Frontend builds successfully (`npm run build`)
-- Backend loads successfully (25 routes)
-
-### Future Work
-- Comprehensive test suite (unit/integration/API)
-- Lint + typecheck (`ruff`, `mypy`)
-- Pytest integration
+1. **Config** (`src/config/settings.py`): add the name to `NOTES_PROVIDERS` (validation), and add
+   any provider-specific fields (for example `<name>_model`, `<name>_api_key_env`,
+   `<name>_input_token_limit`) to `AtlasSettings` and `src/configs/config.yaml`. Every field
+   gets an `ATLAS_<FIELD>` override automatically; add an `ENV_ALIASES` entry only if you want a
+   short name.
+2. **One adapter** under `src/infrastructure/llm/<name>/notes.py` implementing
+   `NotesGeneratorPort.generate_notes(*, title, transcript) -> GeneratedNotes`. Reuse
+   `notes_base`: `NotesPromptSource` (prompt file and version), `render_prompt`,
+   `check_input_size`, `classify_provider_exception`, `check_finish_reason`, `validate_notes`,
+   `request_timeout_seconds`. Make exactly one call (disable SDK retries), raise
+   `NotesGeneratorConfigError` for a missing key, and record a `UsageRecord`.
+3. **One factory branch** in `src/infrastructure/llm/factory.py::build_notes_generator`, importing
+   the adapter inside the branch so no SDK is imported unless selected.
+4. Optional: prices in `src/infrastructure/llm/cost.py` (unknown providers cost 0.0), and the key
+   check in `backend/services/diagnostics.py::check_llm_key`, which currently knows only
+   `openrouter` and treats every other provider as Gemini.
