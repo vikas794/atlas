@@ -126,8 +126,15 @@ class YouTubePlaylistProvider:
                     FailureType.PLAYLIST_UNAVAILABLE,
                     "The playlist was not found or is private.",
                 )
-            return ProviderError(f"YouTube {what} failed (HTTP {status}): {detail}", provider="youtube")
-        return ProviderError(f"YouTube {what} failed: {detail}", provider="youtube")
+            # str(HttpError) embeds the request URL; the API's own reason is what a user
+            # can act on, and it is what reaches the HTTP error body.
+            reason = redact_text(str(getattr(exc, "reason", "") or ""), self.api_key).strip()
+            return ProviderError(
+                f"YouTube {what} failed (HTTP {status}): {reason or 'unexpected error'}",
+                provider="youtube",
+            )
+        first_line = detail.strip().splitlines()[0] if detail.strip() else type(exc).__name__
+        return ProviderError(f"YouTube {what} failed: {first_line[:200]}", provider="youtube")
 
     def fetch_playlist_videos(
         self, playlist_id: str, max_videos: int | None = None

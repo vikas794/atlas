@@ -208,6 +208,19 @@ async def test_http_errors_never_leak_the_api_key(
     assert excinfo.value.__suppress_context__ is True
 
 
+async def test_a_server_error_message_carries_no_request_url() -> None:
+    stub = StubYouTube([{"items": []}])
+    stub.error = http_error(500, "backendError")
+    provider, _ = make_provider(stub)
+
+    with pytest.raises(ProviderError) as excinfo:
+        await asyncio.to_thread(provider.fetch_playlist_videos, "PL1")
+
+    message = str(excinfo.value)
+    assert "HTTP 500" in message
+    assert "googleapis.com" not in message
+
+
 async def test_an_unknown_playlist_is_classified_playlist_unavailable() -> None:
     stub = StubYouTube([{"items": []}])
     stub.error = http_error(404, "playlistNotFound")
