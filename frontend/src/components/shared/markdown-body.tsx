@@ -59,7 +59,7 @@ export function MarkdownBody({ markdown, className }: { markdown: string; classN
                 ) : null}
                 <pre
                   className={cn(
-                    'overflow-x-auto rounded border border-border bg-surface-muted p-3 pt-8',
+                    'overflow-x-auto rounded border border-border bg-surface-muted p-3 pt-6',
                     'font-mono text-code text-text',
                     preClassName,
                   )}
