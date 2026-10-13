@@ -246,15 +246,6 @@ def classify_playlist_error(detail: str) -> FailureType:
     return classify_transcript_error(detail)
 
 
-def classify_drive_error(detail: str) -> FailureType:
-    """Classify a Google Drive error.
-
-    Drive failures are not video-specific, so the context already decides the
-    type; the detail is only kept for :func:`safe_diagnostic`.
-    """
-    return FailureType.DRIVE_ERROR
-
-
 def classify_error(detail: str) -> FailureInfo:
     """Classify a transcript-provider error into the full triple."""
     failure_type = classify_transcript_error(detail)

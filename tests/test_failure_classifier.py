@@ -6,7 +6,6 @@ import pytest
 
 from src.domain.models.playlist import FAILURE_KINDS, FailureKind, FailureType, kind_of
 from src.domain.services.failure_classifier import (
-    classify_drive_error,
     classify_error,
     classify_output_error,
     classify_playlist_error,
@@ -65,17 +64,19 @@ CASES: list[tuple[object, str, FailureType]] = [
     (classify_output_error, "Expecting value: line 1 column 1 (char 0)", FailureType.OUTPUT_MALFORMED),
     (classify_playlist_error, "Playlist does not exist", FailureType.PLAYLIST_UNAVAILABLE),
     (classify_playlist_error, "ERROR: Invalid URL for playlist", FailureType.INVALID_URL),
-    (classify_drive_error, "403 insufficientPermissions on file", FailureType.DRIVE_ERROR),
 ]
 
 #: Atlas-side failures are raised directly by the pipeline (never classified from provider
 #: text), so they have no classifier case; they must still be permanent and have a reason.
 PIPELINE_ONLY_TYPES = {FailureType.CONFIG_ERROR, FailureType.INTERNAL_ERROR}
 
+#: The Drive publisher raises DRIVE_ERROR itself after its own HTTP-status check.
+PUBLISHER_ONLY_TYPES = {FailureType.DRIVE_ERROR}
+
 
 def test_cases_cover_every_failure_type() -> None:
     covered = {expected for _fn, _detail, expected in CASES}
-    assert covered | PIPELINE_ONLY_TYPES == set(FailureType)
+    assert covered | PIPELINE_ONLY_TYPES | PUBLISHER_ONLY_TYPES == set(FailureType)
 
 
 def test_atlas_side_failures_are_permanent() -> None:
@@ -259,8 +260,7 @@ def test_classify_playlist_error() -> None:
     assert classify_playlist_error("This video is private") is FailureType.VIDEO_PRIVATE
 
 
-def test_classify_drive_error() -> None:
-    assert classify_drive_error("403 insufficientPermissions") is FailureType.DRIVE_ERROR
+def test_drive_error_is_transient() -> None:
     assert kind_of(FailureType.DRIVE_ERROR) is FailureKind.TRANSIENT
 
 
