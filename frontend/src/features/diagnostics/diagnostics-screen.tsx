@@ -87,7 +87,7 @@ function ErrorRow({ entry }: { entry: DiagnosticLogEntry }) {
 
 /**
  * Diagnostics (GET /api/diagnostics): readiness checks and the most recent
- * backend errors, so a failing setup explains itself without reading logs.
+ * backend warnings and errors, so a failing setup explains itself without reading logs.
  */
 export function DiagnosticsScreen() {
   const query = useQuery({
@@ -161,11 +161,17 @@ export function DiagnosticsScreen() {
           </section>
 
           <section className="space-y-3" aria-labelledby="errors-heading">
-            <h2 id="errors-heading" className="text-section text-text">
-              Recent errors
-            </h2>
+            <div>
+              <h2 id="errors-heading" className="text-section text-text">
+                Recent warnings and errors
+              </h2>
+              <p className="text-label text-text-muted">
+                The last 50 backend log records at WARNING or above, newest first. Rejected requests
+                (4xx) are logged at INFO, so they do not appear here.
+              </p>
+            </div>
             {data && data.recent_errors.length === 0 ? (
-              <EmptyState title="No errors logged recently." />
+              <EmptyState title="No warnings or errors logged recently." />
             ) : (
               <div className="overflow-x-auto rounded border border-border bg-surface">
                 <table className="w-full text-left text-body">
@@ -189,6 +195,7 @@ export function DiagnosticsScreen() {
                     {!data ? (
                       <SkeletonTableRows rows={3} widths={['w-16', 'w-12', 'w-24', 'w-64']} />
                     ) : (
+                      // Already newest first from the backend; keep its order.
                       data.recent_errors.map((entry, index) => (
                         <ErrorRow key={`${entry.timestamp}-${index}`} entry={entry} />
                       ))

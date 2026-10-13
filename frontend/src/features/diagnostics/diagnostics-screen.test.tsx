@@ -55,11 +55,35 @@ describe('DiagnosticsScreen', () => {
     expect(within(row).getByRole('time')).toHaveAttribute('title')
   })
 
+  it('keeps the backend order (newest first) and says what is listed', async () => {
+    mockApi().on('GET', '/api/diagnostics', {
+      ...DIAGNOSTICS,
+      recent_errors: [
+        { timestamp: '2026-10-12T09:30:00Z', level: 'WARNING', logger: 'a', message: 'newest' },
+        { timestamp: '2026-10-12T10:30:00Z', level: 'ERROR', logger: 'b', message: 'clock skew' },
+        { timestamp: '2026-10-12T08:00:00Z', level: 'ERROR', logger: 'c', message: 'oldest' },
+      ],
+    })
+    renderRoute('/diagnostics')
+
+    await screen.findByText('newest')
+    const table = screen.getByRole('table')
+    const messages = within(table)
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => row.lastElementChild?.textContent)
+    expect(messages).toEqual(['newest', 'clock skew', 'oldest'])
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Recent warnings and errors' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/WARNING or above, newest first/)).toBeInTheDocument()
+  })
+
   it('says so when there are no recent errors', async () => {
     mockApi().on('GET', '/api/diagnostics', { ...DIAGNOSTICS, recent_errors: [] })
     renderRoute('/diagnostics')
 
-    expect(await screen.findByText('No errors logged recently.')).toBeInTheDocument()
+    expect(await screen.findByText('No warnings or errors logged recently.')).toBeInTheDocument()
   })
 
   it('explains a missing endpoint and offers Retry when the request fails', async () => {
