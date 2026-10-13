@@ -54,7 +54,7 @@ both. "Env" lists the override names in precedence order.
 | Setting | Default | Effect | Validation | Env |
 |---|---|---|---|---|
 | `host` | `"127.0.0.1"` | Interface `python -m backend` binds to. Keep it local: Atlas has no authentication. (The Docker image passes `--host 0.0.0.0` to uvicorn and publishes only `127.0.0.1:8000`.) | not empty; must resolve | `ATLAS_HOST` |
-| `port` | `8000` | Port for the API, worker and built UI. Checked before start: a taken port prints one line and exits 1. The Vite dev proxy (`frontend/vite.config.ts`) always targets `127.0.0.1:8000`, so dev mode expects the default. | 1 to 65535 | `ATLAS_PORT` |
+| `port` | `8000` | Port for the API, worker and built UI. Checked before start: a taken port prints one line and exits 1. `scripts/dev` passes the configured host/port to the Vite dev proxy as `ATLAS_API_URL` (default `http://127.0.0.1:8000` when Vite is started by hand). | 1 to 65535 | `ATLAS_PORT` |
 | `cors_origins` | `""` | Comma-separated origins allowed to call the API cross-origin. Empty disables CORS (single-app mode is same-origin; the dev server proxies `/api`). | each must start with `http://` or `https://`; `*` rejected | `ATLAS_CORS_ORIGINS` |
 
 ### Storage

@@ -12,6 +12,13 @@ if (-not (Test-Path (Join-Path $FrontendRoot "node_modules"))) {
 # otherwise proxy /api to whatever else listens there).
 Invoke-Step "Check configuration and port" { uv run --locked python -m backend --check }
 
+# Point the Vite proxy at the configured host/port (config.yaml or ATLAS_PORT), not a
+# hard-coded 8000, so a changed port never proxies to some other server.
+if (-not $env:ATLAS_API_URL) {
+    $env:ATLAS_API_URL = (uv run --locked python -c "from src.config.settings import load_settings as l; s = l(); print(f'http://{s.host}:{s.port}')").Trim()
+}
+Write-Host "Vite proxies /api to $env:ATLAS_API_URL"
+
 # Same console, so Ctrl+C reaches the backend too and it shuts down gracefully.
 $backend = Start-Process -FilePath "uv" -ArgumentList "run", "--locked", "python", "-m", "backend", "--reload" `
     -NoNewWindow -PassThru

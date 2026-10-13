@@ -11,6 +11,14 @@ ensure_frontend_deps
 # otherwise proxy /api to whatever else listens there).
 step "Check configuration and port" uv run --locked python -m backend --check
 
+# Point the Vite proxy at the configured host/port (config.yaml or ATLAS_PORT), not a
+# hard-coded 8000, so a changed port never proxies to some other server.
+if [ -z "${ATLAS_API_URL:-}" ]; then
+  ATLAS_API_URL="$(uv run --locked python -c "from src.config.settings import load_settings as l; s = l(); print(f'http://{s.host}:{s.port}')")"
+  export ATLAS_API_URL
+fi
+echo "Vite proxies /api to $ATLAS_API_URL"
+
 uv run --locked python -m backend --reload &
 BACKEND_PID=$!
 stop_backend() {

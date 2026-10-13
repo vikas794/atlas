@@ -1,17 +1,18 @@
 # Troubleshooting
 
-Symptom, cause, fix. Messages are quoted as Atlas prints them. Start with
-`GET /api/diagnostics` (open `http://127.0.0.1:8000/api/diagnostics`): it checks the
-configuration, database, keys (set / not set, never the value), Drive credentials and token,
-and the frontend build, and lists the last 50 warnings and errors. There is no Diagnostics
-screen in the UI; the Settings screen shows the Google Drive state.
+Symptom, cause, fix. Messages are quoted as Atlas prints them. Start with the
+**Diagnostics** screen (top bar, or `http://127.0.0.1:8000/diagnostics`; the raw JSON is
+`GET /api/diagnostics`): it checks the configuration, database, keys (set / not set, never the
+value), Drive credentials and token (an expired token is actually refreshed, so a revoked one
+shows as a warning), and the frontend build, and lists the last 50 warnings and errors. The
+Settings screen is where you upload the OAuth client file and authorize Drive.
 
 ## Where to look
 
 - **Logs**: the terminal, and `logs/atlas.log` (setting `log_file`; rotating, 5 MB x 3 backups,
   secrets redacted; disable with `log_file_logging: false`). Pipeline lines carry
   `playlist_id=... video_id=...`. Set `log_level: DEBUG` for more.
-- **Recent errors**: `recent_errors` in `/api/diagnostics`, an in-memory buffer of the last 50
+- **Recent errors**: the Diagnostics screen (`recent_errors` in `/api/diagnostics`), an in-memory buffer of the last 50
   WARNING+ records since the process started.
 - **Per video**: the failure reason and kind are shown in the playlist table and returned by
   `GET /api/videos/{id}` (`failure_type`, `failure_kind`, `failure_reason`, `next_retry_at`,
@@ -32,10 +33,9 @@ Cause: something else listens on the port, typically the Atlas Docker container
 traceback. `scripts/dev` runs the same check before starting Vite.
 
 Fix: stop the other server (`docker compose down`), or change `port` in `config.yaml` /
-`ATLAS_PORT`. For single-app mode that is enough. **Dev mode note:** the Vite proxy in
-`frontend/vite.config.ts` always forwards `/api` to `127.0.0.1:8000`. With another port the
-backend starts fine, but the dev UI talks to whatever owns port 8000 (in testing, the Docker
-Atlas answered). In dev mode free port 8000, or change the proxy target as well.
+`ATLAS_PORT`. That is enough in both modes: `scripts/dev` reads the configured host and port
+and passes them to Vite as `ATLAS_API_URL` (it prints "Vite proxies /api to ..."). When you run
+`npm run dev` by hand against a non-default port, set `ATLAS_API_URL` yourself.
 
 ### Invalid configuration (exit code 2)
 
