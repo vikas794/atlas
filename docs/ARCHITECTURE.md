@@ -1,7 +1,7 @@
 # Atlas architecture
 
-This describes the code as it is. Requirements live in [`Atlas_PRD.md`](../Atlas_PRD.md), UI rules
-in [`design.md`](../design.md), settings in [`CONFIG.md`](CONFIG.md), failure recipes in
+This describes the code as it is. Requirements live in [`Atlas_PRD.md`](Atlas_PRD.md), UI rules
+in [`design.md`](design.md), settings in [`CONFIG.md`](CONFIG.md), failure recipes in
 [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
 
 Atlas is a local, single-user tool: one Python process (FastAPI + a background worker) and one

@@ -96,7 +96,7 @@ Stop the container before running Atlas locally on port 8000.
   publishing, crash recovery, concurrency, adding an LLM provider.
 - [docs/CONFIG.md](docs/CONFIG.md): every setting and secret.
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md): symptoms, causes, fixes; logs; backups.
-- [Atlas_PRD.md](Atlas_PRD.md) (requirements) and [design.md](design.md) (UI).
+- [Atlas_PRD.md](docs/Atlas_PRD.md) (requirements) and [design.md](docs/design.md) (UI).
 
 ## License
 

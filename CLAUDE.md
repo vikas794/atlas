@@ -45,10 +45,10 @@ This project is indexed by GitNexus as **atlas** (2437 symbols, 5162 relationshi
 
 # Atlas Product Spec & Design Source of Truth
 
-- **`Atlas_PRD.md`** is the source of truth for *what* to build: scope, functional requirements, data model, pipeline state machine, API contract, failure handling, Drive publishing, and milestone acceptance criteria. Read the relevant sections before implementing any feature, and do not add behavior the PRD lists as out of scope for v1.
-- **`design.md`** is the source of truth for *how the UI looks and behaves*: color tokens, typography, spacing, screens, components, status-badge mapping, and accessibility rules. Read it before any frontend work. Follow it instead of making ad hoc visual choices, and keep tokens in the single global stylesheet; never hardcode colors in components.
-- For any required implementation, check both files first. Backend/pipeline/API work follows `Atlas_PRD.md`; UI work follows `design.md` and the PRD sections it references (6, 7, 8, 15, 16).
-- If the code, the PRD and `design.md` disagree, or a requirement is ambiguous, stop and ask the user. Do not silently pick one, and do not edit either document unless asked.
+- **`docs/Atlas_PRD.md`** is the source of truth for *what* to build: scope, functional requirements, data model, pipeline state machine, API contract, failure handling, Drive publishing, and milestone acceptance criteria. Read the relevant sections before implementing any feature, and do not add behavior the PRD lists as out of scope for v1.
+- **`docs/design.md`** is the source of truth for *how the UI looks and behaves*: color tokens, typography, spacing, screens, components, status-badge mapping, and accessibility rules. Read it before any frontend work. Follow it instead of making ad hoc visual choices, and keep tokens in the single global stylesheet; never hardcode colors in components.
+- For any required implementation, check both files first. Backend/pipeline/API work follows `docs/Atlas_PRD.md`; UI work follows `docs/design.md` and the PRD sections it references (6, 7, 8, 15, 16).
+- If the code, the PRD and `docs/design.md` disagree, or a requirement is ambiguous, stop and ask the user. Do not silently pick one, and do not edit either document unless asked.
 - Build in PRD milestone order (M1 to M6) unless the user directs otherwise.
 
 ## graphify
@@ -63,7 +63,7 @@ Rules:
 
 # Documentation Rules
 
-- All project documentation lives in the `docs/` folder (e.g. `docs/ARCHITECTURE.md`, `docs/CONFIG.md`, `docs/TROUBLESHOOTING.md`, `docs/AUDIT_REPORT.md`). New docs go there, not the repo root. `README.md`, `CLAUDE.md`, `AGENTS.md`, `Atlas_PRD.md` and `design.md` stay at the root.
-- **Before making any change**, read the docs relevant to it (`docs/`, `Atlas_PRD.md`, `design.md`) and verify they match the current code. If they disagree with the code, flag it to the user before proceeding.
+- All project documentation lives in the `docs/` folder (e.g. `docs/ARCHITECTURE.md`, `docs/CONFIG.md`, `docs/TROUBLESHOOTING.md`, `docs/AUDIT_REPORT.md`, `docs/Atlas_PRD.md`, `docs/design.md`). New docs go there, not the repo root. `README.md`, `CLAUDE.md` and `AGENTS.md` stay at the root.
+- **Before making any change**, read the docs relevant to it (`docs/`, `docs/Atlas_PRD.md`, `docs/design.md`) and verify they match the current code. If they disagree with the code, flag it to the user before proceeding.
 - **After every change**, update the affected docs in the same change so they stay accurate to the code (behavior, config/env vars, API, architecture, troubleshooting). Never leave docs stale. Do not finish a task until the docs are checked.
-- `Atlas_PRD.md` and `design.md` are still only edited when the user asks; if a change makes them out of date, tell the user instead of editing them.
+- `docs/Atlas_PRD.md` and `docs/design.md` are still only edited when the user asks; if a change makes them out of date, tell the user instead of editing them.
