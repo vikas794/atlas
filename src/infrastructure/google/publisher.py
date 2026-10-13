@@ -269,6 +269,18 @@ class GoogleDrivePublisher(DrivePublisherPort):
         # 2. Index Doc: create empty (persist id), then write its content as its own step.
         index_doc_id = existing_index_doc_id
         idx_name = index_doc_name(playlist_title)
+        if index_doc_id:
+            # Like a video Doc: an index the user deleted or trashed is re-created
+            # (and rewritten below) instead of failing every publish with a 404.
+            state = await self._retry_call(self.exporter.file_state, index_doc_id)
+            if state != FILE_OK:
+                logger.warning(
+                    "Stored index Doc %s is %s in Drive; creating a new one",
+                    index_doc_id,
+                    state,
+                    extra=ctx,
+                )
+                index_doc_id = None
         if not index_doc_id:
             index_tag = {"atlasKind": "index", "atlasPlaylist": str(playlist_pk)}
             index_doc_id = await self._create_once(

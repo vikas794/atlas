@@ -196,9 +196,9 @@ without duplicating anything. 409 `CONFLICT` means a publish for that playlist i
 
 A deleted or trashed playlist folder makes the next publish start over in a new folder, with
 every approved or published video re-created from its stored notes. A deleted or trashed video
-Doc is re-created on the next publish that includes it. The index Doc's state is not checked:
-if only the index Doc was deleted, a publish that needs to rewrite it can fail; trashing the
-folder makes the next publish rebuild everything.
+Doc is re-created on the next publish that includes it; a deleted or trashed index Doc is
+re-created with every title. A publish only runs when something changed (a newly approved or
+edited video), so if nothing changed, nothing is re-created until then.
 
 ## Restarts and data
 

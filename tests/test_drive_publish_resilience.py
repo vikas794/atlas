@@ -329,6 +329,25 @@ async def test_a_single_doc_deleted_in_drive_is_recreated_on_republish(
     assert [d["name"] for d in docs(stub)].count("1 - Alpha") == 1
 
 
+@pytest.mark.parametrize("how", ["trashed", "deleted"])
+async def test_an_index_doc_deleted_in_drive_is_recreated_with_every_title(
+    repo: PlaylistRepository, stub: StubGoogle, how: str
+) -> None:
+    playlist, videos = await seed(repo, ["Alpha", "Beta"])
+    uc = use_case(repo, stub)
+    await uc.execute(playlist.id)
+    index_old = (await repo.get_playlist(playlist.id)).drive_index_doc_id
+    (stub.trashed if how == "trashed" else stub.deleted).add(index_old)
+    await SaveSummaryEditUseCase(repo).execute(videos[0].id, "## Notes\n\nFixed typo")
+
+    await uc.execute(playlist.id)
+
+    index_new = (await repo.get_playlist(playlist.id)).drive_index_doc_id
+    assert index_new and index_new != index_old
+    text = last_body_text(stub, index_new)
+    assert "Alpha" in text and "Beta" in text
+
+
 async def test_padding_growth_recreates_a_doc_that_vanished_instead_of_failing(
     repo: PlaylistRepository, stub: StubGoogle
 ) -> None:
