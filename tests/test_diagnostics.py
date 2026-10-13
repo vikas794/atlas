@@ -141,3 +141,24 @@ def test_recent_errors_are_redacted_newest_first(env) -> None:
 def test_health_stays_a_cheap_liveness_probe(env) -> None:
     with TestClient(app) as client:
         assert client.get("/api/health").json() == {"status": "ok", "service": "atlas-api"}
+
+
+def test_a_revoked_drive_token_is_not_reported_ok(env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A token that only *looks* refreshable on disk is verified, not trusted."""
+    from google.auth.exceptions import RefreshError
+    from google.oauth2.credentials import Credentials
+
+    from tests.test_drive_auth import write_expired_token
+
+    (env / "credentials.json").write_text('{"installed": {}}', encoding="utf-8")
+    write_expired_token(env / "token.json")
+
+    def refresh(self: Credentials, request: object) -> None:
+        raise RefreshError("invalid_grant: Bad Request", {"error": "invalid_grant"})
+
+    monkeypatch.setattr(Credentials, "refresh", refresh)
+
+    check = by_id(get_report())["drive_token"]
+    assert check["status"] == "warning"
+    assert "Re-authorize Drive" in check["message"]
+    assert "invalid_grant" not in check["message"]

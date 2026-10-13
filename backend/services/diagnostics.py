@@ -1,8 +1,10 @@
 """First-run health checks behind ``GET /api/diagnostics``.
 
-Each check answers "can Atlas do X right now, and if not, what do I do?" without making a
-network call and without ever returning a secret value: keys are reported as set / not set,
-files by their path.
+Each check answers "can Atlas do X right now, and if not, what do I do?" without ever
+returning a secret value: keys are reported as set / not set, files by their path. The only
+network call is a Google token refresh when the saved Drive token has expired: a token that
+merely *looks* refreshable on disk is often revoked (e.g. the 7-day expiry of an OAuth app
+in Testing mode), and reporting it as "ok" would be a false success.
 
 Statuses: ``ok``; ``warning`` (Atlas runs, one feature is unavailable, e.g. Drive publishing
 before consent); ``error`` (a core feature cannot work, e.g. no YouTube key).
@@ -170,7 +172,11 @@ def check_drive_credentials(settings: AtlasSettings) -> Check:
 
 
 def check_drive_token(settings: AtlasSettings) -> Check:
-    from src.infrastructure.google.drive import STATE_AUTHORIZED, GoogleDriveExporter
+    from src.infrastructure.google.drive import (
+        STATE_AUTHORIZED,
+        GoogleDriveAuthorizationRequired,
+        GoogleDriveExporter,
+    )
 
     token = _resolve(settings.google_token_path)
     if not token.is_file():
@@ -184,7 +190,19 @@ def check_drive_token(settings: AtlasSettings) -> Check:
         creds_path=_resolve(settings.google_creds_path), token_path=token
     )
     state, message = exporter.auth_state()
-    return _check("drive_token", "ok" if state == STATE_AUTHORIZED else "warning", message)
+    if state != STATE_AUTHORIZED:
+        return _check("drive_token", "warning", message)
+    try:
+        exporter.ensure_authorized()  # refreshes an expired token; no consent window
+    except GoogleDriveAuthorizationRequired as exc:
+        return _check("drive_token", "warning", str(exc))
+    except Exception:  # network down, Google 5xx: unknown, not "ok"
+        return _check(
+            "drive_token",
+            "warning",
+            "Could not reach Google to verify the Drive token; check the network and reload.",
+        )
+    return _check("drive_token", "ok", message)
 
 
 def check_frontend_build(dist_dir: Path) -> Check:
