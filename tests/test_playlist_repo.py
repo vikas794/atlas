@@ -625,6 +625,26 @@ async def test_mark_published_records_the_digest(repo: PlaylistRepository) -> No
     assert await repo.mark_published(9999, "x") is False
 
 
+async def test_mark_published_ignores_a_video_regenerated_mid_publish(
+    repo: PlaylistRepository,
+) -> None:
+    playlist = await make_playlist(repo)
+    video = await make_video(repo, playlist.id, "abc")
+    await repo.upsert_summary(video.id, "# Old notes")
+    await repo.update_stage(video.id, Stage.PENDING_REVIEW)
+    await repo.approve(video.id)
+    # The publisher read the approved notes; a regenerate lands before it finishes.
+    await repo.regenerate(video.id, "# New notes")
+
+    assert await repo.mark_published(video.id, "sha256:old") is False
+
+    summary = await repo.get_summary(video.id)
+    assert summary is not None
+    assert summary.published is False
+    assert summary.content == "# New notes"
+    assert (await repo.get_video(video.id)).stage is Stage.PENDING_REVIEW
+
+
 async def test_count_published(repo: PlaylistRepository) -> None:
     playlist = await make_playlist(repo)
     videos = [await make_video(repo, playlist.id, f"v{i}", position=i) for i in range(3)]

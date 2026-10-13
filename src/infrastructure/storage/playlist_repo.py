@@ -1251,10 +1251,15 @@ class PlaylistRepository:
     ) -> bool:
         stamp = published_at or now_iso()
         with self._tx() as conn:
+            # Publishing runs in the background: a regenerate that lands while the
+            # Doc is being written moves the video back to an earlier stage, and its
+            # new, unreviewed notes must not be stamped as published.
             cursor = conn.execute(
                 "UPDATE summaries SET published = 1, published_at = ?, published_digest = ?"
-                " WHERE video_id = ?",
-                (stamp, digest, video_pk),
+                " WHERE video_id = ?"
+                " AND EXISTS (SELECT 1 FROM videos WHERE id = ? AND stage IN (?, ?))",
+                (stamp, digest, video_pk, video_pk,
+                 Stage.APPROVED.value, Stage.PUBLISHED.value),
             )
             if cursor.rowcount:
                 conn.execute(
