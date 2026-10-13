@@ -11,19 +11,18 @@ import {
   ExternalLink,
   Loader,
   RotateCcw,
+  RotateCw,
   Save,
 } from 'lucide-react'
 
 import {
-  ApiError,
   approveVideo,
   getPlaylist,
   getVideoSummary,
-  isSummaryResponse,
   regenerateVideo,
   updateVideoSummary,
 } from '../../lib/api'
-import { needsRepublish, sha256Hex } from '../../lib/digest'
+import { errorMessage, failureMessage, isNotFound } from '../../lib/errors'
 import { formatPosition } from '../../lib/format'
 import { regeneratePhase, type JobWatch } from '../../lib/jobs'
 import { pollInterval } from '../../lib/polling'
@@ -40,12 +39,18 @@ import { ConfirmDialog } from '../../components/shared/confirm-dialog'
 import { DisabledReason } from '../../components/shared/disabled-reason'
 import { MarkdownBody } from '../../components/shared/markdown-body'
 import { RelativeTime } from '../../components/shared/relative-time'
-import { EmptyState, ErrorState, SkeletonBar, SkeletonListRows } from '../../components/shared/state-panels'
+import {
+  EmptyState,
+  ErrorState,
+  SkeletonBar,
+  SkeletonListRows,
+} from '../../components/shared/state-panels'
 import { StageDot, StatusBadge } from '../../components/shared/status-badge'
 import { useToast } from '../../components/shared/toast'
 import { Button } from '../../components/ui/button'
 import { ClearTranscriptDialog } from './clear-transcript-dialog'
 import { usePublishJob } from './use-publish-job'
+import { useRetryVideo } from './use-retry-video'
 
 type Mode = 'preview' | 'edit'
 
@@ -98,8 +103,7 @@ export function ReviewScreen() {
     retry: shouldRetry,
   })
   const summary = summaryQuery.data
-  const notesMissing =
-    summaryQuery.error instanceof ApiError && summaryQuery.error.status === 404
+  const notesMissing = isNotFound(summaryQuery.error)
 
   const editedContent =
     draft && draft.videoId === currentVideoPk ? draft.content : (summary?.content ?? '')
@@ -107,20 +111,8 @@ export function ReviewScreen() {
     draft && draft.videoId === currentVideoPk && draft.content !== (summary?.content ?? ''),
   )
 
-  // "Edited since publishing": a real signal, not stage + edited. The backend flag wins;
-  // otherwise compare SHA-256(content) with the published digest the API already returns.
-  const digestNeeded =
-    currentVideo?.stage === 'published' &&
-    summary?.edited === true &&
-    typeof summary.needs_republish !== 'boolean'
-  const digestQuery = useQuery({
-    queryKey: ['content-digest', summary?.content ?? ''],
-    queryFn: () => sha256Hex(summary?.content ?? ''),
-    enabled: digestNeeded,
-    staleTime: Infinity,
-    gcTime: 60_000,
-  })
-  const showRepublish = needsRepublish(currentVideo?.stage, summary, digestQuery.data ?? null)
+  // "Edited since publishing": the backend compares the stored notes with the published digest.
+  const showRepublish = currentVideo?.stage === 'published' && summary?.needs_republish === true
 
   // ---- Unsaved changes guard -------------------------------------------------------------
   const dirtyRef = useRef(false)
@@ -158,7 +150,7 @@ export function ReviewScreen() {
       queryClient.setQueryData(queryKeys.summary(savedId), updated)
       void invalidateVideo(queryClient, playlistId, savedId)
     },
-    onError: (err: Error) => toast(err.message || 'Could not save the notes.', 'error'),
+    onError: (err) => toast(failureMessage('Could not save the notes', err), 'error'),
   })
 
   const approveMut = useMutation({
@@ -167,28 +159,21 @@ export function ReviewScreen() {
       toast('Video approved.')
       void invalidateVideo(queryClient, playlistId, target)
     },
-    onError: (err: Error) => toast(err.message || 'Could not approve the video.', 'error'),
+    onError: (err) => toast(failureMessage('Could not approve the video', err), 'error'),
   })
 
   const regenMut = useMutation({
-    mutationFn: (target: number) =>
-      regenerateVideo(target).then((response) => ({ response, target })),
-    onSuccess: ({ response, target }) => {
-      if (isSummaryResponse(response)) {
-        // Sync backend (200): the new notes are in the response.
-        toast('Notes regenerated.')
-        setDraft(null)
-        queryClient.setQueryData(queryKeys.summary(target), response)
-      } else {
-        // Async backend (202): show "Regenerating..." and poll the video stage.
-        setRegenWatch({ startedAt: Date.now() })
-      }
+    mutationFn: (target: number) => regenerateVideo(target).then(() => ({ target })),
+    onSuccess: ({ target }) => {
+      // Regeneration runs in the background (202): show "Regenerating..." and poll the video.
+      setRegenWatch({ startedAt: Date.now() })
       void invalidateVideo(queryClient, playlistId, target)
     },
-    onError: (err: Error) => toast(err.message || 'Could not regenerate the notes.', 'error'),
+    onError: (err) => toast(failureMessage('Could not regenerate the notes', err), 'error'),
   })
 
   const publishJob = usePublishJob(playlistId)
+  const retryMut = useRetryVideo(playlistId)
 
   // Async regenerate finished (or failed): report it and refresh.
   const regenPhase = regeneratePhase(currentVideo, videosQuery.dataUpdatedAt, regenWatch)
@@ -346,12 +331,14 @@ export function ReviewScreen() {
                     aria-current={isActive ? 'page' : undefined}
                     className={cn(
                       'flex h-row items-center gap-2 border-b border-l-2 border-border px-3 text-label transition',
-                      video.stage === 'pending_review' ? 'border-l-st-review-fg' : 'border-l-transparent',
-                      isActive ? 'bg-accent-soft text-accent' : 'text-text hover:bg-surface-muted',
+                      video.stage === 'pending_review'
+                        ? 'border-l-st-review-fg'
+                        : 'border-l-transparent',
+                      isActive ? 'bg-accent-soft text-text' : 'text-text hover:bg-surface-muted',
                     )}
                   >
                     <StageDot spec={badge} />
-                    <span className="shrink-0 font-mono tabular-nums text-text-muted">
+                    <span className="shrink-0 tabular-nums text-text-muted">
                       {formatPosition(video.position)}
                     </span>
                     <span className="truncate">{video.title}</span>
@@ -390,7 +377,7 @@ export function ReviewScreen() {
                   <a
                     href={`https://www.youtube.com/watch?v=${currentVideo.youtube_video_id}`}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 text-accent hover:underline"
                   >
                     Open video
@@ -402,15 +389,17 @@ export function ReviewScreen() {
 
             <div className="flex items-center gap-2">
               {currentVideo?.stage === 'pending_review' && (
-                <Button
-                  variant="primary"
-                  onClick={() => void approveAndNext()}
-                  disabled={isBusy || !summary}
-                  title="Approve notes (Ctrl+Enter)"
-                >
-                  <Check aria-hidden="true" className="size-icon" />
-                  {isDirty ? 'Save and approve' : 'Approve'}
-                </Button>
+                <DisabledReason reason={!summary ? 'The notes have not loaded yet' : null}>
+                  <Button
+                    variant="primary"
+                    onClick={() => void approveAndNext()}
+                    disabled={isBusy || !summary}
+                    title="Approve notes (Ctrl+Enter)"
+                  >
+                    <Check aria-hidden="true" className="size-icon" />
+                    {isDirty ? 'Save and approve' : 'Approve'}
+                  </Button>
+                </DisabledReason>
               )}
 
               <Button
@@ -428,7 +417,11 @@ export function ReviewScreen() {
               </Button>
 
               <DisabledReason reason={nextReason}>
-                <Button variant="secondary" onClick={goToNextNeedingReview} disabled={nextId === null}>
+                <Button
+                  variant="secondary"
+                  onClick={goToNextNeedingReview}
+                  disabled={nextId === null}
+                >
                   Next needing review
                   <ChevronRight aria-hidden="true" className="size-icon" />
                 </Button>
@@ -452,9 +445,25 @@ export function ReviewScreen() {
 
           {/* Failure reason for a failed video */}
           {detail?.reason && currentVideo?.stage === 'failed' && (
-            <div className={cn('border-b border-border px-4 py-2 text-label', TONE_TEXT[detail.tone === 'muted' ? 'neutral' : detail.tone])}>
-              {detail.reason}
-              {detail.note ? ` · ${detail.note}` : ''}
+            <div
+              className={cn(
+                'flex items-center justify-between gap-3 border-b border-border px-4 py-2 text-label',
+                TONE_TEXT[detail.tone === 'muted' ? 'neutral' : detail.tone],
+              )}
+            >
+              <span>
+                {detail.reason}
+                {detail.note ? ` · ${detail.note}` : ''}
+              </span>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => retryMut.mutate(currentVideo)}
+                disabled={retryMut.isPending}
+              >
+                <RotateCw aria-hidden="true" className="size-icon" />
+                Retry
+              </Button>
             </div>
           )}
 
@@ -483,7 +492,11 @@ export function ReviewScreen() {
 
           {/* Preview / Edit switch and save bar */}
           <div className="flex items-center justify-between border-b border-border bg-surface-muted px-4 py-2">
-            <div role="tablist" aria-label="Notes view" className="flex rounded border border-border bg-surface p-1">
+            <div
+              role="tablist"
+              aria-label="Notes view"
+              className="flex rounded border border-border bg-surface p-1"
+            >
               {(['preview', 'edit'] as const).map((option) => (
                 <button
                   key={option}
@@ -492,10 +505,21 @@ export function ReviewScreen() {
                   id={`notes-tab-${option}`}
                   aria-selected={mode === option}
                   aria-controls="notes-panel"
+                  tabIndex={mode === option ? 0 : -1}
                   onClick={() => setMode(option)}
+                  onKeyDown={(event) => {
+                    // WAI-ARIA tabs: arrows move between Preview and Edit.
+                    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+                    event.preventDefault()
+                    const next = option === 'preview' ? 'edit' : 'preview'
+                    setMode(next)
+                    document.getElementById(`notes-tab-${next}`)?.focus()
+                  }}
                   className={cn(
                     'rounded px-3 text-label transition',
-                    mode === option ? 'bg-surface-muted text-text' : 'text-text-muted hover:text-text',
+                    mode === option
+                      ? 'bg-surface-muted text-text'
+                      : 'text-text-muted hover:text-text',
                   )}
                 >
                   {option === 'preview' ? 'Preview' : 'Edit'}
@@ -505,16 +529,18 @@ export function ReviewScreen() {
 
             <div className="flex items-center gap-3">
               {isDirty && <span className="text-label text-st-review-fg">Unsaved changes</span>}
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={!isDirty || saveMut.isPending}
-                onClick={() => void save()}
-                title="Save changes (Ctrl+S)"
-              >
-                <Save aria-hidden="true" className="size-icon" />
-                {saveMut.isPending ? 'Saving…' : 'Save'}
-              </Button>
+              <DisabledReason reason={!isDirty ? 'No unsaved changes' : null}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={!isDirty || saveMut.isPending}
+                  onClick={() => void save()}
+                  title="Save changes (Ctrl+S)"
+                >
+                  <Save aria-hidden="true" className="size-icon" />
+                  {saveMut.isPending ? 'Saving…' : 'Save'}
+                </Button>
+              </DisabledReason>
             </div>
           </div>
 
@@ -527,12 +553,19 @@ export function ReviewScreen() {
           >
             {videos && !currentVideo ? (
               <EmptyState title="This video is not in the playlist.">
-                <Link to={`/playlists/${playlistId}`} className="text-accent underline underline-offset-4">
+                <Link
+                  to={`/playlists/${playlistId}`}
+                  className="text-accent underline underline-offset-4"
+                >
                   Back to playlist
                 </Link>
               </EmptyState>
             ) : summaryQuery.isPending ? (
-              <div className="mx-auto max-w-3xl space-y-3" aria-busy="true" aria-label="Loading notes">
+              <div
+                className="mx-auto max-w-3xl space-y-3"
+                aria-busy="true"
+                aria-label="Loading notes"
+              >
                 <SkeletonBar className="h-4 w-1/2" />
                 <SkeletonBar className="w-full" />
                 <SkeletonBar className="w-11/12" />
@@ -543,13 +576,13 @@ export function ReviewScreen() {
                 {isRegenerating
                   ? 'New notes are being generated for this video.'
                   : currentVideo?.stage === 'failed'
-                    ? 'Generation failed for this video. Use Retry on the playlist page.'
+                    ? 'Processing failed for this video. Use Retry above to try again.'
                     : 'They will appear here once this video has been processed.'}
               </EmptyState>
             ) : summaryQuery.isError ? (
               <ErrorState
                 title="Could not load the notes"
-                message={summaryQuery.error instanceof Error ? summaryQuery.error.message : undefined}
+                message={errorMessage(summaryQuery.error)}
                 onRetry={() => void summaryQuery.refetch()}
               />
             ) : mode === 'preview' ? (
@@ -559,7 +592,9 @@ export function ReviewScreen() {
             ) : (
               <textarea
                 value={editedContent}
-                onChange={(event) => setDraft({ videoId: currentVideoPk, content: event.target.value })}
+                onChange={(event) =>
+                  setDraft({ videoId: currentVideoPk, content: event.target.value })
+                }
                 aria-label="Edit notes (Markdown)"
                 className="h-full min-h-96 w-full resize-none bg-transparent font-notes text-notes leading-notes text-text"
                 placeholder="Markdown notes"

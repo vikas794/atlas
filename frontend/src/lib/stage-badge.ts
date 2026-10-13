@@ -149,50 +149,37 @@ export function failureLabel(
 /**
  * Fallback copy when the backend sent a failure_type but no reason.
  * Written as plain sentences because design.md section 6.2 shows these verbatim
- * in the Detail column — never surface a snake_case code to the user.
+ * in the Detail column — never surface a snake_case code to the user. A
+ * `Record` (not a switch) so a new backend FailureType fails the type check.
  */
-function defaultReasonFor(failureType: FailureType | null | undefined): string {
-  switch (failureType) {
-    case 'video_private':
-      return 'Video is private'
-    case 'video_deleted':
-      return 'Video was deleted by the uploader'
-    case 'age_restricted':
-      return 'Video is age-restricted'
-    case 'region_blocked':
-      return 'Video is not available in this region'
-    case 'members_only':
-      return 'Members-only video'
-    case 'transcripts_disabled':
-      return 'Transcripts are disabled by the uploader'
-    case 'no_usable_language':
-      return 'No transcript available in a usable language'
-    case 'transcript_too_large':
-      return 'Transcript is too long for the model input limit'
-    case 'rate_limited':
-      return 'Rate limited by the provider'
-    case 'network_error':
-      return 'Temporary network error'
-    case 'provider_error':
-      return 'The provider returned an error'
-    case 'output_malformed':
-      return 'The model returned an unusable response'
-    case 'playlist_unavailable':
-      return 'Playlist is unavailable'
-    case 'invalid_url':
-      return 'Invalid playlist URL'
-    case 'drive_error':
-      return 'Google Drive error'
-    default:
-      return ''
-  }
+export const FAILURE_REASONS: Record<FailureType, string> = {
+  video_private: 'Video is private',
+  video_deleted: 'Video was deleted by the uploader',
+  age_restricted: 'Video is age-restricted',
+  region_blocked: 'Video is not available in this region',
+  members_only: 'Members-only video',
+  transcripts_disabled: 'Transcripts are disabled by the uploader',
+  no_usable_language: 'No transcript available in a usable language',
+  transcript_too_large: 'Transcript is too long for the model input limit',
+  rate_limited: 'Rate limited by the provider',
+  network_error: 'Temporary network error',
+  provider_error: 'The provider returned an error',
+  output_malformed: 'The model returned an unusable response',
+  config_error: 'Atlas is not configured for this step (check Diagnostics)',
+  internal_error: 'Unexpected error inside Atlas',
+  playlist_unavailable: 'Playlist is unavailable',
+  invalid_url: 'Invalid playlist URL',
+  drive_error: 'Google Drive error',
 }
 
+function defaultReasonFor(failureType: FailureType | null | undefined): string {
+  return failureType ? (FAILURE_REASONS[failureType] ?? '') : ''
+}
 
 export interface VideoDetailSpec {
   /** Plain-text failure reason, or null when there is nothing to explain. */
   reason: string | null
-  /** Retry status line: "Retrying in 2m (attempt 3/5)" or "Retries exhausted - use Retry". */
+  /** Retry status line: "Retrying in 2m (attempt 3/5)", "Gave up after 5/5 automatic retries - use Retry"... */
   note: string | null
   /** Transient reasons are warn-coloured, permanent ones error-coloured (design 6.2). */
   tone: 'error' | 'warn' | 'muted'
@@ -225,12 +212,16 @@ export function videoDetail(
   const reason = failureLabel(video.failure_type, video.failure_reason)
 
   if (video.failure_kind !== 'transient') {
-    return { reason, note: null, tone: 'error', edited }
+    return { reason, note: PERMANENT_NOTE, tone: 'error', edited }
   }
 
   if (isRetryScheduled(video)) {
     const countdown = video.next_retry_at ? formatCountdown(video.next_retry_at, now) : ''
-    const when = !countdown ? 'Retrying' : countdown === 'now' ? 'Retrying now' : `Retrying in ${countdown}`
+    const when = !countdown
+      ? 'Retrying'
+      : countdown === 'now'
+        ? 'Retrying now'
+        : `Retrying in ${countdown}`
     return {
       reason,
       note: `${when} (${attemptLabel(video.retry_count, video.max_auto_retries)})`,
@@ -239,5 +230,22 @@ export function videoDetail(
     }
   }
 
-  return { reason, note: 'Retries exhausted - use Retry', tone: 'warn', edited }
+  return {
+    reason,
+    note: exhaustedNote(video.retry_count, video.max_auto_retries),
+    tone: 'warn',
+    edited,
+  }
+}
+
+/** Permanent failures are never retried automatically (PRD section 8). */
+export const PERMANENT_NOTE = 'Not retried automatically - use Retry'
+
+/** "Gave up after 5/5 automatic retries - use Retry". */
+export function exhaustedNote(retryCount: number, maxRetries?: number | null): string {
+  const tries =
+    typeof maxRetries === 'number' && maxRetries > 0
+      ? `${retryCount}/${maxRetries}`
+      : `${retryCount}`
+  return `Gave up after ${tries} automatic ${retryCount === 1 && !maxRetries ? 'retry' : 'retries'} - use Retry`
 }

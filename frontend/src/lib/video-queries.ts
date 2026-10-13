@@ -33,7 +33,12 @@ export async function fetchPlaylistVideos(
 
   const responses = await Promise.all(
     stages.map((stage) =>
-      getPlaylistVideos(playlistId, { stage, search: search || undefined, page: 1, page_size: MAX_PAGE_SIZE }),
+      getPlaylistVideos(playlistId, {
+        stage,
+        search: search || undefined,
+        page: 1,
+        page_size: MAX_PAGE_SIZE,
+      }),
     ),
   )
   const merged: Video[] = responses

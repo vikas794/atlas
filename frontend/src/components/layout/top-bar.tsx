@@ -1,6 +1,6 @@
 import { Monitor, Moon, Sun, type LucideIcon } from 'lucide-react'
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, NavLink } from 'react-router-dom'
 
 import {
   getThemePreference,
@@ -56,6 +56,11 @@ export function ThemeToggle() {
   )
 }
 
+const NAV_LINKS = [
+  { to: '/diagnostics', label: 'Diagnostics' },
+  { to: '/settings', label: 'Settings' },
+] as const
+
 /**
  * Section 5: 56px top bar, app name on the left, theme toggle on the right,
  * sticky so it stays put on the long playlist and review screens.
@@ -69,12 +74,22 @@ export function TopBar() {
         </Link>
 
         <div className="flex items-center gap-3">
-          <Link
-            to="/settings"
-            className="rounded px-2 text-label text-text-muted transition hover:bg-surface-muted hover:text-text"
-          >
-            Settings
-          </Link>
+          <nav aria-label="Main" className="flex items-center gap-1">
+            {NAV_LINKS.map(({ to, label }) => (
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) =>
+                  cn(
+                    'rounded px-2 py-1 text-label transition hover:bg-surface-muted hover:text-text',
+                    isActive ? 'text-text' : 'text-text-muted',
+                  )
+                }
+              >
+                {label}
+              </NavLink>
+            ))}
+          </nav>
           <ThemeToggle />
         </div>
       </div>

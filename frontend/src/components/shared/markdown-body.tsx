@@ -29,7 +29,8 @@ export function MarkdownBody({ markdown, className }: { markdown: string; classN
         '[&_h3]:text-body [&_h3]:font-semibold [&_h3]:text-text',
         '[&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-5',
         '[&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-5',
-        '[&_table]:w-full [&_table]:text-body [&_table]:font-ui [&_th]:border-b [&_th]:border-border [&_th]:bg-surface-muted [&_th]:text-left [&_th]:font-medium [&_th]:text-text-muted [&_td]:border-b [&_td]:border-border [&_td]:align-top',
+        '[&_table]:w-full [&_table]:text-body [&_table]:font-ui [&_th]:border-b [&_th]:border-border [&_th]:bg-surface-muted [&_th]:text-left [&_th]:font-medium [&_th]:text-text [&_td]:border-b [&_td]:border-border [&_td]:align-top',
+        '[&_th]:px-3 [&_th]:py-1 [&_td]:px-3 [&_td]:py-1',
         '[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-text-muted',
         '[&_hr]:border-border',
         className,
@@ -37,26 +38,29 @@ export function MarkdownBody({ markdown, className }: { markdown: string; classN
     >
       <ReactMarkdown
         components={{
-          a: ({ className: anchorClassName, ...props }) => (
+          // Notes are AI output: react-markdown never renders raw HTML (no rehype-raw) and its
+          // default urlTransform drops javascript:/data: URLs. rel/target come last so the
+          // Markdown cannot override them.
+          a: ({ className: anchorClassName, node, ...props }) => (
             <a
-              className={cn('text-accent underline underline-offset-4', anchorClassName)}
-              rel="noreferrer"
-              target="_blank"
               {...props}
+              className={cn('text-accent underline underline-offset-4', anchorClassName)}
+              rel="noopener noreferrer"
+              target="_blank"
             />
           ),
-          pre: ({ children, className: preClassName, ...props }) => {
+          pre: ({ children, className: preClassName, node, ...props }) => {
             const language = fenceLanguage(children)
             return (
               <div className="relative">
                 {language ? (
-                  <span className="absolute right-2 top-1 select-none text-label text-text-muted">
+                  <span className="absolute right-2 top-1 select-none text-label text-text">
                     {language}
                   </span>
                 ) : null}
                 <pre
                   className={cn(
-                    'overflow-x-auto rounded border border-border bg-surface-muted p-3 pt-8',
+                    'overflow-x-auto rounded border border-border bg-surface-muted p-3 pt-6',
                     'font-mono text-code text-text',
                     preClassName,
                   )}
@@ -67,7 +71,7 @@ export function MarkdownBody({ markdown, className }: { markdown: string; classN
               </div>
             )
           },
-          code: ({ className: codeClassName, ...props }) => {
+          code: ({ className: codeClassName, node, ...props }) => {
             const isFenced = /language-/.test(codeClassName ?? '')
             return (
               <code

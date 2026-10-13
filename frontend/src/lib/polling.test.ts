@@ -38,17 +38,25 @@ describe('pollInterval', () => {
   })
 
   it('stays slow for a failure with retries exhausted', () => {
-    expect(pollInterval({ videos: [video('failed', { failure_kind: 'transient' })] })).toBe(SLOW_POLL_MS)
-    expect(pollInterval({ videos: [video('failed', { failure_kind: 'permanent' })] })).toBe(SLOW_POLL_MS)
+    expect(pollInterval({ videos: [video('failed', { failure_kind: 'transient' })] })).toBe(
+      SLOW_POLL_MS,
+    )
+    expect(pollInterval({ videos: [video('failed', { failure_kind: 'permanent' })] })).toBe(
+      SLOW_POLL_MS,
+    )
   })
 
   it('is fast while the playlist is publishing', () => {
-    expect(pollInterval({ playlist: { status: 'publishing', stage_counts: {} as never } })).toBe(FAST_POLL_MS)
+    expect(pollInterval({ playlist: { status: 'publishing', stage_counts: {} as never } })).toBe(
+      FAST_POLL_MS,
+    )
   })
 
   it('is fast when playlist counts show queued or active work', () => {
     expect(
-      pollInterval({ playlist: { status: 'ready', stage_counts: { transcript_ready: 2 } as never } }),
+      pollInterval({
+        playlist: { status: 'ready', stage_counts: { transcript_ready: 2 } as never },
+      }),
     ).toBe(FAST_POLL_MS)
   })
 

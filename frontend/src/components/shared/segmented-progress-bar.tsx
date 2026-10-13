@@ -47,8 +47,12 @@ export function SegmentedProgressBar({
   return (
     <div className={cn('flex items-center gap-3', className)}>
       <div
-        role="img"
-        aria-label={summary || 'No progress yet'}
+        role="progressbar"
+        aria-label="Playlist progress"
+        aria-valuemin={0}
+        aria-valuemax={total}
+        aria-valuenow={published}
+        aria-valuetext={`${published} of ${total} published${summary ? ` (${summary})` : ''}`}
         className="relative flex h-bar w-full overflow-hidden rounded-pill bg-surface-muted"
       >
         {segments.map((segment) => {

@@ -6,6 +6,15 @@ import { vi } from 'vitest'
 import { routes } from '../routes'
 import type { Playlist, Summary, Video } from '../lib/types'
 
+// The routes load their screens lazily. Importing the screens here moves their
+// (slow, cold) transform into test collection, so the first `findBy*` of a file
+// does not time out while Vite is still compiling the screen on a busy machine.
+import '../features/playlists/playlists-home'
+import '../features/playlists/playlist-detail'
+import '../features/playlists/review-screen'
+import '../features/settings/settings-screen'
+import '../features/diagnostics/diagnostics-screen'
+
 /* ------------------------------------------------------------------ fetch mock */
 
 export interface RecordedCall {
@@ -84,10 +93,13 @@ export function mockApi() {
           : candidate.match.test(url.pathname)),
     )
     if (!route) {
-      return new Response(JSON.stringify({ code: 'not_found', message: `No mock for ${method} ${url.pathname}` }), {
-        status: 404,
-        headers: { 'Content-Type': 'application/json' },
-      })
+      return new Response(
+        JSON.stringify({ code: 'not_found', message: `No mock for ${method} ${url.pathname}` }),
+        {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      )
     }
     return toResponse(await route.respond(call))
   })
@@ -144,11 +156,14 @@ export function makePlaylist(overrides: Partial<Playlist> = {}): Playlist {
       published: 0,
       failed: 0,
     },
+    last_publish_error: null,
     ...overrides,
   }
 }
 
 export function makeVideo(id: number, overrides: Partial<Video> = {}): Video {
+  // Same derivation as the backend's Video.auto_retry / retries_exhausted.
+  const transientFailure = overrides.stage === 'failed' && overrides.failure_kind === 'transient'
   return {
     id,
     playlist_id: 1,
@@ -165,6 +180,12 @@ export function makeVideo(id: number, overrides: Partial<Video> = {}): Video {
     removed_upstream: false,
     created_at: STAMP,
     updated_at: STAMP,
+    auto_retry: transientFailure && Boolean(overrides.next_retry_at),
+    retries_exhausted: transientFailure && !overrides.next_retry_at,
+    duplicate_of: null,
+    regenerating: false,
+    max_auto_retries: 5,
+    edited: false,
     ...overrides,
   }
 }
@@ -184,8 +205,22 @@ export function makeSummary(videoId: number, overrides: Partial<Summary> = {}): 
     published: false,
     published_at: null,
     published_digest: null,
+    needs_republish: false,
     ...overrides,
   }
+}
+
+/** The real body of POST /api/playlists/{id}/publish (HTTP 202; counts are always 0). */
+export const PUBLISH_ACCEPTED = {
+  status: 202,
+  body: {
+    folder_id: '',
+    index_doc_id: null,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    status: 'accepted',
+  },
 }
 
 export function videoList(videos: Video[], total = videos.length) {

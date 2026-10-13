@@ -32,6 +32,8 @@ export type FailureType =
   | 'network_error'
   | 'provider_error'
   | 'output_malformed'
+  | 'config_error'
+  | 'internal_error'
   | 'playlist_unavailable'
   | 'invalid_url'
   | 'drive_error'
@@ -73,15 +75,11 @@ export interface Playlist {
   created_at: string
   updated_at: string
   last_synced_at: string | null
-  stage_counts: Record<Stage, number>
-  /** Optional: last Drive publish error when `status` is `publish_failed`. */
-  last_publish_error?: string | null
-  /** Optional: result of the last async publish. */
-  last_publish?: { created: number; updated: number; skipped: number } | null
+  /** Only stages that have videos are present; read missing keys as 0. */
+  stage_counts: Partial<Record<Stage, number>>
+  /** Redacted reason of the last failed publish (set while `status` is `publish_failed`). */
+  last_publish_error: string | null
 }
-
-/** Playlist `status` values the UI reacts to (others are shown as-is). */
-export type PlaylistStatus = 'publishing' | 'publish_failed' | string
 
 export interface PlaylistListResponse {
   playlists: Playlist[]
@@ -104,16 +102,21 @@ export interface Video {
   removed_upstream: boolean
   created_at: string
   updated_at: string
+  /** A transient failure is waiting for its scheduled automatic retry. */
+  auto_retry: boolean
+  /** A transient failure used up its automatic retries: manual Retry only. */
+  retries_exhausted: boolean
+  /** Primary key of the first occurrence when this row repeats an earlier video. */
+  duplicate_of: number | null
+  /** A "regenerate notes" request is queued or running. */
+  regenerating: boolean
+  /** Configured automatic-retry cap (denominator of "attempt N/M"). */
+  max_auto_retries: number | null
   /**
-   * Optional fields the backend may add (the UI works without them).
-   * `retries_exhausted` / `auto_retry`: whether automatic retries are over or
-   * still scheduled. `max_auto_retries`: cap for the "attempt N/M" text.
-   * `edited`: the notes were edited by the user.
+   * The notes were hand-edited. Only the videos list endpoint fills this in;
+   * single-video responses (approve, retry, regenerate) always send false.
    */
-  retries_exhausted?: boolean
-  auto_retry?: boolean
-  max_auto_retries?: number | null
-  edited?: boolean
+  edited: boolean
 }
 
 export interface VideoListResponse {
@@ -137,11 +140,8 @@ export interface Summary {
   published: boolean
   published_at: string | null
   published_digest: string | null
-  /**
-   * Optional: true when the stored notes differ from what was published.
-   * When absent the UI compares SHA-256(content) with `published_digest`.
-   */
-  needs_republish?: boolean
+  /** The notes were edited after they were published (offer Re-publish). */
+  needs_republish: boolean
 }
 
 export interface ActionResponse {
@@ -150,22 +150,29 @@ export interface ActionResponse {
   count?: number | null
 }
 
-/** Sync publish (200) carries counts; async publish (202) only `status`/`message`. */
+/**
+ * Acknowledgement of POST /publish (HTTP 202). Publishing runs in the
+ * background: the counts are always 0 here, the outcome is read from the
+ * playlist's `status` (`publishing` -> `published` | `publish_failed`).
+ */
 export interface PublishResponse {
-  folder_id?: string
-  index_doc_id?: string | null
-  created?: number
-  updated?: number
-  skipped?: number
+  folder_id: string
+  index_doc_id: string | null
+  created: number
+  updated: number
+  skipped: number
   status: string
-  message?: string
 }
 
 /* ------------------------------------------------------------------- Drive */
 
+export type DriveAuthState = 'credentials_missing' | 'needs_consent' | 'authorized'
+
 export interface DriveStatusResponse {
+  /** True only when a valid (or refreshable) token exists. */
   configured: boolean
   message: string
+  state: DriveAuthState
 }
 
 export interface DriveActionResponse {
@@ -214,4 +221,30 @@ export interface UsageAggregateResponse {
   by_operation: UsageOperationAggregate[]
   cache_stats: UsageCacheAggregate | null
   time_range: UsageTimeRange | null
+}
+
+/* ------------------------------------------------------------- Diagnostics */
+
+export type DiagnosticStatus = 'ok' | 'warning' | 'error'
+
+/** One readiness check (configuration, database, worker, Drive...). */
+export interface DiagnosticCheck {
+  id: string
+  label: string
+  status: DiagnosticStatus
+  message: string
+}
+
+/** A recent warning/error log record kept by the backend. */
+export interface DiagnosticLogEntry {
+  timestamp: string
+  level: string
+  logger: string
+  message: string
+}
+
+/** GET /api/diagnostics */
+export interface DiagnosticsResponse {
+  checks: DiagnosticCheck[]
+  recent_errors: DiagnosticLogEntry[]
 }

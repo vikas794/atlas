@@ -17,7 +17,10 @@ function parseTimestamp(iso: string | null | undefined): number | null {
  * "3 min ago", "2 h ago", "in 5 min". Returns '' for missing or invalid input
  * so callers can render a dash. `now` is injectable for deterministic tests.
  */
-export function formatRelativeTime(iso: string | null | undefined, now: number = Date.now()): string {
+export function formatRelativeTime(
+  iso: string | null | undefined,
+  now: number = Date.now(),
+): string {
   const ms = parseTimestamp(iso)
   if (ms === null) return ''
 

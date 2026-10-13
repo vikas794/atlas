@@ -2,7 +2,14 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 
-import { makePlaylist, makeVideo, mockApi, renderRoute, videoList } from '../../test/harness'
+import {
+  PUBLISH_ACCEPTED,
+  makePlaylist,
+  makeVideo,
+  mockApi,
+  renderRoute,
+  videoList,
+} from '../../test/harness'
 
 const COUNTS = {
   queued: 1,
@@ -15,11 +22,15 @@ const COUNTS = {
   failed: 1,
 }
 
-function setup(options: { counts?: Partial<typeof COUNTS>; videos?: ReturnType<typeof makeVideo>[] } = {}) {
+function setup(
+  options: { counts?: Partial<typeof COUNTS>; videos?: ReturnType<typeof makeVideo>[] } = {},
+) {
   const counts = { ...COUNTS, ...options.counts }
   const videos = options.videos ?? [makeVideo(1), makeVideo(2)]
   const api = mockApi()
-  api.on('GET', '/api/playlists/1', () => makePlaylist({ video_count: 8, stage_counts: counts as never }))
+  api.on('GET', '/api/playlists/1', () =>
+    makePlaylist({ video_count: 8, stage_counts: counts as never }),
+  )
   api.on('GET', '/api/playlists/1/videos', (call) => {
     const stage = call.search.get('stage')
     return videoList(stage ? videos.filter((video) => video.stage === stage) : videos)
@@ -60,7 +71,9 @@ describe('PlaylistDetail summary strip', () => {
     // The table shows exactly the in-progress rows, merged in playlist order.
     await waitFor(() => expect(screen.getByText('Video 3')).toBeInTheDocument())
     expect(screen.queryByText('Video 4')).not.toBeInTheDocument()
-    const stages = api.callsTo('GET', '/api/playlists/1/videos').map((call) => call.search.get('stage'))
+    const stages = api
+      .callsTo('GET', '/api/playlists/1/videos')
+      .map((call) => call.search.get('stage'))
     expect(stages).toEqual(
       expect.arrayContaining(['fetching_transcript', 'transcript_ready', 'generating_notes']),
     )
@@ -108,6 +121,22 @@ describe('PlaylistDetail table', () => {
     row.focus()
     await user.keyboard('{Enter}')
     await waitFor(() => expect(router.state.location.pathname).toBe('/playlists/1/review/1'))
+  })
+
+  it('moves focus between rows with the arrow keys', async () => {
+    setup()
+    const user = userEvent.setup()
+    renderRoute('/playlists/1')
+
+    const first = (await screen.findByText('Video 1')).closest('tr')!
+    const second = screen.getByText('Video 2').closest('tr')!
+    first.focus()
+    await user.keyboard('{ArrowDown}')
+    expect(second).toHaveFocus()
+    await user.keyboard('{ArrowDown}') // last row: focus stays
+    expect(second).toHaveFocus()
+    await user.keyboard('{ArrowUp}')
+    expect(first).toHaveFocus()
   })
 
   it('Retry does not open the review and calls the retry endpoint', async () => {
@@ -166,8 +195,31 @@ describe('PlaylistDetail table', () => {
     renderRoute('/playlists/1')
 
     expect(await screen.findByText('Failed – temporary')).toBeInTheDocument()
-    expect(screen.getByText('Retries exhausted - use Retry')).toBeInTheDocument()
+    expect(screen.getByText(/Gave up after .* automatic retries - use Retry/)).toBeInTheDocument()
     expect(screen.queryByText('Retrying')).not.toBeInTheDocument()
+  })
+
+  it('shows a permanent failure reason in plain text with a Retry button', async () => {
+    setup({
+      videos: [
+        makeVideo(1, {
+          stage: 'failed',
+          failure_type: 'transcripts_disabled',
+          failure_kind: 'permanent',
+          failure_reason: 'Transcripts disabled by uploader',
+        }),
+        makeVideo(2, { stage: 'failed', failure_type: 'video_private', failure_kind: 'permanent' }),
+      ],
+    })
+    renderRoute('/playlists/1')
+
+    const row = (await screen.findByText('Transcripts disabled by uploader')).closest('tr')!
+    expect(within(row).getByText('Failed')).toBeInTheDocument()
+    expect(within(row).getByText('Not retried automatically - use Retry')).toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: 'Retry #001' })).toBeEnabled()
+    // No reason from the backend: a sentence derived from failure_type, never the raw code.
+    const second = screen.getByText('Video is private').closest('tr')!
+    expect(within(second).queryByText('video_private')).not.toBeInTheDocument()
   })
 
   it('shows the edited tag and the removed-upstream badge next to the real stage', async () => {
@@ -190,10 +242,14 @@ describe('PlaylistDetail table', () => {
 
     await waitFor(() =>
       expect(
-        api.callsTo('GET', '/api/playlists/1/videos').some((call) => call.search.get('search') === 'abc'),
+        api
+          .callsTo('GET', '/api/playlists/1/videos')
+          .some((call) => call.search.get('search') === 'abc'),
       ).toBe(true),
     )
-    const searches = api.callsTo('GET', '/api/playlists/1/videos').map((call) => call.search.get('search'))
+    const searches = api
+      .callsTo('GET', '/api/playlists/1/videos')
+      .map((call) => call.search.get('search'))
     expect(searches).not.toContain('a')
     expect(searches).not.toContain('ab')
   })
@@ -255,7 +311,11 @@ describe('PlaylistDetail actions', () => {
 
   it('confirms Approve all with the count, then approves', async () => {
     const api = setup({ counts: { pending_review: 2 } })
-    api.on('POST', '/api/playlists/1/approve-all', { status: 'ok', message: 'Approved 2 videos', count: 2 })
+    api.on('POST', '/api/playlists/1/approve-all', {
+      status: 'ok',
+      message: 'Approved 2 videos',
+      count: 2,
+    })
     const user = userEvent.setup()
     renderRoute('/playlists/1')
 
@@ -298,7 +358,9 @@ describe('PlaylistDetail actions', () => {
 
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByRole('heading', { name: 'Delete playlist' })).toBeInTheDocument()
-    expect(dialog).toHaveTextContent('Delete "Complete Java" and all 8 stored videos, transcripts and notes?')
+    expect(dialog).toHaveTextContent(
+      'Delete "Complete Java" and all 8 stored videos, transcripts and notes?',
+    )
     expect(dialog).toHaveTextContent('This does not delete Google Docs already in Drive.')
 
     await user.click(within(dialog).getByRole('button', { name: 'Delete playlist' }))
@@ -348,65 +410,79 @@ describe('PlaylistDetail actions', () => {
 })
 
 describe('PlaylistDetail publishing', () => {
-  it('says "Nothing new to publish" for a sync publish that did nothing', async () => {
-    const api = setup({ counts: { approved: 1 } })
-    api.on('POST', '/api/playlists/1/publish', {
-      folder_id: 'f',
-      created: 0,
-      updated: 0,
-      skipped: 3,
-      status: 'ok',
-    })
-    const user = userEvent.setup()
-    renderRoute('/playlists/1')
-
-    await user.click(await screen.findByRole('button', { name: 'Publish approved to Drive' }))
-
-    expect(await screen.findByText('Nothing new to publish.')).toBeInTheDocument()
-    expect(screen.queryByText(/Published 0/)).not.toBeInTheDocument()
-  })
-
-  it('reports real counts for a sync publish', async () => {
-    const api = setup({ counts: { approved: 1 } })
-    api.on('POST', '/api/playlists/1/publish', {
-      folder_id: 'f',
-      created: 2,
-      updated: 1,
-      skipped: 0,
-      status: 'ok',
-    })
-    const user = userEvent.setup()
-    renderRoute('/playlists/1')
-
-    await user.click(await screen.findByRole('button', { name: 'Publish approved to Drive' }))
-
-    expect(await screen.findByText('Published 2 new Docs, updated 1 Doc in Drive.')).toBeInTheDocument()
-  })
-
-  it('handles an async (202) publish: shows Publishing, polls, then toasts the failure', async () => {
+  /** A playlist whose GET reflects the background publish job. */
+  function setupPublish() {
     const api = mockApi()
-    let phase: 'ready' | 'publishing' | 'publish_failed' = 'ready'
+    const state = {
+      status: 'ingested',
+      error: null as string | null,
+      published: 0,
+    }
     api.on('GET', '/api/playlists/1', () =>
       makePlaylist({
-        status: phase,
-        last_publish_error: phase === 'publish_failed' ? 'Drive quota exceeded' : null,
-        stage_counts: { ...COUNTS, approved: 2 } as never,
+        status: state.status,
+        last_publish_error: state.error,
+        stage_counts: { ...COUNTS, approved: 2 - state.published, published: state.published },
       }),
     )
     api.on('GET', '/api/playlists/1/videos', videoList([makeVideo(1)]))
     api.on('POST', '/api/playlists/1/publish', () => {
-      phase = 'publishing'
-      return { status: 202, body: { status: 'accepted', message: 'Publishing started' } }
+      state.status = 'publishing'
+      return PUBLISH_ACCEPTED
     })
+    return { api, state }
+  }
+
+  it('never reports success from the 202 itself: shows Publishing, then the real count', async () => {
+    const { state } = setupPublish()
+    const user = userEvent.setup()
+    renderRoute('/playlists/1')
+
+    await user.click(await screen.findByRole('button', { name: 'Publish approved to Drive' }))
+    expect(await screen.findByRole('button', { name: /publishing/i })).toBeDisabled()
+    // The 202 carries created/updated = 0: no "Nothing new to publish" while the job runs.
+    expect(screen.queryByText(/nothing new to publish/i)).not.toBeInTheDocument()
+
+    state.status = 'published'
+    state.published = 2
+    expect(
+      await screen.findByText('Published 2 videos to Drive.', {}, { timeout: 6000 }),
+    ).toBeInTheDocument()
+  }, 15000)
+
+  it('toasts the stored reason when the background publish fails', async () => {
+    const { state } = setupPublish()
     const user = userEvent.setup()
     renderRoute('/playlists/1')
 
     await user.click(await screen.findByRole('button', { name: 'Publish approved to Drive' }))
     expect(await screen.findByRole('button', { name: /publishing/i })).toBeDisabled()
 
-    phase = 'publish_failed' // the next poll (3s) sees the failure
-    const alerts = await screen.findAllByText('Drive quota exceeded', {}, { timeout: 6000 })
-    expect(alerts.length).toBeGreaterThan(0)
+    state.status = 'publish_failed' // the next poll (3s) sees the failure
+    state.error = 'Drive quota exceeded'
+    const alert = await screen.findByText(
+      'Publishing to Drive failed: Drive quota exceeded',
+      {},
+      { timeout: 6000 },
+    )
+    expect(alert.closest('[role="alert"]')).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Publish approved to Drive' })).toBeEnabled()
   }, 15000)
+
+  it('shows the backend error when the publish request itself is rejected', async () => {
+    const { api } = setupPublish()
+    api.on('POST', '/api/playlists/1/publish', {
+      status: 409,
+      body: {
+        code: 'DRIVE_AUTH_REQUIRED',
+        message: 'Google Drive is not authorized.',
+        details: {},
+      },
+    })
+    const user = userEvent.setup()
+    renderRoute('/playlists/1')
+
+    await user.click(await screen.findByRole('button', { name: 'Publish approved to Drive' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Google Drive is not authorized.')
+  })
 })

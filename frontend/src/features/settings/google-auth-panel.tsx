@@ -1,11 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, CheckCircle2, Link2, LoaderCircle, LogIn, RefreshCw, UploadCloud } from 'lucide-react'
+import {
+  AlertCircle,
+  CheckCircle2,
+  Link2,
+  LoaderCircle,
+  LogIn,
+  RefreshCw,
+  UploadCloud,
+} from 'lucide-react'
 import { useRef, useState, type ChangeEvent } from 'react'
 
 import { Button } from '../../components/ui/button'
 import { Card } from '../../components/ui/card'
 import { authenticateDrive, getDriveStatus, uploadDriveCredentials } from '../../lib/api'
+import { errorMessage, failureMessage } from '../../lib/errors'
 import { cn } from '../../lib/utils'
+import { useToast } from '../../components/shared/toast'
 
 const DRIVE_STATUS_KEY = ['drive', 'status'] as const
 
@@ -16,6 +26,7 @@ const DRIVE_STATUS_KEY = ['drive', 'status'] as const
  */
 export function GoogleAuthPanel() {
   const queryClient = useQueryClient()
+  const { toast } = useToast()
   const [uploadStatus, setUploadStatus] = useState<string | null>(null)
   const [uploadOk, setUploadOk] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -30,27 +41,34 @@ export function GoogleAuthPanel() {
     onSuccess: (result) => {
       setUploadOk(true)
       setUploadStatus(result.message || 'Credentials uploaded successfully.')
+      toast('Google credentials uploaded. Next: authenticate.')
       void queryClient.invalidateQueries({ queryKey: DRIVE_STATUS_KEY })
     },
-    onError: (error: unknown) => {
+    onError: (error) => {
       setUploadOk(false)
-      setUploadStatus(error instanceof Error ? error.message : 'Upload failed.')
+      setUploadStatus(errorMessage(error, 'Upload failed.'))
+      toast(failureMessage('Could not upload the credentials', error), 'error')
     },
   })
 
   const authMutation = useMutation({
     mutationFn: authenticateDrive,
     onSuccess: () => {
+      toast('Google Drive connected.')
       void queryClient.invalidateQueries({ queryKey: DRIVE_STATUS_KEY })
     },
+    onError: (error) => toast(failureMessage('Could not connect Google Drive', error), 'error'),
   })
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
+    // Reset so choosing the same file again still fires `change`.
+    event.target.value = ''
     if (!file) return
-    if (file.name !== 'credentials.json') {
+    // Google names the download client_secret_<id>.json; the backend only needs a .json file.
+    if (!file.name.toLowerCase().endsWith('.json')) {
       setUploadOk(false)
-      setUploadStatus('Please upload a file named credentials.json.')
+      setUploadStatus('Choose the OAuth client file from Google Cloud Console (a .json file).')
       return
     }
     uploadMutation.mutate(file)
@@ -93,21 +111,22 @@ export function GoogleAuthPanel() {
         {isBusy ? <p className="mt-4 text-body text-text-muted">Checking Drive status…</p> : null}
 
         {driveStatusQuery.isError ? (
-          <p className="mt-4 text-body text-st-error-fg">
-            {driveStatusQuery.error.message}
+          <p role="alert" className="mt-4 text-body text-st-error-fg">
+            Could not check Google Drive: {errorMessage(driveStatusQuery.error)}
           </p>
         ) : null}
 
-        {driveStatusQuery.isSuccess && !isConfigured ? (
+        {driveStatusQuery.isSuccess ? (
           <p className="mt-4 text-body text-text-muted">{driveStatusQuery.data.message}</p>
         ) : null}
 
         <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <div className="rounded border border-border bg-surface-muted p-4">
+          <div className="rounded border border-border bg-surface p-4">
             <h3 className="text-body font-medium text-text">Step 1: Upload credentials</h3>
             <p className="mt-1 text-label text-text-muted">
-              Upload the <code className="font-mono text-code">credentials.json</code> file from the
-              Google Cloud Console.
+              Upload the OAuth client JSON file (for example{' '}
+              <code className="font-mono text-code">client_secret_….json</code>) from the Google
+              Cloud Console.
             </p>
             <input
               ref={fileInputRef}
@@ -127,11 +146,14 @@ export function GoogleAuthPanel() {
               ) : (
                 <UploadCloud className="size-icon" aria-hidden="true" />
               )}
-              {uploadMutation.isPending ? 'Uploading…' : 'Select credentials.json'}
+              {uploadMutation.isPending ? 'Uploading…' : 'Select credentials file'}
             </Button>
             {uploadStatus ? (
               <p
-                className={cn('mt-2 text-label', uploadOk ? 'text-st-success-fg' : 'text-st-error-fg')}
+                className={cn(
+                  'mt-2 text-label',
+                  uploadOk ? 'text-st-success-fg' : 'text-st-error-fg',
+                )}
                 role="status"
               >
                 {uploadStatus}
@@ -139,10 +161,11 @@ export function GoogleAuthPanel() {
             ) : null}
           </div>
 
-          <div className="rounded border border-border bg-surface-muted p-4">
+          <div className="rounded border border-border bg-surface p-4">
             <h3 className="text-body font-medium text-text">Step 2: Authenticate</h3>
             <p className="mt-1 text-label text-text-muted">
-              Opens the Google consent screen in your local browser and stores a token for publishing.
+              Opens the Google consent screen in your local browser and stores a token for
+              publishing.
             </p>
             <Button
               className="mt-3 w-full justify-start"
@@ -158,7 +181,7 @@ export function GoogleAuthPanel() {
             </Button>
             {authMutation.isError ? (
               <p className="mt-2 text-label text-st-error-fg" role="alert">
-                Failed to authenticate: {authMutation.error.message}
+                Failed to authenticate: {errorMessage(authMutation.error)}
               </p>
             ) : null}
           </div>

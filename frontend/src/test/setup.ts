@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest'
-import { cleanup, configure } from '@testing-library/react'
+import { cleanup, configure, queryAllByRole } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
 
 // Screens fetch through several mocked requests; CI machines can be slow.
@@ -61,3 +61,18 @@ globalThis.Request = class extends NativeRequest {
     }
   }
 } as typeof Request
+
+// The first getComputedStyle / accessible-name computation in a fresh jsdom costs
+// ~0.2-0.6 s (cssstyle and dom-accessibility-api initialise lazily), and many
+// times that when every worker is busy. Each test file gets a fresh jsdom, so
+// that cost landed inside the first `findByRole` of every file and made the
+// first test (e.g. "#001 Video 1", "In progress") time out under full-suite
+// load. Pay it here, during setup, instead.
+{
+  const warmup = document.createElement('div')
+  warmup.innerHTML = '<h1>Warm up</h1><button type="button">Warm up</button>'
+  document.body.append(warmup)
+  queryAllByRole(warmup, 'heading', { name: 'Warm up' })
+  queryAllByRole(warmup, 'button', { name: 'Warm up' })
+  warmup.remove()
+}

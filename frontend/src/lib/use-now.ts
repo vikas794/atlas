@@ -29,5 +29,9 @@ function subscribe(listener: () => void) {
 
 /** Current time in ms, refreshed every 30 seconds. */
 export function useNow(): number {
-  return useSyncExternalStore(subscribe, () => current, () => Date.now())
+  return useSyncExternalStore(
+    subscribe,
+    () => current,
+    () => Date.now(),
+  )
 }

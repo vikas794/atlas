@@ -63,9 +63,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               t.type === 'info' && 'border-border bg-surface text-text',
             )}
           >
-            {t.type === 'error' && <AlertCircle aria-hidden="true" className="size-icon-lg shrink-0" />}
-            {t.type === 'success' && <CheckCircle2 aria-hidden="true" className="size-icon-lg shrink-0" />}
-            {t.type === 'info' && <Info aria-hidden="true" className="size-icon-lg shrink-0 text-accent" />}
+            {t.type === 'error' && (
+              <AlertCircle aria-hidden="true" className="size-icon-lg shrink-0" />
+            )}
+            {t.type === 'success' && (
+              <CheckCircle2 aria-hidden="true" className="size-icon-lg shrink-0" />
+            )}
+            {t.type === 'info' && (
+              <Info aria-hidden="true" className="size-icon-lg shrink-0 text-accent" />
+            )}
             <p className="flex-1 text-body font-medium">{t.message}</p>
             <button
               type="button"

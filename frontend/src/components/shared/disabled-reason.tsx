@@ -12,8 +12,9 @@ interface DisabledReasonProps {
 /**
  * design.md 7: a disabled control carries a tooltip explaining why. Disabled
  * buttons swallow pointer events and are skipped by keyboard focus, so the
- * tooltip lives on a wrapper span. `reason` is also exposed to assistive tech
- * through `aria-describedby` on the wrapper.
+ * tooltip lives on a wrapper span. While a reason is shown the wrapper is a tab
+ * stop, so keyboard users reach it too (design.md 8) and assistive tech reads
+ * `reason` through `aria-describedby`.
  */
 export function DisabledReason({ reason, children, className }: DisabledReasonProps) {
   const id = useId()
@@ -21,7 +22,11 @@ export function DisabledReason({ reason, children, className }: DisabledReasonPr
   if (!reason) return <span className={cn('inline-flex', className)}>{children}</span>
 
   return (
-    <span className={cn('group relative inline-flex', className)} aria-describedby={id}>
+    <span
+      className={cn('group relative inline-flex rounded', className)}
+      tabIndex={0}
+      aria-describedby={id}
+    >
       {children}
       <span
         id={id}

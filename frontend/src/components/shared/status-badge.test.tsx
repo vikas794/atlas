@@ -15,7 +15,9 @@ describe('StatusBadge', () => {
   })
 
   it('says Retrying only while a retry is scheduled, otherwise "Failed – temporary"', () => {
-    const { rerender } = render(<StatusBadge stage="failed" failureKind="transient" retryScheduled />)
+    const { rerender } = render(
+      <StatusBadge stage="failed" failureKind="transient" retryScheduled />,
+    )
     expect(screen.getByText('Retrying')).toBeInTheDocument()
     rerender(<StatusBadge stage="failed" failureKind="transient" />)
     expect(screen.queryByText('Retrying')).not.toBeInTheDocument()

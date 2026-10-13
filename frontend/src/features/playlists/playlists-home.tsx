@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ExternalLink, Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
 
 import { deletePlaylist, getPlaylists, ingestPlaylist, reprocessPlaylist } from '../../lib/api'
+import { errorMessage, failureMessage } from '../../lib/errors'
 import { pluralize } from '../../lib/format'
 import { playlistIsBusy, pollInterval } from '../../lib/polling'
 import { validatePlaylistUrl } from '../../lib/playlist-url'
 import { queryKeys } from '../../lib/query-keys'
+import { onRowKeyDown } from '../../lib/row-keys'
 import type { Playlist } from '../../lib/types'
 import { ActionMenu } from '../../components/shared/action-menu'
 import { ConfirmDialog } from '../../components/shared/confirm-dialog'
@@ -53,13 +55,19 @@ export function PlaylistsHome() {
     onSuccess: (playlist) => {
       setUrl('')
       setUrlError(null)
-      toast(`Added "${playlist.title}" with ${pluralize(playlist.video_count, 'video')}.`)
+      // A known link is re-synced by the backend (HTTP 200), not added again.
+      const known = playlistsQuery.data?.playlists.find((item) => item.id === playlist.id)
+      toast(
+        known
+          ? `"${playlist.title}" is already tracked: synced, ${pluralize(Math.max(0, playlist.video_count - known.video_count), 'new video')}.`
+          : `Added "${playlist.title}" with ${pluralize(playlist.video_count, 'video')}.`,
+      )
       void invalidateLists()
     },
-    onError: (err: Error) => {
+    onError: (err) => {
       // Server-side errors (private playlist, bad URL...) show inline and as a toast.
-      setUrlError(err.message || 'Could not add this playlist.')
-      toast(err.message || 'Could not add this playlist.', 'error')
+      setUrlError(errorMessage(err, 'Could not add this playlist.'))
+      toast(failureMessage('Could not add the playlist', err), 'error')
     },
   })
 
@@ -78,8 +86,8 @@ export function PlaylistsHome() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.videos(playlist.id) })
       void invalidateLists()
     },
-    onError: (err: Error, { playlist }) => {
-      toast(err.message || `Could not sync "${playlist.title}".`, 'error')
+    onError: (err, { playlist }) => {
+      toast(failureMessage(`Could not sync "${playlist.title}"`, err), 'error')
     },
   })
 
@@ -91,7 +99,7 @@ export function PlaylistsHome() {
       queryClient.removeQueries({ queryKey: queryKeys.videos(playlist.id) })
       void invalidateLists()
     },
-    onError: (err: Error) => toast(err.message || 'Could not delete the playlist.', 'error'),
+    onError: (err) => toast(failureMessage('Could not delete the playlist', err), 'error'),
   })
 
   const reprocessMutation = useMutation({
@@ -102,7 +110,7 @@ export function PlaylistsHome() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.videos(playlist.id) })
       void invalidateLists()
     },
-    onError: (err: Error) => toast(err.message || 'Could not reprocess the playlist.', 'error'),
+    onError: (err) => toast(failureMessage('Could not reprocess the playlist', err), 'error'),
   })
 
   const handleAddSubmit = (event: FormEvent) => {
@@ -119,11 +127,6 @@ export function PlaylistsHome() {
 
   const openPlaylist = (playlist: Playlist) => navigate(`/playlists/${playlist.id}`)
 
-  const handleRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, playlist: Playlist) => {
-    if (event.target !== event.currentTarget) return
-    if (event.key === 'Enter') openPlaylist(playlist)
-  }
-
   return (
     <div className="space-y-5">
       <h1 className="text-page text-text">Playlists</h1>
@@ -135,7 +138,11 @@ export function PlaylistsHome() {
           Paste a YouTube playlist link to fetch its videos and generate study notes.
         </p>
 
-        <form onSubmit={handleAddSubmit} noValidate className="mt-4 flex flex-col gap-2 sm:flex-row">
+        <form
+          onSubmit={handleAddSubmit}
+          noValidate
+          className="mt-4 flex flex-col gap-2 sm:flex-row"
+        >
           <div className="flex-1">
             <input
               ref={inputRef}
@@ -189,14 +196,26 @@ export function PlaylistsHome() {
         ) : (
           <div className="overflow-x-auto rounded border border-border bg-surface">
             <table className="w-full text-left text-body">
-              <thead className="border-b border-border bg-surface-muted text-label text-text-muted">
+              <thead className="border-b border-border bg-surface-muted text-label text-text">
                 <tr className="h-row">
-                  <th scope="col" className="px-3">Title</th>
-                  <th scope="col" className="px-3 text-right">Videos</th>
-                  <th scope="col" className="min-w-48 px-3">Progress</th>
-                  <th scope="col" className="px-3 text-right">Needs review</th>
-                  <th scope="col" className="px-3 text-right">Failed</th>
-                  <th scope="col" className="px-3">Last synced</th>
+                  <th scope="col" className="px-3">
+                    Title
+                  </th>
+                  <th scope="col" className="px-3 text-right">
+                    Videos
+                  </th>
+                  <th scope="col" className="min-w-48 px-3">
+                    Progress
+                  </th>
+                  <th scope="col" className="px-3 text-right">
+                    Needs review
+                  </th>
+                  <th scope="col" className="px-3 text-right">
+                    Failed
+                  </th>
+                  <th scope="col" className="px-3">
+                    Last synced
+                  </th>
                   <th scope="col" className="w-12 px-3">
                     <span className="sr-only">Actions</span>
                   </th>
@@ -204,7 +223,10 @@ export function PlaylistsHome() {
               </thead>
               <tbody>
                 {!playlists ? (
-                  <SkeletonTableRows rows={4} widths={['w-48', 'w-8', 'w-48', 'w-8', 'w-8', 'w-16', 'w-8']} />
+                  <SkeletonTableRows
+                    rows={4}
+                    widths={['w-48', 'w-8', 'w-48', 'w-8', 'w-8', 'w-16', 'w-8']}
+                  />
                 ) : (
                   playlists.map((playlist) => {
                     const counts = playlist.stage_counts ?? {}
@@ -216,7 +238,7 @@ export function PlaylistsHome() {
                         key={playlist.id}
                         tabIndex={0}
                         onClick={() => openPlaylist(playlist)}
-                        onKeyDown={(event) => handleRowKeyDown(event, playlist)}
+                        onKeyDown={(event) => onRowKeyDown(event, () => openPlaylist(playlist))}
                         className="h-row cursor-pointer border-b border-border transition last:border-b-0 hover:bg-surface-muted"
                       >
                         <td className="px-3 py-1 text-text">
@@ -235,7 +257,9 @@ export function PlaylistsHome() {
                           <SegmentedProgressBar counts={counts} total={playlist.video_count} />
                         </td>
                         <td className="px-3 py-1 text-right tabular-nums">
-                          <span className={needsReview > 0 ? 'text-st-review-fg' : 'text-text-muted'}>
+                          <span
+                            className={needsReview > 0 ? 'text-st-review-fg' : 'text-text-muted'}
+                          >
                             {needsReview}
                           </span>
                         </td>
@@ -308,7 +332,9 @@ export function PlaylistsHome() {
         description={`Reprocess "${reprocessTarget?.title}"? All ${pluralize(reprocessTarget?.video_count ?? 0, 'video')} go back to the queue and their transcripts and notes are discarded and regenerated, including your edits and approvals. Google Docs already in Drive are not deleted.`}
         confirmLabel="Reprocess playlist"
         isDestructive
-        onConfirm={() => (reprocessTarget ? reprocessMutation.mutateAsync(reprocessTarget) : undefined)}
+        onConfirm={() =>
+          reprocessTarget ? reprocessMutation.mutateAsync(reprocessTarget) : undefined
+        }
       />
     </div>
   )

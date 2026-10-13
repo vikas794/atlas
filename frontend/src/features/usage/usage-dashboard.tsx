@@ -5,7 +5,11 @@ import { useState } from 'react'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { ErrorState, SkeletonBar } from '../../components/shared/state-panels'
-import { getUsageAggregate, type UsageAggregateResponse, type UsageQueryParams } from '../../lib/api'
+import {
+  getUsageAggregate,
+  type UsageAggregateResponse,
+  type UsageQueryParams,
+} from '../../lib/api'
 import { cn } from '../../lib/utils'
 
 interface UsageDashboardProps {
@@ -39,7 +43,15 @@ function formatPercent(value: number) {
 }
 
 /** Flat stat tile: label, value, optional detail. One level of border, no nested cards. */
-function Stat({ title, value, description }: { title: string; value: string; description?: string }) {
+function Stat({
+  title,
+  value,
+  description,
+}: {
+  title: string
+  value: string
+  description?: string
+}) {
   return (
     <div className="rounded border border-border bg-surface p-4">
       <p className="text-label text-text-muted">{title}</p>
@@ -66,7 +78,7 @@ function TableShell({ empty, children }: { empty?: string; children?: React.Reac
 
 function Head({ columns }: { columns: string[] }) {
   return (
-    <thead className="bg-surface-muted text-label text-text-muted">
+    <thead className="bg-surface-muted text-label text-text">
       <tr className="h-row">
         {columns.map((heading) => (
           <th key={heading} scope="col" className="px-3">
@@ -86,7 +98,10 @@ function ProviderTable({ providers }: { providers: UsageAggregateResponse['by_pr
       <Head columns={['Provider', 'Models', 'Requests', 'Tokens', 'Cost']} />
       <tbody>
         {providers.map((p) => (
-          <tr key={p.provider} className="h-row border-t border-border align-middle hover:bg-surface-muted">
+          <tr
+            key={p.provider}
+            className="h-row border-t border-border align-middle hover:bg-surface-muted"
+          >
             <td className="px-3 py-1 capitalize text-text">{p.provider}</td>
             <td className="px-3 py-1">
               <div className="flex flex-wrap gap-1">
@@ -118,7 +133,9 @@ function OperationTable({ operations }: { operations: UsageAggregateResponse['by
             <td className="px-3 py-1 tabular-nums text-text">{formatNumber(o.total_requests)}</td>
             <td className="px-3 py-1 tabular-nums text-text">{formatNumber(o.total_tokens)}</td>
             <td className="px-3 py-1 tabular-nums text-text">{formatCost(o.total_cost_usd)}</td>
-            <td className="px-3 py-1 tabular-nums text-text">{formatNumber(o.avg_tokens_per_request)}</td>
+            <td className="px-3 py-1 tabular-nums text-text">
+              {formatNumber(o.avg_tokens_per_request)}
+            </td>
           </tr>
         ))}
       </tbody>
@@ -218,13 +235,17 @@ export function UsageDashboard({ className }: UsageDashboardProps) {
             />
             <Stat
               title="Average cost per request"
-              value={formatCost(data.total_requests ? data.total_cost_usd / data.total_requests : 0)}
+              value={formatCost(
+                data.total_requests ? data.total_cost_usd / data.total_requests : 0,
+              )}
             />
             <Stat
               title="Cache hit rate"
               value={formatPercent(data.cache_hit_rate)}
               description={
-                cache ? `${formatNumber(cache.total_hits)} hits, ${formatNumber(cache.total_misses)} misses` : undefined
+                cache
+                  ? `${formatNumber(cache.total_hits)} hits, ${formatNumber(cache.total_misses)} misses`
+                  : undefined
               }
             />
           </div>

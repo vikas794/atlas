@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -16,7 +16,6 @@ import {
 } from 'lucide-react'
 
 import {
-  ApiError,
   approveAllVideos,
   cleanupPlaylistTranscripts,
   deletePlaylist,
@@ -24,12 +23,13 @@ import {
   ingestPlaylist,
   processPlaylist,
   reprocessPlaylist,
-  retryVideo,
 } from '../../lib/api'
+import { failureMessage, isNotFound } from '../../lib/errors'
 import { formatPosition, pluralize } from '../../lib/format'
 import { pollInterval } from '../../lib/polling'
 import { filterCount, type StageFilter } from '../../lib/progress'
-import { invalidatePlaylist, invalidateVideo, queryKeys } from '../../lib/query-keys'
+import { invalidatePlaylist, queryKeys } from '../../lib/query-keys'
+import { onRowKeyDown } from '../../lib/row-keys'
 import { isRetriesExhausted, isRetryScheduled, videoDetail } from '../../lib/stage-badge'
 import { TONE_TEXT } from '../../lib/tone'
 import type { Playlist, Video, VideoListResponse } from '../../lib/types'
@@ -41,7 +41,12 @@ import { ConfirmDialog } from '../../components/shared/confirm-dialog'
 import { DisabledReason } from '../../components/shared/disabled-reason'
 import { RelativeTime } from '../../components/shared/relative-time'
 import { SegmentedProgressBar } from '../../components/shared/segmented-progress-bar'
-import { EmptyState, ErrorState, SkeletonBar, SkeletonTableRows } from '../../components/shared/state-panels'
+import {
+  EmptyState,
+  ErrorState,
+  SkeletonBar,
+  SkeletonTableRows,
+} from '../../components/shared/state-panels'
 import { StatusBadge } from '../../components/shared/status-badge'
 import { useToast } from '../../components/shared/toast'
 import { Badge } from '../../components/ui/badge'
@@ -49,6 +54,7 @@ import { Button } from '../../components/ui/button'
 import { buttonClasses } from '../../components/ui/button-styles'
 import { ClearTranscriptDialog } from './clear-transcript-dialog'
 import { usePublishJob } from './use-publish-job'
+import { useRetryVideo } from './use-retry-video'
 
 const PAGE_SIZE = 50
 const SEARCH_DEBOUNCE_MS = 300
@@ -57,7 +63,11 @@ const SEARCH_DEBOUNCE_MS = 300
 const STRIP_CARDS: { filter: StageFilter; label: string; tone: string }[] = [
   { filter: 'all', label: 'All videos', tone: 'border-border text-text' },
   { filter: 'queued', label: 'Queued', tone: 'border-border text-st-neutral-fg' },
-  { filter: 'in_progress', label: 'In progress', tone: 'border-st-progress-fg/40 text-st-progress-fg' },
+  {
+    filter: 'in_progress',
+    label: 'In progress',
+    tone: 'border-st-progress-fg/40 text-st-progress-fg',
+  },
   {
     filter: 'pending_review',
     label: 'Needs review',
@@ -65,7 +75,11 @@ const STRIP_CARDS: { filter: StageFilter; label: string; tone: string }[] = [
   },
   { filter: 'approved', label: 'Approved', tone: 'border-st-success-fg/40 text-st-success-fg' },
   { filter: 'published', label: 'Published', tone: 'border-st-success-fg/40 text-st-success-fg' },
-  { filter: 'failed', label: 'Failed', tone: 'border-st-error-fg/40 bg-st-error-bg/30 text-st-error-fg' },
+  {
+    filter: 'failed',
+    label: 'Failed',
+    tone: 'border-st-error-fg/40 bg-st-error-bg/30 text-st-error-fg',
+  },
 ]
 
 /** New videos found by a re-sync: video_count difference, never negative. */
@@ -135,7 +149,7 @@ export function PlaylistDetail() {
       toast('Processing started.')
       void refresh()
     },
-    onError: (err: Error) => toast(err.message, 'error'),
+    onError: (err) => toast(failureMessage('Could not start processing', err), 'error'),
   })
 
   const approveAllMut = useMutation({
@@ -144,7 +158,7 @@ export function PlaylistDetail() {
       toast(`Approved ${pluralize(res.count ?? 0, 'video')}.`)
       void refresh()
     },
-    onError: (err: Error) => toast(err.message, 'error'),
+    onError: (err) => toast(failureMessage('Could not approve the videos', err), 'error'),
   })
 
   const resyncMut = useMutation({
@@ -159,7 +173,7 @@ export function PlaylistDetail() {
       )
       void refresh()
     },
-    onError: (err: Error) => toast(err.message, 'error'),
+    onError: (err) => toast(failureMessage('Could not re-sync the playlist', err), 'error'),
   })
 
   const reprocessMut = useMutation({
@@ -168,7 +182,7 @@ export function PlaylistDetail() {
       toast('Playlist queued for reprocessing.')
       void refresh()
     },
-    onError: (err: Error) => toast(err.message, 'error'),
+    onError: (err) => toast(failureMessage('Could not reprocess the playlist', err), 'error'),
   })
 
   const deleteMut = useMutation({
@@ -180,7 +194,7 @@ export function PlaylistDetail() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.playlists })
       navigate('/')
     },
-    onError: (err: Error) => toast(err.message, 'error'),
+    onError: (err) => toast(failureMessage('Could not delete the playlist', err), 'error'),
   })
 
   const cleanupMut = useMutation({
@@ -189,20 +203,13 @@ export function PlaylistDetail() {
       toast(res.message || 'Transcripts cleared.')
       void refresh()
     },
-    onError: (err: Error) => toast(err.message, 'error'),
+    onError: (err) => toast(failureMessage('Could not clean up the transcripts', err), 'error'),
   })
 
-  const retryMut = useMutation({
-    mutationFn: (video: Video) => retryVideo(video.id),
-    onSuccess: (_result, video) => {
-      toast(`#${formatPosition(video.position)} queued for retry.`)
-      void invalidateVideo(queryClient, playlistId, video.id)
-    },
-    onError: (err: Error) => toast(err.message, 'error'),
-  })
+  const retryMut = useRetryVideo(playlistId)
 
   // ---- Loading / error / not found states -------------------------------------------------
-  if (!validId || (playlistQuery.isError && playlistQuery.error instanceof ApiError && playlistQuery.error.status === 404)) {
+  if (!validId || (playlistQuery.isError && isNotFound(playlistQuery.error))) {
     return (
       <div className="space-y-3">
         <h1 className="text-page text-text">Playlist not found</h1>
@@ -242,7 +249,10 @@ export function PlaylistDetail() {
         <div className="rounded border border-border bg-surface">
           <table className="w-full">
             <tbody>
-              <SkeletonTableRows rows={6} widths={['w-8', 'w-64', 'w-24', 'w-32', 'w-16', 'w-16']} />
+              <SkeletonTableRows
+                rows={6}
+                widths={['w-8', 'w-64', 'w-24', 'w-32', 'w-16', 'w-16']}
+              />
             </tbody>
           </table>
         </div>
@@ -272,11 +282,6 @@ export function PlaylistDetail() {
 
   const openReview = (video: Video) => navigate(`/playlists/${playlistId}/review/${video.id}`)
 
-  const handleRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, video: Video) => {
-    // Only react when the row itself is focused, not a button or menu inside it.
-    if (event.target === event.currentTarget && event.key === 'Enter') openReview(video)
-  }
-
   return (
     <div className="space-y-5">
       {/* 6.2 Header */}
@@ -287,7 +292,7 @@ export function PlaylistDetail() {
             <a
               href={playlist.source_url}
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="shrink-0 text-text-muted transition hover:text-accent"
               aria-label="Open playlist on YouTube"
               title="Open playlist on YouTube"
@@ -298,7 +303,11 @@ export function PlaylistDetail() {
           <p className="mt-1 text-label text-text-muted">
             <code className="font-mono">{playlist.playlist_id}</code>
             {' · '}
-            <RelativeTime iso={playlist.last_synced_at} prefix="Last synced" fallback="Never synced" />
+            <RelativeTime
+              iso={playlist.last_synced_at}
+              prefix="Last synced"
+              fallback="Never synced"
+            />
             {playlist.status === 'publish_failed' && playlist.last_publish_error ? (
               <span className="text-st-error-fg">
                 {' · '}Last publish failed: {playlist.last_publish_error}
@@ -454,7 +463,7 @@ export function PlaylistDetail() {
           )}
         >
           <table className="w-full text-left text-body">
-            <thead className="text-label text-text-muted">
+            <thead className="text-label text-text">
               <tr className="h-row">
                 {[
                   ['#', 'w-16 text-right'],
@@ -479,7 +488,10 @@ export function PlaylistDetail() {
             </thead>
             <tbody>
               {!videos ? (
-                <SkeletonTableRows rows={8} widths={['w-8', 'w-64', 'w-24', 'w-32', 'w-16', 'w-16']} />
+                <SkeletonTableRows
+                  rows={8}
+                  widths={['w-8', 'w-64', 'w-24', 'w-32', 'w-16', 'w-16']}
+                />
               ) : videos.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="p-5 text-center text-text-muted">
@@ -499,12 +511,12 @@ export function PlaylistDetail() {
                       key={video.id}
                       tabIndex={0}
                       onClick={() => openReview(video)}
-                      onKeyDown={(event) => handleRowKeyDown(event, video)}
+                      onKeyDown={(event) => onRowKeyDown(event, () => openReview(video))}
                       className="h-row cursor-pointer border-b border-border transition last:border-b-0 hover:bg-surface-muted"
                     >
                       <td
                         className={cn(
-                          'border-l-2 px-3 py-1 text-right font-mono text-label tabular-nums text-text-muted',
+                          'border-l-2 px-3 py-1 text-right text-label tabular-nums text-text-muted',
                           needsReview ? 'border-l-st-review-fg' : 'border-l-transparent',
                         )}
                       >
@@ -529,12 +541,22 @@ export function PlaylistDetail() {
                       </td>
                       <td className="px-3 py-1 text-label">
                         {detail.reason ? (
-                          <span className={cn('block', TONE_TEXT[detail.tone === 'muted' ? 'neutral' : detail.tone])}>
+                          <span
+                            className={cn(
+                              'block',
+                              TONE_TEXT[detail.tone === 'muted' ? 'neutral' : detail.tone],
+                            )}
+                          >
                             {detail.reason}
                           </span>
                         ) : null}
                         {detail.note ? (
-                          <span className={cn('block', TONE_TEXT[detail.tone === 'muted' ? 'neutral' : detail.tone])}>
+                          <span
+                            className={cn(
+                              'block',
+                              TONE_TEXT[detail.tone === 'muted' ? 'neutral' : detail.tone],
+                            )}
+                          >
                             {detail.note}
                           </span>
                         ) : null}
@@ -558,7 +580,11 @@ export function PlaylistDetail() {
                               }}
                               disabled={retryMut.isPending}
                               aria-label={`Retry #${formatPosition(video.position)}`}
-                              title={isRetriesExhausted(video) ? 'Retries exhausted. Retry now.' : 'Retry this video'}
+                              title={
+                                isRetriesExhausted(video)
+                                  ? 'Retries exhausted. Retry now.'
+                                  : 'Retry this video'
+                              }
                             >
                               <RotateCw aria-hidden="true" className="size-icon" />
                               Retry

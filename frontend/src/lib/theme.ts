@@ -40,7 +40,9 @@ export function getSystemTheme(): ResolvedTheme {
 }
 
 /** The theme actually in effect (a preference of `system` resolves to the OS). */
-export function getResolvedTheme(preference: ThemePreference = getThemePreference()): ResolvedTheme {
+export function getResolvedTheme(
+  preference: ThemePreference = getThemePreference(),
+): ResolvedTheme {
   return preference === 'system' ? getSystemTheme() : preference
 }
 

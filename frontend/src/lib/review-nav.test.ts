@@ -20,7 +20,9 @@ describe('findNextNeedingReview', () => {
   })
 
   it('works for videos beyond the first 250', () => {
-    const videos = list(Array.from({ length: 400 }, (_, i) => (i === 399 ? 'pending_review' : 'approved')) as Stage[])
+    const videos = list(
+      Array.from({ length: 400 }, (_, i) => (i === 399 ? 'pending_review' : 'approved')) as Stage[],
+    )
     expect(findNextNeedingReview(videos, 300)).toBe(400)
   })
 })
