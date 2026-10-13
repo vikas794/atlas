@@ -257,7 +257,27 @@ async def test_concurrency_is_bounded_and_every_video_still_completes(
     repo: PlaylistRepository,
 ) -> None:
     _, videos = await add_videos(repo, count=6)
-    transcripts = Transcripts(delay=0.05)
+
+    class PairedTranscripts(Transcripts):
+        """Hold each fetch until a second one is in flight (or 2s pass), so the
+        test proves the cap is reached without depending on scheduler timing."""
+
+        async def fetch_transcript(self, video_id: str, language: str = "en") -> TranscriptResult:
+            self.calls.append(video_id)
+            self.running += 1
+            self.max_running = max(self.max_running, self.running)
+            try:
+                loop = asyncio.get_running_loop()
+                deadline = loop.time() + 2.0
+                while self.max_running < 2 and loop.time() < deadline:
+                    await asyncio.sleep(0.01)
+                await asyncio.sleep(0.01)
+                text = f"transcript of {video_id}"
+                return TranscriptResult(video_id, language, "", text, "hash", "", len(text))
+            finally:
+                self.running -= 1
+
+    transcripts = PairedTranscripts()
     worker = make_worker(repo, transcripts, Notes(), max_concurrent_videos=2)
 
     await worker.start()
