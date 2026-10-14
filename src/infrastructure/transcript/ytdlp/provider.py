@@ -38,8 +38,7 @@ from pathlib import Path
 from typing import Any, Final
 from uuid import uuid4
 
-from typing import Any, cast
-from yt_dlp import _Params, _Params, YoutubeDL
+from yt_dlp import YoutubeDL
 from yt_dlp import version as yt_dlp_version
 
 from src.config.settings import SettingsLoader, repo_root
@@ -91,7 +90,7 @@ def download_subtitles(options: dict[str, Any], urls: list[str]) -> None:
     Keeping it a free function with no ``self`` makes it a one-line monkeypatch
     seam for the test suite.
     """
-    with YoutubeDL(cast(_Params, options)) as ydl:
+    with YoutubeDL(options) as ydl:  # type: ignore[arg-type]
         ydl.download(urls)
 
 
@@ -101,7 +100,7 @@ def list_subtitle_languages(options: dict[str, Any], url: str) -> list[str]:
     Manual tracks come first, then automatic captions. Like :func:`download_subtitles` this
     blocks, so callers use :func:`asyncio.to_thread`, and it is a one-line monkeypatch seam.
     """
-    with YoutubeDL(cast(_Params, options)) as ydl:
+    with YoutubeDL(options) as ydl:  # type: ignore[arg-type]
         info = ydl.extract_info(url, download=False) or {}
     manual = [code for code in (info.get("subtitles") or {}) if code != "live_chat"]
     automatic = [
@@ -142,6 +141,11 @@ def _language_preference(requested: str) -> list[str]:
         if code and code not in ordered:
             ordered.append(code)
     return ordered or ["en"]
+
+
+def _original_tracks(languages: list[str]) -> list[str]:
+    """``["en", "hi"]`` -> ``["en-orig", "hi-orig"]``: YouTube's un-derived auto-caption tracks."""
+    return [f"{code}-orig" for code in languages if not code.endswith("-orig")]
 
 
 def _next_line_is_cue_timing(lines: list[str], start: int) -> bool:
@@ -287,7 +291,11 @@ class YtDlpTranscriptProvider(TranscriptProviderPort):
             0.0, float(settings("transcript_min_interval_seconds", 4.0) or 0.0)
         )
         self._cookies_file = str(settings("ytdlp_cookies_file", "") or "").strip()
-        self._cookies_browser = str(settings("ytdlp_cookies_from_browser", "") or "").strip()
+        if self._cookies_file and not Path(self._cookies_file).is_absolute():
+            # Relative to the repo root, like the transcript folder: the working directory
+            # must not matter.
+            self._cookies_file = str(repo_root() / self._cookies_file)
+        self._cookies_browser =str(settings("ytdlp_cookies_from_browser", "") or "").strip()
         self._fetch_lock = asyncio.Lock()
         self._last_fetch_end = 0.0
         logger.info("yt-dlp %s", yt_dlp_version.__version__)
@@ -326,17 +334,24 @@ class YtDlpTranscriptProvider(TranscriptProviderPort):
             tempfile.mkdtemp(prefix=f"ytdlp-{_safe_name(video_id)}-", dir=self._output_folder)
         )
         try:
-            options = self._ydl_options(languages, work_dir)
             async with self._paced():
+                # YouTube's "<lang>-orig" track is the original auto-caption; the plain
+                # "<lang>" one is often a derived track it throttles with HTTP 429. Ask for
+                # the original first: yt-dlp writes tracks in order, so when a later track
+                # fails, a subtitle file already on disk is still a good result.
+                wanted = _original_tracks(languages) + languages
+                options = self._ydl_options(wanted, work_dir)
                 try:
                     # Never block the event loop: yt-dlp is synchronous and slow.
                     await asyncio.to_thread(download_subtitles, options, [url])
                 except Exception as error:
                     detail = str(error) or type(error).__name__
                     logger.debug("yt-dlp download failed for %s: %s", video_id, safe_detail(detail))
-                    raise _transcript_error(detail) from error
+                    if self._locate_subtitle(work_dir, wanted) is None:
+                        raise _transcript_error(detail) from error
+                    logger.info("Using the caption track already downloaded for %s", video_id)
 
-                subtitle_path = self._locate_subtitle(work_dir, languages)
+                subtitle_path = self._locate_subtitle(work_dir, wanted)
                 if subtitle_path is None:
                     # Neither the requested language nor English exists. If *any* subtitle track
                     # exists, use it as is and record its language (PRD section 20); only a video
@@ -355,6 +370,9 @@ class YtDlpTranscriptProvider(TranscriptProviderPort):
                 )
 
             delivered_language = _language_from_filename(subtitle_path) or languages[0]
+            if delivered_language.removesuffix("-orig") in languages:
+                # The original track of a language we asked for is that language ("en-orig").
+                delivered_language = delivered_language.removesuffix("-orig")
             artifact_path = self._persist_artifact(video_id, subtitle_path)
 
             result = TranscriptResult(

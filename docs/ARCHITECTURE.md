@@ -304,6 +304,11 @@ Every failure is a `FailureType` with a fixed `FailureKind` (`FAILURE_KINDS` in
 
 Where the type comes from:
 
+- **Subtitle track choice.** The yt-dlp adapter requests `[<lang>-orig, ..., <lang>, en]` in one
+  call. YouTube serves the original auto-caption (`en-orig`) but often answers the plain derived
+  track (`en`) with HTTP 429; yt-dlp writes tracks in order, so a subtitle file already on disk
+  when a later track fails is used and the error is only logged at debug level. With no file on
+  disk the error is classified as below. A `<lang>-orig` file is recorded as `<lang>`.
 - **yt-dlp** errors go through `failure_classifier.classify_transcript_error`: ordered regex rules,
   first match wins. Rate limiting (`HTTP Error 429`, "too many requests", "rate-limited",
   "try again later") is checked first because a throttled IP gets "Video unavailable ... try

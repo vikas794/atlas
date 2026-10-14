@@ -116,18 +116,34 @@ the video stays `failed` with `retries_exhausted` and the reason
 `YouTube is rate-limiting requests. Automatic retries are used up; press Retry to try again.`
 (seen in a real run). It is never retried forever.
 
-Atlas already fetches transcripts one at a time, `transcript_min_interval_seconds` (4s) apart.
-If it still happens:
+Atlas asks yt-dlp for the original auto-caption track (`en-orig`) before the plain one (`en`).
+YouTube often throttles the plain track with a 429 while serving the original; when the
+original was downloaded, that 429 is ignored and logged at debug level only. Atlas also fetches
+transcripts one at a time, `transcript_min_interval_seconds` (4s) apart. If it still happens:
 
-1. Wait (often tens of minutes) and press Retry; or raise `transcript_min_interval_seconds`
+1. **Find out whether it is one video or your whole IP.** From the project folder run
+   `.venv/Scripts/python -m yt_dlp --skip-download --write-auto-subs --sub-langs en -o "%(id)s" <video url>`
+   on the failing video and on another captioned video. If only one fails, compare
+   `--sub-langs en-orig` with `--sub-langs en`: a 429 on `en` only is the throttled-derived-track
+   case Atlas already works around. If every video fails, your IP is flagged.
+2. Wait (often tens of minutes) and press Retry; or raise `transcript_min_interval_seconds`
    (for example 10) and the `rate_limit_backoff_*` values.
-2. Give yt-dlp logged-in cookies: set `ytdlp_cookies_file` (a Netscape `cookies.txt`) or
-   `ytdlp_cookies_from_browser` (for example `chrome`). Use a throwaway Google account, since
-   heavy scraping can get an account flagged, and never commit the file.
-3. Update yt-dlp (`pip install -U yt-dlp`; the version in use is logged at startup). YouTube
-   changes often and old versions get blocked. `pyproject.toml` pins an exact version, so bump
-   the pin too.
-4. A VPN or datacenter IP is throttled fastest; a home connection is far less likely to be.
+3. Install Deno (see the README prerequisites) and restart the backend. yt-dlp warns
+   `No supported JavaScript runtime could be found` without it.
+4. Update yt-dlp: the dependency is pinned in `pyproject.toml`, so bump the pin and run
+   `uv add "yt-dlp[default,curl-cffi]==<version>"` (the project uses `uv`, there is no `pip` in
+   the venv). YouTube changes often and old versions get blocked. The version in use is logged
+   at startup. The `curl-cffi` extra lets yt-dlp impersonate a browser.
+5. Cookies, only if the above is not enough: set `ytdlp_cookies_file` (a Netscape `cookies.txt`;
+   a raw `Cookie:` header string does not work) or `ytdlp_cookies_from_browser` (for example
+   `firefox`, signed in to YouTube; `Extracted 3 cookies` means it is not signed in). Use a
+   throwaway Google account, keep the file out of git (`cookies.txt` at the repo root is
+   gitignored; set `ATLAS_YTDLP_COOKIES_FILE` in `.env`), and export it from a private window
+   that you then close. A cookie file exported from a normal tab gets rotated by YouTube and
+   fails with `The page needs to be reloaded`. Cookies that were pasted anywhere shared should
+   be revoked by signing out of that session.
+6. A VPN or datacenter IP is throttled fastest; try another network (a phone hotspot is a quick
+   test).
 
 ### Permanent video failures
 

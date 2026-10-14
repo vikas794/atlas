@@ -11,6 +11,8 @@ one Drive folder. It is a local, single-user tool: one process, one SQLite file,
 - [`uv`](https://docs.astral.sh/uv/getting-started/installation/). It installs the pinned Python
   (`.python-version`: 3.13.13; `pyproject.toml` requires `>=3.13,<3.14`).
 - Node.js `^20.19.0 || >=22.12.0` (required by Vite 7), only to install and build the frontend.
+- Recommended: [Deno](https://deno.com) (`winget install DenoLand.Deno` on Windows). yt-dlp uses
+  it as its JavaScript runtime for YouTube; without it yt-dlp warns and some downloads fail.
 - A YouTube Data API v3 key and a Gemini (Google AI Studio) or OpenRouter key.
 - For publishing: a Google Cloud project with the Drive API and Docs API enabled.
 

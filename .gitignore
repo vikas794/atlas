@@ -88,3 +88,6 @@ graphify-out/
 .archify/**/*.json
 skills-lock.json
 .gitnexus/
+
+# yt-dlp login cookies (secret)
+cookies.txt

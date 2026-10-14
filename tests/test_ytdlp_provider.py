@@ -202,7 +202,7 @@ async def test_fetch_returns_cleaned_text_language_and_usage_record(
     assert record.total_tokens == 0 and record.cost_usd == 0.0
 
     # Requested language first, English as the fallback track.
-    assert seen[0]["subtitleslangs"] == ["en"]
+    assert seen[0]["subtitleslangs"] == ["en-orig", "en"]
     assert seen[0]["skip_download"] is True
     assert seen[0]["writesubtitles"] is True
     assert seen[0]["writeautomaticsub"] is True
@@ -222,7 +222,7 @@ async def test_requested_language_is_preferred_and_english_is_the_fallback(
     # track actually used rather than the requested one (PRD section 20).
     result = await provider.fetch_transcript(VIDEO_ID, language="de")
 
-    assert seen[0]["subtitleslangs"] == ["de", "en"]
+    assert seen[0]["subtitleslangs"] == ["de-orig", "en-orig", "de", "en"]
     assert result.language == "en"
     assert result.cleaned_text == SRT_CLEANED
 
@@ -416,7 +416,39 @@ async def test_a_non_default_language_is_used_as_is_and_recorded(
 
     assert result.language == "hi"
     assert "Welcome back to the channel." in result.cleaned_text
-    assert [call["subtitleslangs"] for call in seen] == [["en"], ["hi"]]
+    assert [call["subtitleslangs"] for call in seen] == [["en-orig", "en"], ["hi"]]
+
+
+async def test_throttled_plain_track_does_not_lose_the_original_track(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """YouTube answers the derived "en" track with 429 but serves "en-orig": keep what we got."""
+
+    def handler(options: dict[str, Any], urls: list[str]) -> None:
+        write_subtitle(options, urls[0], language="en-orig", payload=SRT_PAYLOAD)
+        raise RuntimeError("Unable to download video subtitles for 'en': HTTP Error 429")
+
+    install_download_stub(monkeypatch, handler)
+    provider = build_provider(tmp_path)
+
+    result = await provider.fetch_transcript(VIDEO_ID)
+
+    assert result.cleaned_text == SRT_CLEANED
+    assert result.language == "en"
+
+
+async def test_throttle_with_no_track_written_is_still_rate_limited(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_download_stub(
+        monkeypatch, raising_stub("Unable to download video subtitles: HTTP Error 429")
+    )
+    provider = build_provider(tmp_path)
+
+    with pytest.raises(TranscriptError) as excinfo:
+        await provider.fetch_transcript(VIDEO_ID)
+
+    assert excinfo.value.failure_type is FailureType.RATE_LIMITED
 
 
 async def test_fallback_prefers_the_original_language_automatic_track(
@@ -633,7 +665,7 @@ def test_ydl_options_pace_subtitle_requests_and_carry_cookies(tmp_path: Path) ->
         make_settings(
             tmp_path / "transcripts",
             transcript_min_interval_seconds=4.0,
-            ytdlp_cookies_file="cookies.txt",
+            ytdlp_cookies_file=str(tmp_path / "cookies.txt"),
             ytdlp_cookies_from_browser="chrome",
         )
     )
@@ -641,8 +673,18 @@ def test_ydl_options_pace_subtitle_requests_and_carry_cookies(tmp_path: Path) ->
     options = provider._ydl_options(["en"], tmp_path)
 
     assert options["sleep_interval_subtitles"] == 4
-    assert options["cookiefile"] == "cookies.txt"
+    assert options["cookiefile"] == str(tmp_path / "cookies.txt")
     assert "cookiesfrombrowser" not in options  # the file wins over the browser
+
+
+def test_relative_cookie_path_resolves_against_the_repo_root(tmp_path: Path) -> None:
+    provider = YtDlpTranscriptProvider(
+        make_settings(tmp_path / "transcripts", ytdlp_cookies_file="cookies.txt")
+    )
+
+    cookiefile = Path(provider._ydl_options(["en"], tmp_path)["cookiefile"])
+
+    assert cookiefile.is_absolute() and cookiefile.name == "cookies.txt"
 
 
 def test_ydl_options_have_no_cookies_by_default(tmp_path: Path) -> None:

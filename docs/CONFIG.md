@@ -64,7 +64,7 @@ both. "Env" lists the override names in precedence order.
 | `database_path` | `"data/atlas.sqlite3"` | The SQLite file holding all state. Created and migrated on startup. | not empty | `ATLAS_DATABASE_PATH`, `ATLAS_DB_PATH` |
 | `transcript_output_folder` | `"transcripts"` | Where raw subtitle files are kept (one per fetch); transcript cleanup only deletes files inside it. | not empty | `ATLAS_TRANSCRIPT_OUTPUT_FOLDER` |
 | `transcript_min_interval_seconds` | `4.0` | YouTube transcript fetches run one at a time (whatever `max_concurrent_videos` is), at least this far apart (plus up to 25% jitter); also yt-dlp's `sleep_interval_subtitles`. `0` turns pacing off. | >= 0 | `ATLAS_TRANSCRIPT_MIN_INTERVAL_SECONDS` |
-| `ytdlp_cookies_file` | `""` | Optional Netscape `cookies.txt` for yt-dlp; logged-in requests are throttled far less. Use a throwaway Google account. Wins over the browser setting. Never commit this file. | path or empty | `ATLAS_YTDLP_COOKIES_FILE` |
+| `ytdlp_cookies_file` | `""` | Optional Netscape `cookies.txt` for yt-dlp; logged-in requests are throttled far less. Use a throwaway Google account. Wins over the browser setting. Relative paths resolve against the repo root; `cookies.txt` at the root is gitignored. Prefer setting it via `ATLAS_YTDLP_COOKIES_FILE` in `.env`. Never commit this file. | path or empty | `ATLAS_YTDLP_COOKIES_FILE` |
 | `ytdlp_cookies_from_browser` | `""` | Optional browser name (`chrome`, `firefox`, `edge`, ...) to read cookies from. | name or empty | `ATLAS_YTDLP_COOKIES_FROM_BROWSER` |
 
 ### Secrets (names, not values)
@@ -91,7 +91,7 @@ These hold the **name** of the environment variable that contains the key.
 
 | Setting | Default | Effect | Validation | Env |
 |---|---|---|---|---|
-| `transcript_language` | `"en"` | Preferred subtitle language for yt-dlp (manual or automatic). If neither it nor English exists, any available track is used and its language recorded; no track at all is `no_usable_language`. | not empty | `ATLAS_TRANSCRIPT_LANGUAGE` |
+| `transcript_language` | `"en"` | Preferred subtitle language for yt-dlp (manual or automatic). Atlas asks for the original auto-caption track (`<lang>-orig`) first, then the plain `<lang>` track (YouTube often throttles the plain one). If neither it nor English exists, any available track is used and its language recorded; no track at all is `no_usable_language`. | not empty | `ATLAS_TRANSCRIPT_LANGUAGE` |
 
 ### Notes generation
 
