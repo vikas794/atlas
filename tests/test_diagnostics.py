@@ -48,6 +48,16 @@ def get_report() -> dict:
     return resp.json()
 
 
+def test_recent_errors_can_be_cleared(env) -> None:
+    logging.getLogger("src.test.diag").error("boom")
+    assert any(e["message"] == "boom" for e in get_report()["recent_errors"])
+
+    with TestClient(app) as client:
+        resp = client.delete("/api/diagnostics/recent-errors")
+        assert resp.status_code == 204
+        assert client.get("/api/diagnostics").json()["recent_errors"] == []
+
+
 def by_id(report: dict) -> dict[str, dict]:
     return {check["id"]: check for check in report["checks"]}
 

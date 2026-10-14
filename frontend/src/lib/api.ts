@@ -197,6 +197,11 @@ export function getDiagnostics() {
   return request<DiagnosticsResponse>('/api/diagnostics')
 }
 
+/** Empties the backend's in-memory recent warnings/errors buffer. */
+export function clearRecentErrors() {
+  return request<void>('/api/diagnostics/recent-errors', { method: 'DELETE' })
+}
+
 /* ------------------------------------------------------------------ Usage */
 
 export interface UsageQueryParams {

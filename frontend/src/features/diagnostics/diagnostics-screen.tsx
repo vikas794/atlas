@@ -1,20 +1,24 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
+  Check,
+  Copy,
   HelpCircle,
   RefreshCw,
+  Trash2,
   XCircle,
   type LucideIcon,
 } from 'lucide-react'
 
-import { getDiagnostics } from '../../lib/api'
+import { clearRecentErrors, getDiagnostics } from '../../lib/api'
 import { errorMessage, isNotFound } from '../../lib/errors'
 import { pluralize } from '../../lib/format'
 import { SLOW_POLL_MS } from '../../lib/polling'
 import { queryKeys } from '../../lib/query-keys'
 import { TONE_TEXT, type Tone } from '../../lib/tone'
-import type { DiagnosticCheck, DiagnosticLogEntry } from '../../lib/types'
+import type { DiagnosticCheck, DiagnosticLogEntry, DiagnosticsResponse } from '../../lib/types'
 import { cn } from '../../lib/utils'
 import { RelativeTime } from '../../components/shared/relative-time'
 import {
@@ -56,6 +60,54 @@ function levelTone(level: string): Tone {
 /** design.md 4: sentence case everywhere ("WARNING" -> "Warning"). */
 function levelLabel(level: string): string {
   return level ? level.charAt(0).toUpperCase() + level.slice(1).toLowerCase() : level
+}
+
+type LevelFilter = 'all' | 'warning' | 'error'
+
+const FILTERS: { value: LevelFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'warning', label: 'Warnings' },
+  { value: 'error', label: 'Errors' },
+]
+
+function matchesFilter(entry: DiagnosticLogEntry, filter: LevelFilter): boolean {
+  if (filter === 'all') return true
+  return levelTone(entry.level) === (filter === 'error' ? 'error' : 'warn')
+}
+
+/** Plain-text report of the problems on screen, ready to paste to whoever fixes them. */
+function buildReport(data: DiagnosticsResponse, entries: DiagnosticLogEntry[]): string {
+  const problems = data.checks.filter((check) => check.status !== 'ok')
+  const lines = [`Atlas diagnostics (${new Date().toISOString()})`, '']
+  lines.push('Checks needing attention:')
+  if (problems.length === 0) lines.push('- none')
+  for (const check of problems) {
+    lines.push(`- [${check.status.toUpperCase()}] ${check.label}: ${check.message}`)
+  }
+  lines.push('', 'Recent backend log records (newest first):')
+  if (entries.length === 0) lines.push('- none')
+  for (const entry of entries) {
+    lines.push(
+      `- ${entry.timestamp} ${entry.level.toUpperCase()} ${entry.logger}: ${entry.message}`,
+    )
+  }
+  return lines.join('\n')
+}
+
+async function writeClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const area = document.createElement('textarea')
+  area.value = text
+  area.style.position = 'fixed'
+  area.style.opacity = '0'
+  document.body.appendChild(area)
+  area.select()
+  const ok = document.execCommand('copy')
+  area.remove()
+  if (!ok) throw new Error('Copy command was rejected')
 }
 
 function CheckRow({ check }: { check: DiagnosticCheck }) {
@@ -101,6 +153,40 @@ export function DiagnosticsScreen() {
     refetchInterval: SLOW_POLL_MS,
   })
   const data = query.data
+  const queryClient = useQueryClient()
+  const clear = useMutation({
+    mutationFn: clearRecentErrors,
+    onSuccess: () =>
+      queryClient.setQueryData<DiagnosticsResponse>(queryKeys.diagnostics, (old) =>
+        old ? { ...old, recent_errors: [] } : old,
+      ),
+  })
+  const [filter, setFilter] = useState<LevelFilter>('all')
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  useEffect(() => {
+    if (copyState !== 'copied') return
+    const timer = window.setTimeout(() => setCopyState('idle'), 2000)
+    return () => window.clearTimeout(timer)
+  }, [copyState])
+
+  const allEntries = data?.recent_errors ?? []
+  const visibleEntries = allEntries.filter((entry) => matchesFilter(entry, filter))
+  const filterCounts: Record<LevelFilter, number> = {
+    all: allEntries.length,
+    warning: allEntries.filter((entry) => matchesFilter(entry, 'warning')).length,
+    error: allEntries.filter((entry) => matchesFilter(entry, 'error')).length,
+  }
+
+  async function copyReport() {
+    if (!data) return
+    try {
+      await writeClipboard(buildReport(data, visibleEntries))
+      setCopyState('copied')
+    } catch {
+      setCopyState('failed')
+    }
+  }
+
   const counts = data
     ? {
         ok: data.checks.filter((check) => check.status === 'ok').length,
@@ -113,18 +199,33 @@ export function DiagnosticsScreen() {
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-page text-text">Diagnostics</h1>
-        <Button
-          variant="secondary"
-          onClick={() => void query.refetch()}
-          disabled={query.isFetching}
-        >
-          <RefreshCw
-            aria-hidden="true"
-            className={cn('size-icon', query.isFetching && 'atlas-spin')}
-          />
-          {query.isFetching ? 'Checking…' : 'Run checks again'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => void copyReport()} disabled={!data}>
+            {copyState === 'copied' ? (
+              <Check aria-hidden="true" className="size-icon" />
+            ) : (
+              <Copy aria-hidden="true" className="size-icon" />
+            )}
+            {copyState === 'copied' ? 'Copied' : 'Copy for fixing'}
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => void query.refetch()}
+            disabled={query.isFetching}
+          >
+            <RefreshCw
+              aria-hidden="true"
+              className={cn('size-icon', query.isFetching && 'atlas-spin')}
+            />
+            {query.isFetching ? 'Checking…' : 'Run checks again'}
+          </Button>
+        </div>
       </div>
+      {copyState === 'failed' ? (
+        <p role="alert" className="text-label text-st-error-fg">
+          Could not copy to the clipboard. Select the text and copy it manually.
+        </p>
+      ) : null}
 
       {query.isError && !data ? (
         <ErrorState
@@ -175,8 +276,49 @@ export function DiagnosticsScreen() {
                 (4xx) are logged at INFO, so they do not appear here.
               </p>
             </div>
+            {data && data.recent_errors.length > 0 ? (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div role="group" aria-label="Filter by level" className="flex flex-wrap gap-2">
+                  {FILTERS.map((item) => {
+                    const selected = filter === item.value
+                    return (
+                      <button
+                        type="button"
+                        key={item.value}
+                        aria-pressed={selected}
+                        onClick={() => setFilter(item.value)}
+                        className={cn(
+                          'rounded border border-border px-3 py-1 text-label transition',
+                          selected
+                            ? 'bg-surface-muted text-text ring-2 ring-accent'
+                            : 'hover:bg-surface-muted',
+                        )}
+                      >
+                        {item.label} ({filterCounts[item.value]})
+                      </button>
+                    )
+                  })}
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => clear.mutate()}
+                  disabled={clear.isPending}
+                >
+                  <Trash2 aria-hidden="true" className="size-icon" />
+                  {clear.isPending ? 'Clearing…' : 'Clear log'}
+                </Button>
+              </div>
+            ) : null}
+            {clear.isError ? (
+              <p role="alert" className="text-label text-st-error-fg">
+                Could not clear the log: {errorMessage(clear.error)}
+              </p>
+            ) : null}
             {data && data.recent_errors.length === 0 ? (
               <EmptyState title="No warnings or errors logged recently." />
+            ) : data && visibleEntries.length === 0 ? (
+              <EmptyState title="No log records match this filter." />
             ) : (
               <div className="overflow-x-auto rounded border border-border bg-surface">
                 <table className="w-full text-left text-body">
@@ -201,7 +343,7 @@ export function DiagnosticsScreen() {
                       <SkeletonTableRows rows={3} widths={['w-16', 'w-12', 'w-24', 'w-64']} />
                     ) : (
                       // Already newest first from the backend; keep its order.
-                      data.recent_errors.map((entry, index) => (
+                      visibleEntries.map((entry, index) => (
                         <ErrorRow key={`${entry.timestamp}-${index}`} entry={entry} />
                       ))
                     )}

@@ -13,7 +13,10 @@ Settings screen is where you upload the OAuth client file and authorize Drive.
   secrets redacted; disable with `log_file_logging: false`). Pipeline lines carry
   `playlist_id=... video_id=...`. Set `log_level: DEBUG` for more.
 - **Recent errors**: the Diagnostics screen (`recent_errors` in `/api/diagnostics`), an in-memory buffer of the last 50
-  WARNING+ records since the process started.
+  WARNING+ records since the process started. The screen can filter them (All / Warnings /
+  Errors), and **Copy for fixing** copies the checks needing attention plus the currently
+  filtered records as plain text, ready to paste to whoever will fix them. **Clear log** empties the in-memory buffer
+  (`DELETE /api/diagnostics/recent-errors`); `logs/atlas.log` keeps its history.
 - **Per video**: the failure reason and kind are shown in the playlist table and returned by
   `GET /api/videos/{id}` (`failure_type`, `failure_kind`, `failure_reason`, `next_retry_at`,
   `auto_retry`, `retries_exhausted`).

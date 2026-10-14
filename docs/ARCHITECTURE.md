@@ -522,6 +522,7 @@ recovered on the next start.
 | `GET /api/drive/status`, `POST /api/drive/credentials`, `POST /api/drive/auth` | Drive state, upload the OAuth client JSON, run consent |
 | `GET /api/usage` | Usage ledger aggregates |
 | `GET /api/health`, `GET /api/diagnostics` | Liveness; readiness checks and the last 50 warnings/errors |
+| `DELETE /api/diagnostics/recent-errors` | Empty the in-memory warnings/errors buffer (204; `logs/atlas.log` is untouched) |
 
 Errors use `{code, message, details}` with messages passed through the secret redactor:
 400 `INVALID_URL`, 404 `PLAYLIST_UNAVAILABLE` / `NOT_FOUND`, 409 `CONFLICT` / `INVALID_STATE` /

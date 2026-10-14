@@ -1,6 +1,6 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { mockApi, renderRoute } from '../../test/harness'
 import type { DiagnosticsResponse } from '../../lib/types'
@@ -77,6 +77,67 @@ describe('DiagnosticsScreen', () => {
       screen.getByRole('heading', { level: 2, name: 'Recent warnings and errors' }),
     ).toBeInTheDocument()
     expect(screen.getByText(/WARNING or above, newest first/)).toBeInTheDocument()
+  })
+
+  const MIXED: DiagnosticsResponse = {
+    ...DIAGNOSTICS,
+    recent_errors: [
+      { timestamp: '2026-10-12T09:30:00Z', level: 'WARNING', logger: 'a', message: 'slow call' },
+      { timestamp: '2026-10-12T09:00:00Z', level: 'ERROR', logger: 'b', message: 'db locked' },
+    ],
+  }
+
+  it('filters the log by warnings and errors', async () => {
+    mockApi().on('GET', '/api/diagnostics', MIXED)
+    const user = userEvent.setup()
+    renderRoute('/diagnostics')
+
+    await screen.findByText('slow call')
+    await user.click(screen.getByRole('button', { name: 'Errors (1)' }))
+    expect(screen.queryByText('slow call')).not.toBeInTheDocument()
+    expect(screen.getByText('db locked')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Warnings (1)' }))
+    expect(screen.getByText('slow call')).toBeInTheDocument()
+    expect(screen.queryByText('db locked')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'All (2)' }))
+    expect(screen.getByText('slow call')).toBeInTheDocument()
+    expect(screen.getByText('db locked')).toBeInTheDocument()
+  })
+
+  it('clears the log through the backend', async () => {
+    const api = mockApi().on('GET', '/api/diagnostics', MIXED)
+    api.on('DELETE', '/api/diagnostics/recent-errors', { status: 204 })
+    const user = userEvent.setup()
+    renderRoute('/diagnostics')
+    await screen.findByText('slow call')
+
+    await user.click(screen.getByRole('button', { name: 'Clear log' }))
+    expect(await screen.findByText('No warnings or errors logged recently.')).toBeInTheDocument()
+    expect(screen.queryByText('slow call')).not.toBeInTheDocument()
+  })
+
+  it('copies the problems and the filtered log to the clipboard', async () => {
+    mockApi().on('GET', '/api/diagnostics', MIXED)
+    const user = userEvent.setup()
+    renderRoute('/diagnostics')
+    await screen.findByText('slow call')
+
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+
+    await user.click(screen.getByRole('button', { name: 'Errors (1)' }))
+    await user.click(screen.getByRole('button', { name: 'Copy for fixing' }))
+
+    expect(writeText).toHaveBeenCalledTimes(1)
+    const text = writeText.mock.calls[0][0] as string
+    expect(text).toContain('[ERROR] Notes model: GEMINI_API_KEY is not set.')
+    expect(text).toContain('[WARNING] Google Drive')
+    expect(text).not.toContain('Database')
+    expect(text).toContain('ERROR b: db locked')
+    expect(text).not.toContain('slow call')
+    expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument()
   })
 
   it('says so when there are no recent errors', async () => {

@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.services.diagnostics import diagnostics_report
 from backend.spa import SpaFallback, default_dist_dir
 from src.config import load_settings
-from src.shared.logging_setup import configure_logging
+from src.shared.logging_setup import RECENT_ERRORS, configure_logging
 from src.transport.http.fastapi.dependencies import get_usage_ledger, get_worker
 from src.transport.http.fastapi.errors import register_error_handlers
 from src.transport.http.fastapi.middleware import RequestLoggingMiddleware
@@ -92,6 +92,12 @@ async def diagnostics() -> DiagnosticsResponse:
     plus the last 50 warnings/errors from the log (redacted). Never returns secret values."""
     report = await asyncio.to_thread(diagnostics_report, default_dist_dir())
     return DiagnosticsResponse.model_validate(report)
+
+
+@app.delete("/api/diagnostics/recent-errors", status_code=204)
+def clear_recent_errors() -> None:
+    """Empty the in-memory recent warnings/errors buffer (logs/atlas.log is untouched)."""
+    RECENT_ERRORS.clear()
 
 
 # Single-app mode: when no API route matches, serve the built frontend (frontend/dist) with
