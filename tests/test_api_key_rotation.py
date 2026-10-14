@@ -13,7 +13,7 @@ from backend.services.diagnostics import check_llm_key, check_youtube_key
 from src.config import load_settings
 from src.domain.exceptions import ConfigurationError
 from src.domain.models.playlist import FailureType, PipelineError
-from src.infrastructure.llm.gemini.notes import GeminiNotesGenerator
+from src.infrastructure.llm.litellm_notes import LiteLLMNotesGenerator
 from src.infrastructure.youtube import playlist as yt
 from src.infrastructure.youtube.playlist import YouTubePlaylistProvider
 from src.shared.api_keys import KeyPool, pool_for, read_api_keys, reset_pools
@@ -166,7 +166,7 @@ def test_youtube_without_any_key_still_names_the_variable() -> None:
         YouTubePlaylistProvider()
 
 
-# --- Gemini --------------------------------------------------------------------------------
+# --- LLM (through LiteLLM) --------------------------------------------------------------------------------
 
 
 class _ApiError(Exception):
@@ -175,23 +175,20 @@ class _ApiError(Exception):
         self.code = code
 
 
-def _gemini_client(error: Exception | None, calls: list[str], key: str) -> Any:
-    async def generate_content(**_: Any) -> Any:
-        calls.append(key)
-        if error:
-            raise error
-        return SimpleNamespace(text=NOTES, usage_metadata=None, candidates=[], prompt_feedback=None)
-
-    return SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)))
-
-
 def _generator(monkeypatch: pytest.MonkeyPatch, errors: dict[str, Exception]) -> tuple[Any, list[str]]:
+    """A notes generator whose provider call fails per API key, recording which keys were tried."""
     calls: list[str] = []
-    generator = GeminiNotesGenerator(load_settings().to_loader())
-    monkeypatch.setattr(
-        generator, "_client_for", lambda key: _gemini_client(errors.get(key), calls, key)
-    )
-    return generator, calls
+
+    async def completion(*, api_key: str, **_: Any) -> Any:
+        calls.append(api_key)
+        if api_key in errors:
+            raise errors[api_key]
+        message = SimpleNamespace(content=NOTES)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=message, finish_reason="stop")], usage=None
+        )
+
+    return LiteLLMNotesGenerator(load_settings().to_loader(), completion=completion), calls
 
 
 async def test_gemini_rate_limited_key_fails_over_and_is_parked(

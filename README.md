@@ -1,7 +1,8 @@
 # Atlas
 
 Atlas turns a YouTube playlist into study notes: it fetches each video's transcript, has an LLM
-(Gemini by default, or OpenRouter) write Markdown notes, lets you review, edit and approve them
+(Gemini by default; any LiteLLM provider such as OpenRouter, OpenAI or OmniRoute, with
+fallbacks) write Markdown notes, lets you review, edit and approve them
 in a local web UI, and publishes the approved notes as numbered Google Docs plus an index Doc in
 one Drive folder. It is a local, single-user tool: one process, one SQLite file, no login.
 
@@ -24,8 +25,8 @@ if it does not exist. Put your keys in `.env`:
 
 ```dotenv
 YOUTUBE_API_KEY=...      # required to add playlists
-GEMINI_API_KEY=...       # required when notes_provider is gemini (default)
-OPENROUTER_API_KEY=...   # only when notes_provider is openrouter
+GEMINI_API_KEY=...       # required for the default gemini/... model
+OPENROUTER_API_KEY=...   # only for openrouter/... models (any LiteLLM provider works: see docs/CONFIG.md)
 ```
 
 Every other setting lives in `src/configs/config.yaml` and can be overridden per run with

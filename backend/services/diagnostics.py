@@ -25,6 +25,7 @@ from src.config.settings import (
     load_settings,
     repo_root,
 )
+from src.infrastructure.llm.models import resolve_model_specs
 from src.shared.api_keys import read_api_keys
 from src.shared.oauth_client import client_secrets_problem
 
@@ -72,11 +73,12 @@ def check_config() -> tuple[Check, AtlasSettings | None]:
         settings = load_settings()
     except SettingsError as exc:
         return _check("config", "error", "; ".join(exc.problems)), None
+    primary = resolve_model_specs(settings.to_loader())[0].litellm_model
     return (
         _check(
             "config",
             "ok",
-            f"src/configs/config.yaml is valid (notes provider: {settings.notes_provider}, "
+            f"src/configs/config.yaml is valid (notes model: {primary}, "
             f"{settings.max_concurrent_videos} video(s) at a time).",
         ),
         settings,
@@ -143,21 +145,30 @@ def check_youtube_key(settings: AtlasSettings) -> Check:
 
 
 def check_llm_key(settings: AtlasSettings) -> Check:
-    if settings.notes_provider == "openrouter":
-        name = settings.openrouter_api_key_env
-        model = settings.notes_model or settings.openrouter_model or "the provider default"
-    else:
-        name = settings.gemini_api_key_env
-        model = settings.notes_model or settings.gemini_model
-    if _key_is_set(name):
+    try:
+        specs = resolve_model_specs(settings.to_loader())
+    except ValueError as exc:
+        return _check("llm_key", "error", str(exc))
+
+    missing = [spec for spec in specs if not _key_is_set(spec.api_key_env)]
+    primary = specs[0]
+    if not missing:
+        names = ", ".join(spec.litellm_model for spec in specs)
+        keys = "; ".join(_key_summary(spec.api_key_env) for spec in specs)
+        return _check("llm_key", "ok", f"{keys} (models, in fallback order: {names}).")
+    if len(missing) < len(specs):
+        absent = ", ".join(f"{spec.api_key_env} (for {spec.litellm_model})" for spec in missing)
+        status = "error" if missing[0] is primary else "warning"
         return _check(
-            "llm_key", "ok", f"{name} is set (provider {settings.notes_provider}, model {model})."
+            "llm_key",
+            status,
+            f"Not set: {absent}. Those models are skipped; add the keys to .env to use them.",
         )
+    names = ", ".join(spec.api_key_env for spec in specs)
     return _check(
         "llm_key",
         "error",
-        f"{name} is not set, so notes cannot be generated with provider "
-        f"{settings.notes_provider}. Add {name}=<key> to .env.",
+        f"{names} is not set, so notes cannot be generated. Add the key to .env.",
     )
 
 

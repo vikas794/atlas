@@ -1,15 +1,13 @@
-"""Tests for the notes generator: port, guardrails, retries, both adapters.
+"""Tests for the notes generator: port, guardrails, the LiteLLM adapter and its factory.
 
-No test in this file touches the network or needs a real key. The SDK boundary
-is exactly one seam -- the ``client_factory`` constructor argument on each
-adapter -- so every provider call is a double:
+No test in this file touches the network or needs a real key. The provider boundary is exactly
+one seam -- the ``completion`` constructor argument on :class:`LiteLLMNotesGenerator`, shaped like
+``litellm.acompletion`` -- so every provider call is a double. Keys are fake values set in the
+environment by an autouse fixture.
 
-* Gemini: ``client.aio.models.generate_content(model=..., contents=...)``
-* OpenRouter: ``client.chat.completions.create(model=..., messages=...)``
-
-Settings come from :class:`FakeLoader`, a dict-backed object with the same
-``__call__`` shape as ``AtlasSettings.to_loader()``; that keeps assertions
-independent of the developer's shell and ``.env``.
+Settings come from :class:`FakeLoader`, a dict-backed object with the same ``__call__`` shape as
+``AtlasSettings.to_loader()``; that keeps assertions independent of the developer's shell and
+``.env``.
 """
 
 from __future__ import annotations
@@ -33,7 +31,8 @@ from src.domain.models.playlist import (
 )
 from src.infrastructure.llm import notes_base
 from src.infrastructure.llm.factory import build_notes_generator
-from src.infrastructure.llm.gemini.notes import GeminiNotesGenerator
+from src.infrastructure.llm.litellm_notes import LiteLLMNotesGenerator
+from src.infrastructure.llm.models import DEFAULT_OPENROUTER_MODEL, resolve_model_specs
 from src.infrastructure.llm.notes_base import (
     MIN_NOTES_CHARS,
     TITLE_PLACEHOLDER,
@@ -45,11 +44,7 @@ from src.infrastructure.llm.notes_base import (
     render_prompt,
     validate_notes,
 )
-from src.infrastructure.llm.openai.notes import (
-    DEFAULT_OPENROUTER_MODEL,
-    OPENROUTER_BASE_URL,
-    OpenRouterNotesGenerator,
-)
+from src.shared.api_keys import reset_pools
 
 FENCE = "`" * 3
 
@@ -64,6 +59,9 @@ NOTES_BODY = (
     "- includes a worked example per loop.\n"
 )
 GOOD_NOTES = NOTES_BODY + f"\n{FENCE}python\nfor item in items:\n    print(item)\n{FENCE}"
+
+TEST_GEMINI_KEY = "test-gemini-key-not-real"
+TEST_OPENROUTER_KEY = "sk-or-test-not-a-real-key"
 
 
 # --------------------------------------------------------------------------
@@ -85,65 +83,43 @@ class FakeLoader:
         return FakeLoader(**{**self._values, **values})
 
 
-class FakeModels:
-    """``client.aio.models`` for the Gemini double."""
+class FakeCompletion:
+    """``litellm.acompletion`` double: records every call, replays canned outcomes.
 
-    def __init__(self, owner: FakeGeminiClient) -> None:
-        self._owner = owner
+    ``outcomes`` is consumed one entry per call (the last repeats): an exception is raised, a
+    string is returned as the model's reply.
+    """
 
-    async def generate_content(self, *, model: str, contents: str) -> Any:
-        return await self._owner.respond(model=model, contents=contents)
-
-
-class FakeGeminiClient:
-    """Gemini SDK double: records the call, replays a canned response."""
-
-    def __init__(self, text: str | None = None, *, error: Exception | None = None) -> None:
-        self.text = GOOD_NOTES if text is None else text
-        self.error = error
+    def __init__(
+        self,
+        *outcomes: str | Exception,
+        usage: tuple[int, int] | None = (1200, 345),
+        finish_reason: str | None = "stop",
+    ) -> None:
+        self.outcomes = list(outcomes) or [GOOD_NOTES]
+        self.usage = usage
+        self.finish_reason = finish_reason
         self.calls: list[dict[str, Any]] = []
-        self.aio = type("Aio", (), {"models": FakeModels(self)})()
 
-    async def respond(self, *, model: str, contents: str) -> Any:
-        self.calls.append({"model": model, "contents": contents})
-        if self.error is not None:
-            raise self.error
-        usage = type(
-            "Usage",
-            (),
-            {"prompt_token_count": 1200, "candidates_token_count": 345, "total_token_count": 1545},
-        )()
-        return type("Response", (), {"text": self.text, "usage_metadata": usage})()
-
-
-class FakeCompletions:
-    """``client.chat.completions`` for the OpenRouter double."""
-
-    def __init__(self, owner: FakeOpenAIClient) -> None:
-        self._owner = owner
-
-    async def create(self, *, model: str, messages: list[dict[str, str]]) -> Any:
-        return await self._owner.respond(model=model, messages=messages)
-
-
-class FakeOpenAIClient:
-    """OpenAI SDK double: records the call, replays a canned response."""
-
-    def __init__(self, content: str | None = None, *, error: Exception | None = None) -> None:
-        self.content = GOOD_NOTES if content is None else content
-        self.error = error
-        self.calls: list[dict[str, Any]] = []
-        self.chat = type("Chat", (), {"completions": FakeCompletions(self)})()
-
-    async def respond(self, *, model: str, messages: list[dict[str, str]]) -> Any:
-        self.calls.append({"model": model, "messages": messages})
-        if self.error is not None:
-            raise self.error
-        usage = type(
-            "Usage", (), {"prompt_tokens": 1100, "completion_tokens": 400, "total_tokens": 1500}
-        )()
-        message = type("Message", (), {"content": self.content})()
-        choice = type("Choice", (), {"message": message})()
+    async def __call__(self, **params: Any) -> Any:
+        self.calls.append(params)
+        outcome = self.outcomes[min(len(self.calls) - 1, len(self.outcomes) - 1)]
+        if isinstance(outcome, Exception):
+            raise outcome
+        usage = None
+        if self.usage is not None:
+            prompt, completion = self.usage
+            usage = type(
+                "Usage",
+                (),
+                {
+                    "prompt_tokens": prompt,
+                    "completion_tokens": completion,
+                    "total_tokens": prompt + completion,
+                },
+            )()
+        message = type("Message", (), {"content": outcome})()
+        choice = type("Choice", (), {"message": message, "finish_reason": self.finish_reason})()
         return type("Response", (), {"choices": [choice], "usage": usage})()
 
 
@@ -158,6 +134,16 @@ class RecordingLedger:
         if self.explode:
             raise RuntimeError("ledger backend is down")
         self.records.append(record)
+
+
+@pytest.fixture(autouse=True)
+def _provider_keys(monkeypatch: pytest.MonkeyPatch):
+    """Fake keys for the two default providers; key pools are process-wide, so start clean."""
+    monkeypatch.setenv("GEMINI_API_KEY", TEST_GEMINI_KEY)
+    monkeypatch.setenv("OPENROUTER_API_KEY", TEST_OPENROUTER_KEY)
+    reset_pools()
+    yield
+    reset_pools()
 
 
 @pytest.fixture
@@ -182,6 +168,22 @@ def openrouter_settings(gemini_settings: FakeLoader) -> FakeLoader:
         notes_provider="openrouter", openrouter_api_key_env="OPENROUTER_API_KEY"
     )
 
+
+@pytest.fixture
+def chain_settings(gemini_settings: FakeLoader) -> FakeLoader:
+    """Gemini first, OpenRouter as the fallback, both listed in ``notes_models``."""
+    return gemini_settings.override(
+        notes_models=[
+            {"model": "gemini/gemini-2.5-flash", "input_token_limit": 1_000_000},
+            {"model": "openrouter/openai/gpt-5-mini"},
+        ]
+    )
+
+
+def generator_for(
+    settings: FakeLoader, completion: FakeCompletion, **kwargs: Any
+) -> LiteLLMNotesGenerator:
+    return LiteLLMNotesGenerator(settings, completion=completion, **kwargs)
 
 # --------------------------------------------------------------------------
 # 1. render_prompt
@@ -374,51 +376,55 @@ class TestCheckInputSize:
         check_input_size("a" * 4000, -1)
 
 
+
 # --------------------------------------------------------------------------
-# 5 + 6. no retries inside the adapters
+# 5 + 6. one call per model, no retries inside the adapter
 # --------------------------------------------------------------------------
 
-class TestGeminiAdapter:
+
+class TestSingleModel:
     async def test_generates_notes_and_returns_the_prompt_version(
         self, gemini_settings: FakeLoader
     ) -> None:
-        client = FakeGeminiClient()
-        generator = GeminiNotesGenerator(
-            gemini_settings, client_factory=lambda: client
-        )
+        completion = FakeCompletion()
 
-        result = await generator.generate_notes(title="Loops", transcript="for x in y: pass")
+        result = await generator_for(gemini_settings, completion).generate_notes(
+            title="Loops", transcript="for x in y: pass"
+        )
 
         assert result.provider == "gemini"
         assert result.model == "gemini-2.5-flash"
         assert result.prompt_version == "notes_v1"
         assert result.content == GOOD_NOTES
 
-        sent = client.calls[0]
-        assert sent["model"] == "gemini-2.5-flash"
-        assert "Loops" in sent["contents"]
-        assert "for x in y: pass" in sent["contents"]
+        sent = completion.calls[0]
+        assert sent["model"] == "gemini/gemini-2.5-flash"
+        assert sent["api_key"] == TEST_GEMINI_KEY
+        assert sent["num_retries"] == 0  # ProcessVideoUseCase owns retries
+        assert sent["messages"][0]["role"] == "user"
+        assert "Loops" in sent["messages"][0]["content"]
+        assert "for x in y: pass" in sent["messages"][0]["content"]
+        assert "api_base" not in sent
 
     async def test_notes_model_overrides_gemini_model(self, gemini_settings: FakeLoader) -> None:
         settings = gemini_settings.override(notes_model="gemini-2.5-pro")
-        client = FakeGeminiClient()
+        completion = FakeCompletion()
 
-        result = await GeminiNotesGenerator(settings, client_factory=lambda: client).generate_notes(
+        result = await generator_for(settings, completion).generate_notes(
             title="t", transcript="x"
         )
 
         assert result.model == "gemini-2.5-pro"
-        assert client.calls[0]["model"] == "gemini-2.5-pro"
+        assert completion.calls[0]["model"] == "gemini/gemini-2.5-pro"
 
     async def test_a_fenced_response_is_unwrapped_end_to_end(
         self, gemini_settings: FakeLoader
     ) -> None:
-        fenced = f"{FENCE}markdown\n{GOOD_NOTES}{FENCE}"
-        client = FakeGeminiClient(text=fenced)
+        completion = FakeCompletion(f"{FENCE}markdown\n{GOOD_NOTES}{FENCE}")
 
-        result = await GeminiNotesGenerator(
-            gemini_settings, client_factory=lambda: client
-        ).generate_notes(title="t", transcript="x")
+        result = await generator_for(gemini_settings, completion).generate_notes(
+            title="t", transcript="x"
+        )
 
         assert result.content == GOOD_NOTES
 
@@ -426,36 +432,46 @@ class TestGeminiAdapter:
         self, gemini_settings: FakeLoader
     ) -> None:
         """Retry/backoff belongs to ProcessVideoUseCase alone: one call per attempt."""
-        client = FakeGeminiClient(text="   ")
-        generator = GeminiNotesGenerator(gemini_settings, client_factory=lambda: client)
+        completion = FakeCompletion("   ")
 
         with pytest.raises(NotesGenerationError) as excinfo:
-            await generator.generate_notes(title="t", transcript="x")
+            await generator_for(gemini_settings, completion).generate_notes(
+                title="t", transcript="x"
+            )
 
         assert excinfo.value.failure_type is FailureType.OUTPUT_MALFORMED
         assert excinfo.value.failure_kind is FailureKind.TRANSIENT
-        assert len(client.calls) == 1
+        assert len(completion.calls) == 1
+
+    async def test_a_truncated_response_is_rejected(self, gemini_settings: FakeLoader) -> None:
+        completion = FakeCompletion(finish_reason="length")
+
+        with pytest.raises(NotesGenerationError) as excinfo:
+            await generator_for(gemini_settings, completion).generate_notes(
+                title="t", transcript="x"
+            )
+
+        assert excinfo.value.failure_type is FailureType.OUTPUT_MALFORMED
 
     async def test_an_oversized_transcript_never_reaches_the_provider(
         self, gemini_settings: FakeLoader
     ) -> None:
         settings = gemini_settings.override(gemini_input_token_limit=10)
-        client = FakeGeminiClient()
+        completion = FakeCompletion()
 
         with pytest.raises(NotesGenerationError) as excinfo:
-            await GeminiNotesGenerator(settings, client_factory=lambda: client).generate_notes(
+            await generator_for(settings, completion).generate_notes(
                 title="t", transcript="a" * 4000
             )
 
         assert excinfo.value.failure_type is FailureType.TRANSCRIPT_TOO_LARGE
-        assert client.calls == []
+        assert completion.calls == []
 
     async def test_a_usage_record_is_emitted(self, gemini_settings: FakeLoader) -> None:
         ledger = RecordingLedger()
-        client = FakeGeminiClient()
 
-        await GeminiNotesGenerator(
-            gemini_settings, usage_ledger=ledger, client_factory=lambda: client
+        await generator_for(
+            gemini_settings, FakeCompletion(), usage_ledger=ledger
         ).generate_notes(title="t", transcript="x")
 
         assert len(ledger.records) == 1
@@ -466,138 +482,299 @@ class TestGeminiAdapter:
         assert record.input_tokens == 1200
         assert record.output_tokens == 345
         assert record.total_tokens == 1545
-        assert record.cost_usd >= 0.0
+        assert record.cost_usd > 0.0  # gemini-2.5-flash is priced in CostCalculator
         assert record.cache_hit is False
 
-    async def test_missing_token_counts_default_to_zero(
-        self, gemini_settings: FakeLoader
-    ) -> None:
+    async def test_missing_token_counts_default_to_zero(self, gemini_settings: FakeLoader) -> None:
         ledger = RecordingLedger()
-        client = FakeGeminiClient()
-        client.respond = _respond_without_usage(client)
 
-        await GeminiNotesGenerator(
-            gemini_settings, usage_ledger=ledger, client_factory=lambda: client
+        await generator_for(
+            gemini_settings, FakeCompletion(usage=None), usage_ledger=ledger
         ).generate_notes(title="t", transcript="x")
 
         record = ledger.records[0]
         assert (record.input_tokens, record.output_tokens, record.total_tokens) == (0, 0, 0)
 
     async def test_no_ledger_configured_is_fine(self, gemini_settings: FakeLoader) -> None:
-        client = FakeGeminiClient()
-        result = await GeminiNotesGenerator(
-            gemini_settings, client_factory=lambda: client
-        ).generate_notes(title="t", transcript="x")
+        result = await generator_for(gemini_settings, FakeCompletion()).generate_notes(
+            title="t", transcript="x"
+        )
         assert result.content == GOOD_NOTES
-
-    async def test_a_missing_key_names_the_variable_not_the_value(
-        self, gemini_settings: FakeLoader, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-
-        with pytest.raises(NotesGeneratorConfigError) as excinfo:
-            await GeminiNotesGenerator(gemini_settings).generate_notes(title="t", transcript="x")
-
-        assert "GEMINI_API_KEY" in str(excinfo.value)
-
-
-class TestOpenRouterAdapter:
-    async def test_generates_notes_against_the_openrouter_endpoint(
-        self, openrouter_settings: FakeLoader, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-not-a-real-key")
-        client = FakeOpenAIClient()
-
-        result = await OpenRouterNotesGenerator(
-            openrouter_settings, client_factory=lambda: client
-        ).generate_notes(title="Loops", transcript="for x in y: pass")
-
-        assert result.provider == "openrouter"
-        assert result.model == DEFAULT_OPENROUTER_MODEL
-        assert result.prompt_version == "notes_v1"
-        assert result.content == GOOD_NOTES
-
-        sent = client.calls[0]
-        assert sent["model"] == DEFAULT_OPENROUTER_MODEL
-        assert sent["messages"][0]["role"] == "user"
-        assert "for x in y: pass" in sent["messages"][0]["content"]
-
-    async def test_base_url_is_the_openrouter_endpoint(self) -> None:
-        assert OPENROUTER_BASE_URL == "https://openrouter.ai/api/v1"
-
-    async def test_notes_model_overrides_the_default(
-        self, openrouter_settings: FakeLoader, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-not-a-real-key")
-        settings = openrouter_settings.override(notes_model="anthropic/claude-sonnet-4")
-        client = FakeOpenAIClient()
-
-        result = await OpenRouterNotesGenerator(
-            settings, client_factory=lambda: client
-        ).generate_notes(title="t", transcript="x")
-
-        assert result.model == "anthropic/claude-sonnet-4"
-
-    async def test_a_usage_record_is_emitted_with_the_openrouter_cost(
-        self, openrouter_settings: FakeLoader, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-not-a-real-key")
-        ledger = RecordingLedger()
-        client = FakeOpenAIClient()
-
-        await OpenRouterNotesGenerator(
-            openrouter_settings, usage_ledger=ledger, client_factory=lambda: client
-        ).generate_notes(title="t", transcript="x")
-
-        record = ledger.records[0]
-        assert record.provider == "openrouter"
-        assert record.operation == "generate_notes"
-        assert record.input_tokens == 1100
-        assert record.output_tokens == 400
-        assert record.total_tokens == 1500
-        # The default model is priced in CostCalculator, so cost is real.
-        assert record.cost_usd > 0.0
 
     async def test_a_ledger_failure_does_not_fail_generation(
-        self,
-        gemini_settings: FakeLoader,
-        openrouter_settings: FakeLoader,
-        monkeypatch: pytest.MonkeyPatch,
+        self, gemini_settings: FakeLoader, openrouter_settings: FakeLoader
     ) -> None:
-        monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-real")
-        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-not-real")
-
-        cases = (
-            (GeminiNotesGenerator, gemini_settings, FakeGeminiClient()),
-            (OpenRouterNotesGenerator, openrouter_settings, FakeOpenAIClient()),
-        )
-
-        for generator_cls, settings, client in cases:
-            generator = generator_cls(
-                settings,
-                usage_ledger=RecordingLedger(explode=True),
-                client_factory=lambda made=client: made,
+        for settings in (gemini_settings, openrouter_settings):
+            completion = FakeCompletion()
+            generator = generator_for(
+                settings, completion, usage_ledger=RecordingLedger(explode=True)
             )
 
             result = await generator.generate_notes(title="t", transcript="x")
 
             assert result.content == GOOD_NOTES
-            assert len(client.calls) == 1
+            assert len(completion.calls) == 1
+
+    async def test_a_missing_key_names_the_variable_not_the_value(
+        self, gemini_settings: FakeLoader, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        completion = FakeCompletion()
+
+        with pytest.raises(NotesGeneratorConfigError) as excinfo:
+            await generator_for(gemini_settings, completion).generate_notes(
+                title="t", transcript="x"
+            )
+
+        assert "GEMINI_API_KEY" in str(excinfo.value)
+        assert completion.calls == []
+
+
+class TestOpenRouterLegacySettings:
+    async def test_generates_notes_against_the_openrouter_endpoint(
+        self, openrouter_settings: FakeLoader
+    ) -> None:
+        completion = FakeCompletion()
+
+        result = await generator_for(openrouter_settings, completion).generate_notes(
+            title="Loops", transcript="for x in y: pass"
+        )
+
+        assert result.provider == "openrouter"
+        assert result.model == DEFAULT_OPENROUTER_MODEL
+        assert result.prompt_version == "notes_v1"
+        sent = completion.calls[0]
+        assert sent["model"] == f"openrouter/{DEFAULT_OPENROUTER_MODEL}"
+        assert sent["api_base"] == "https://openrouter.ai/api/v1"
+        assert sent["api_key"] == TEST_OPENROUTER_KEY
+
+    async def test_notes_model_overrides_the_default(
+        self, openrouter_settings: FakeLoader
+    ) -> None:
+        settings = openrouter_settings.override(notes_model="anthropic/claude-sonnet-4")
+
+        result = await generator_for(settings, FakeCompletion()).generate_notes(
+            title="t", transcript="x"
+        )
+
+        assert result.model == "anthropic/claude-sonnet-4"
+
+    async def test_a_usage_record_is_emitted_with_the_openrouter_cost(
+        self, openrouter_settings: FakeLoader
+    ) -> None:
+        ledger = RecordingLedger()
+
+        await generator_for(
+            openrouter_settings, FakeCompletion(usage=(1100, 400)), usage_ledger=ledger
+        ).generate_notes(title="t", transcript="x")
+
+        record = ledger.records[0]
+        assert record.provider == "openrouter"
+        assert record.operation == "generate_notes"
+        assert (record.input_tokens, record.output_tokens, record.total_tokens) == (1100, 400, 1500)
+        # The default model is priced in CostCalculator, so cost is real.
+        assert record.cost_usd > 0.0
 
     async def test_an_oversized_transcript_is_refused_before_the_call(
-        self, openrouter_settings: FakeLoader, monkeypatch: pytest.MonkeyPatch
+        self, openrouter_settings: FakeLoader
     ) -> None:
-        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-not-real")
         settings = openrouter_settings.override(openrouter_input_token_limit=8)
-        client = FakeOpenAIClient()
+        completion = FakeCompletion()
 
         with pytest.raises(NotesGenerationError) as excinfo:
-            await OpenRouterNotesGenerator(settings, client_factory=lambda: client).generate_notes(
+            await generator_for(settings, completion).generate_notes(
                 title="t", transcript="a" * 4000
             )
 
         assert excinfo.value.failure_type is FailureType.TRANSCRIPT_TOO_LARGE
-        assert client.calls == []
+        assert completion.calls == []
+
+
+# --------------------------------------------------------------------------
+# 7. models are configuration: custom endpoints, key rotation, fallback
+# --------------------------------------------------------------------------
+
+
+class TestConfiguredModels:
+    def test_a_new_provider_is_only_a_config_entry(self) -> None:
+        settings = FakeLoader(
+            notes_models=[
+                {
+                    "model": "openai/gpt-5-mini",
+                    "api_base": "http://localhost:20128/v1",
+                    "api_key_env": "OMNIROUTE_API_KEY",
+                    "input_token_limit": 200_000,
+                },
+                {"model": "groq/llama-3.3-70b-versatile"},
+            ]
+        )
+
+        first, second = resolve_model_specs(settings)
+
+        assert (first.provider, first.model) == ("openai", "gpt-5-mini")
+        assert first.api_base == "http://localhost:20128/v1"
+        assert first.api_key_env == "OMNIROUTE_API_KEY"
+        assert first.input_token_limit == 200_000
+        assert second.api_key_env == "GROQ_API_KEY"  # default derived from the provider name
+        assert second.api_base is None
+
+    @pytest.mark.parametrize("model", ["gpt-5-mini", "", "gemini/"])
+    def test_an_entry_without_provider_and_model_is_rejected(self, model: str) -> None:
+        with pytest.raises(ValueError, match="notes_models"):
+            resolve_model_specs(FakeLoader(notes_models=[{"model": model}]))
+
+    async def test_a_custom_endpoint_is_passed_to_the_provider_call(
+        self, gemini_settings: FakeLoader, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OMNIROUTE_API_KEY", "omni-test-key")
+        settings = gemini_settings.override(
+            notes_models=[
+                {
+                    "model": "openai/gpt-5-mini",
+                    "api_base": "http://localhost:20128/v1",
+                    "api_key_env": "OMNIROUTE_API_KEY",
+                }
+            ]
+        )
+        completion = FakeCompletion()
+
+        result = await generator_for(settings, completion).generate_notes(
+            title="t", transcript="x"
+        )
+
+        assert result.provider == "openai"
+        sent = completion.calls[0]
+        assert sent["model"] == "openai/gpt-5-mini"
+        assert sent["api_base"] == "http://localhost:20128/v1"
+        assert sent["api_key"] == "omni-test-key"
+
+    async def test_keys_of_one_model_rotate_before_falling_back(
+        self, chain_settings: FakeLoader, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GEMINI_API_KEY", "gem-key-1,gem-key-2")
+        reset_pools()
+        completion = FakeCompletion(RuntimeError("429 Too Many Requests"), GOOD_NOTES)
+
+        result = await generator_for(chain_settings, completion).generate_notes(
+            title="t", transcript="x"
+        )
+
+        assert result.provider == "gemini"
+        assert [call["api_key"] for call in completion.calls] == ["gem-key-1", "gem-key-2"]
+
+    async def test_falls_back_to_the_next_model_when_the_first_is_turned_away(
+        self, chain_settings: FakeLoader
+    ) -> None:
+        completion = FakeCompletion(RuntimeError("503 Service Unavailable"), GOOD_NOTES)
+        ledger = RecordingLedger()
+
+        result = await generator_for(
+            chain_settings, completion, usage_ledger=ledger
+        ).generate_notes(title="t", transcript="x")
+
+        assert (result.provider, result.model) == ("openrouter", "openai/gpt-5-mini")
+        assert [call["model"] for call in completion.calls] == [
+            "gemini/gemini-2.5-flash",
+            "openrouter/openai/gpt-5-mini",
+        ]
+        # The ledger records the model that actually answered.
+        assert [(r.provider, r.model) for r in ledger.records] == [
+            ("openrouter", "openai/gpt-5-mini")
+        ]
+
+    async def test_a_rejected_key_on_the_first_model_still_falls_back(
+        self, chain_settings: FakeLoader
+    ) -> None:
+        completion = FakeCompletion(RuntimeError("401 Unauthorized"), GOOD_NOTES)
+
+        result = await generator_for(chain_settings, completion).generate_notes(
+            title="t", transcript="x"
+        )
+
+        assert result.provider == "openrouter"
+
+    async def test_a_model_without_a_key_is_skipped(
+        self, chain_settings: FakeLoader, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        completion = FakeCompletion()
+
+        result = await generator_for(chain_settings, completion).generate_notes(
+            title="t", transcript="x"
+        )
+
+        assert result.provider == "openrouter"
+        assert len(completion.calls) == 1
+
+    async def test_a_transcript_too_big_for_one_model_goes_to_a_bigger_one(
+        self, gemini_settings: FakeLoader
+    ) -> None:
+        settings = gemini_settings.override(
+            notes_models=[
+                {"model": "openrouter/openai/gpt-5-mini", "input_token_limit": 10},
+                {"model": "gemini/gemini-2.5-flash", "input_token_limit": 1_000_000},
+            ]
+        )
+        completion = FakeCompletion()
+
+        result = await generator_for(settings, completion).generate_notes(
+            title="t", transcript="a" * 4000
+        )
+
+        assert result.provider == "gemini"
+        assert len(completion.calls) == 1
+
+    async def test_every_model_failing_raises_the_transient_error_so_the_pipeline_retries(
+        self, chain_settings: FakeLoader
+    ) -> None:
+        completion = FakeCompletion(RuntimeError("401 Unauthorized"), RuntimeError("429 Too Many"))
+
+        with pytest.raises(NotesGenerationError) as excinfo:
+            await generator_for(chain_settings, completion).generate_notes(
+                title="t", transcript="x"
+            )
+
+        assert excinfo.value.failure_type is FailureType.RATE_LIMITED
+        assert excinfo.value.failure_kind is FailureKind.TRANSIENT
+
+    async def test_every_model_rejecting_its_key_is_a_permanent_config_error(
+        self, chain_settings: FakeLoader
+    ) -> None:
+        completion = FakeCompletion(RuntimeError("401 Unauthorized"))
+
+        with pytest.raises(NotesGeneratorConfigError):
+            await generator_for(chain_settings, completion).generate_notes(
+                title="t", transcript="x"
+            )
+
+        assert len(completion.calls) == 2
+
+    async def test_a_bad_response_does_not_trigger_a_fallback(
+        self, chain_settings: FakeLoader
+    ) -> None:
+        """Only a model that is turned away falls back; its answer is judged as is."""
+        completion = FakeCompletion("   ")
+
+        with pytest.raises(NotesGenerationError) as excinfo:
+            await generator_for(chain_settings, completion).generate_notes(
+                title="t", transcript="x"
+            )
+
+        assert excinfo.value.failure_type is FailureType.OUTPUT_MALFORMED
+        assert len(completion.calls) == 1
+
+    @pytest.mark.parametrize(
+        ("overrides", "message"),
+        [
+            ({"notes_models": [{"model": "nope"}]}, "notes_models"),
+            ({"notes_provider": "llama.cpp"}, "llama.cpp"),
+        ],
+    )
+    def test_unusable_configuration_raises_a_clear_error(
+        self, gemini_settings: FakeLoader, overrides: dict[str, Any], message: str
+    ) -> None:
+        with pytest.raises(ValueError, match=message):
+            build_notes_generator(gemini_settings.override(**overrides))
 
 
 # --------------------------------------------------------------------------
@@ -609,50 +786,42 @@ class TestBuildNotesGenerator:
     def test_defaults_to_gemini(self, gemini_settings: FakeLoader) -> None:
         generator = build_notes_generator(gemini_settings)
 
-        assert isinstance(generator, GeminiNotesGenerator)
+        assert isinstance(generator, LiteLLMNotesGenerator)
         assert generator.provider == "gemini"
 
-    def test_openrouter_is_selected_by_settings(self, openrouter_settings: FakeLoader) -> None:
-        generator = build_notes_generator(openrouter_settings)
-
-        assert isinstance(generator, OpenRouterNotesGenerator)
-        assert generator.provider == "openrouter"
+    def test_openrouter_is_selected_by_legacy_settings(
+        self, openrouter_settings: FakeLoader
+    ) -> None:
+        assert build_notes_generator(openrouter_settings).provider == "openrouter"
 
     def test_provider_matching_is_forgiving_about_case_and_padding(
         self, openrouter_settings: FakeLoader
     ) -> None:
         settings = openrouter_settings.override(notes_provider=" OpenRouter ")
-        assert isinstance(build_notes_generator(settings), OpenRouterNotesGenerator)
+        assert build_notes_generator(settings).provider == "openrouter"
 
-    def test_an_unknown_provider_raises_a_clear_error(self, gemini_settings: FakeLoader) -> None:
-        settings = gemini_settings.override(notes_provider="llama.cpp")
+    def test_notes_models_win_over_the_legacy_provider(self, chain_settings: FakeLoader) -> None:
+        generator = build_notes_generator(chain_settings.override(notes_provider="openrouter"))
 
-        with pytest.raises(ValueError) as excinfo:
-            build_notes_generator(settings)
-
-        message = str(excinfo.value)
-        assert "llama.cpp" in message
-        assert "gemini" in message and "openrouter" in message
+        assert generator.provider == "gemini"
+        assert [spec.litellm_model for spec in generator.specs] == [
+            "gemini/gemini-2.5-flash",
+            "openrouter/openai/gpt-5-mini",
+        ]
 
     def test_the_real_settings_loader_is_accepted(self) -> None:
         loader = AtlasSettings(notes_provider="gemini").to_loader()
-        assert isinstance(build_notes_generator(loader), GeminiNotesGenerator)
+        assert build_notes_generator(loader).provider == "gemini"
 
-    def test_no_provider_sdk_is_imported_by_the_factory(self) -> None:
-        # Constructing an adapter must not import google.genai or openai: the
-        # factory is called at wiring time, long before any key is needed.
-        generator = build_notes_generator(FakeLoader(notes_provider="openrouter"))
-        assert generator.provider == "openrouter"
+    def test_the_real_settings_loader_reads_notes_models(self) -> None:
+        loader = AtlasSettings(
+            notes_models=[{"model": "openai/gpt-5-mini", "api_base": "http://localhost:20128/v1"}]
+        ).to_loader()
 
+        (spec,) = build_notes_generator(loader).specs
 
-def _respond_without_usage(client: FakeGeminiClient):
-    async def respond(*, model: str, contents: str) -> Any:
-        client.calls.append({"model": model, "contents": contents})
-        if client.error is not None:
-            raise client.error
-        return type("Response", (), {"text": client.text, "usage_metadata": None})()
-
-    return respond
+        assert spec.api_base == "http://localhost:20128/v1"
+        assert spec.api_key_env == "OPENAI_API_KEY"
 
 
 # --------------------------------------------------------------------------
@@ -672,18 +841,16 @@ class TestSecretHygiene:
     ) -> None:
         monkeypatch.setenv("GEMINI_API_KEY", FAKE_KEY)
         # Worst case: the provider echoes the credential back inside its error.
-        client = FakeGeminiClient(error=RuntimeError(f"400 invalid key {FAKE_KEY}"))
+        completion = FakeCompletion(RuntimeError(f"400 invalid key {FAKE_KEY}"))
         ledger = RecordingLedger()
-        generator = GeminiNotesGenerator(
-            gemini_settings, usage_ledger=ledger, client_factory=lambda: client
-        )
+        generator = generator_for(gemini_settings, completion, usage_ledger=ledger)
 
         with caplog.at_level(logging.DEBUG), pytest.raises(NotesGenerationError) as excinfo:
             await generator.generate_notes(title="t", transcript="a secret transcript line")
 
         error = excinfo.value
         assert FAKE_KEY not in str(error)
-        assert FAKE_KEY not in (error.diagnostic or "")
+        assert FAKE_KEY not in (getattr(error, "diagnostic", None) or "")
         assert FAKE_KEY not in caplog.text
         for record in ledger.records:
             assert FAKE_KEY not in repr(asdict(record))
@@ -695,11 +862,9 @@ class TestSecretHygiene:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         monkeypatch.setenv("OPENROUTER_API_KEY", FAKE_OPENROUTER_KEY)
-        client = FakeOpenAIClient(error=RuntimeError(f"401 Unauthorized: {FAKE_OPENROUTER_KEY}"))
+        completion = FakeCompletion(RuntimeError(f"401 Unauthorized: {FAKE_OPENROUTER_KEY}"))
         ledger = RecordingLedger()
-        generator = OpenRouterNotesGenerator(
-            openrouter_settings, usage_ledger=ledger, client_factory=lambda: client
-        )
+        generator = generator_for(openrouter_settings, completion, usage_ledger=ledger)
 
         # "Unauthorized" is a rejected key: a permanent config error, not a retryable one.
         with caplog.at_level(logging.DEBUG), pytest.raises(NotesGeneratorConfigError) as excinfo:
@@ -714,45 +879,44 @@ class TestSecretHygiene:
 
     async def test_a_successful_call_logs_neither_key_nor_transcript(
         self,
-        gemini_settings: FakeLoader,
-        openrouter_settings: FakeLoader,
+        chain_settings: FakeLoader,
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         monkeypatch.setenv("GEMINI_API_KEY", FAKE_KEY)
         monkeypatch.setenv("OPENROUTER_API_KEY", FAKE_OPENROUTER_KEY)
         transcript = "a very secret transcript line about closures"
+        # First model fails, so the fallback path is logged as well.
+        completion = FakeCompletion(RuntimeError("503 Service Unavailable"), GOOD_NOTES)
 
         with caplog.at_level(logging.DEBUG):
-            await GeminiNotesGenerator(
-                gemini_settings, usage_ledger=RecordingLedger(), client_factory=FakeGeminiClient
-            ).generate_notes(title="t", transcript=transcript)
-            await OpenRouterNotesGenerator(
-                openrouter_settings, usage_ledger=RecordingLedger(), client_factory=FakeOpenAIClient
+            await generator_for(
+                chain_settings, completion, usage_ledger=RecordingLedger()
             ).generate_notes(title="t", transcript=transcript)
 
-        assert caplog.text, "expected the adapters to log something at all"
+        assert caplog.text, "expected the adapter to log something at all"
         assert FAKE_KEY not in caplog.text
         assert FAKE_OPENROUTER_KEY not in caplog.text
         assert transcript not in caplog.text
 
-    def test_an_adapter_never_stores_the_key_on_itself(
+    def test_the_adapter_never_stores_the_key_on_itself(
         self, gemini_settings: FakeLoader, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("GEMINI_API_KEY", FAKE_KEY)
-        generator = GeminiNotesGenerator(gemini_settings, client_factory=FakeGeminiClient)
+        generator = generator_for(gemini_settings, FakeCompletion())
 
         assert FAKE_KEY not in repr(vars(generator))
 
     def test_importing_the_llm_package_does_not_import_a_provider_sdk(self) -> None:
         """`import src.infrastructure.llm` must stay free of provider SDKs.
 
-        Run in a clean interpreter: the test process will have imported the SDK
+        Run in a clean interpreter: the test process will have imported LiteLLM
         for other tests, which would hide a module-level import regression.
         """
         script = (
             "import sys; import src.infrastructure.llm as m; "
-            "leaked = [n for n in ('google.genai', 'openai') if n in sys.modules]; "
+            "from src.infrastructure.llm.factory import build_notes_generator; "
+            "leaked = [n for n in ('litellm', 'google.genai', 'openai') if n in sys.modules]; "
             "assert not leaked, leaked; "
             "assert m.build_notes_generator and m.NotesGeneratorPort and m.GeneratedNotes"
         )

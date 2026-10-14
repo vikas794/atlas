@@ -12,10 +12,9 @@ dependencies = [
     "pyyaml==6.0.3",
     "google-api-python-client==2.198.0",
     "google-auth-oauthlib==1.4.0",
-    "google-genai==2.16.0",
-    "openai==2.52.0",
     "yt-dlp==2026.7.4",
     "pydantic==2.13.4",
+    "litellm==1.105.1",
 ]
 
 [tool.uv]

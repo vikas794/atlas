@@ -13,7 +13,7 @@ Highest precedence first:
 
 1. `ATLAS_<FIELD_IN_UPPERCASE>` in the environment or `.env` (for example `ATLAS_PORT=8001`).
 2. The legacy name `ATLAS_DB_PATH` (for `database_path` only).
-3. The short aliases `NOTES_PROVIDER`, `NOTES_MODEL`, `NOTES_PROMPT_NAME`, `GEMINI_MODEL`,
+3. The short aliases `NOTES_MODELS`, `NOTES_PROVIDER`, `NOTES_MODEL`, `NOTES_PROMPT_NAME`, `GEMINI_MODEL`,
    `GEMINI_INPUT_TOKEN_LIMIT`, `OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`,
    `OPENROUTER_INPUT_TOKEN_LIMIT` (`ENV_ALIASES`).
 4. `src/configs/config.yaml`.
@@ -94,9 +94,10 @@ These hold the **name** of the environment variable that contains the key.
 
 | Setting | Default | Effect | Validation | Env |
 |---|---|---|---|---|
-| `notes_provider` | `"gemini"` | Which adapter `llm/factory.py` builds. | `gemini` or `openrouter` | `ATLAS_NOTES_PROVIDER`, `NOTES_PROVIDER` |
-| `notes_model` | `""` | Model for whichever provider is active. Empty uses `gemini_model` / `openrouter_model` / the OpenRouter default. | none | `ATLAS_NOTES_MODEL`, `NOTES_MODEL` |
-| `gemini_model` | `"gemini-2.5-flash"` | Gemini model when `notes_model` is empty. | none | `ATLAS_GEMINI_MODEL`, `GEMINI_MODEL` |
+| `notes_models` | `[]` | Ordered list of LiteLLM models, tried first to last (later ones are fallbacks). Each entry: `model` (`<provider>/<model>`, required), `api_key_env`, `api_base`, `input_token_limit`. See [Choosing models](#choosing-models-litellm). Empty falls back to the single-model shorthand below. | each entry needs `model` like `gemini/gemini-2.5-flash`; no other keys | `ATLAS_NOTES_MODELS`, `NOTES_MODELS` (a JSON list) |
+| `notes_provider` | `"gemini"` | Legacy single-model shorthand, used only when `notes_models` is empty. | `gemini` or `openrouter` | `ATLAS_NOTES_PROVIDER`, `NOTES_PROVIDER` |
+| `notes_model` | `""` | Legacy shorthand: model for the active `notes_provider`. Empty uses `gemini_model` / `openrouter_model` / the OpenRouter default. | none | `ATLAS_NOTES_MODEL`, `NOTES_MODEL` |
+| `gemini_model` | `"gemini-3.5-flash"` | Gemini model when `notes_model` is empty. | none | `ATLAS_GEMINI_MODEL`, `GEMINI_MODEL` |
 | `gemini_input_token_limit` | `1000000` | Pre-flight limit: a transcript estimated (characters / 4) above this fails as permanent `transcript_too_large` without calling Gemini. | >= 1 | `ATLAS_GEMINI_INPUT_TOKEN_LIMIT`, `GEMINI_INPUT_TOKEN_LIMIT` |
 | `openrouter_model` | `""` | OpenRouter model when `notes_model` is empty; empty means `openai/gpt-5-mini`. | none | `ATLAS_OPENROUTER_MODEL`, `OPENROUTER_MODEL` |
 | `openrouter_base_url` | `"https://openrouter.ai/api/v1"` | OpenAI-compatible endpoint for the OpenRouter adapter. | none | `ATLAS_OPENROUTER_BASE_URL`, `OPENROUTER_BASE_URL` |
@@ -136,8 +137,39 @@ missing, and each feature fails with a message naming the variable.
 | Variable | Needed for | Without it |
 |---|---|---|
 | `YOUTUBE_API_KEY` | Listing a playlist (YouTube Data API v3, enabled in Google Cloud) | `POST /api/playlists` answers 503 `CONFIG_MISSING` |
-| `GEMINI_API_KEY` | Notes when `notes_provider` is `gemini` (default); a Google AI Studio key | Each video fails with a permanent `config_error`, no retries |
-| `OPENROUTER_API_KEY` | Notes when `notes_provider` is `openrouter` | Same as above |
+| `GEMINI_API_KEY` | Notes with a `gemini/...` model (the default); a Google AI Studio key | That model is skipped; with no other model, each video fails with a permanent `config_error`, no retries |
+| `OPENROUTER_API_KEY` | Notes with an `openrouter/...` model | Same as above |
+| `<PROVIDER>_API_KEY` / the entry's `api_key_env` | Notes with any other `notes_models` entry | Same as above |
+
+### Choosing models (LiteLLM)
+
+Every LLM call goes through [LiteLLM](https://docs.litellm.ai/docs/providers), so a provider is a
+config entry, not code. `model` is LiteLLM's `<provider>/<model>` string. Example in
+`config.yaml`:
+
+```yaml
+notes_models:
+  - model: "gemini/gemini-2.5-flash"          # primary; key from GEMINI_API_KEY
+    input_token_limit: 1000000
+  - model: "openrouter/openai/gpt-5-mini"     # fallback; key from OPENROUTER_API_KEY
+  - model: "openai/gpt-5-mini"                # any OpenAI-compatible gateway, e.g. OmniRoute
+    api_base: "http://localhost:20128/v1"
+    api_key_env: "OMNIROUTE_API_KEY"
+```
+
+- `api_key_env` defaults to `<PROVIDER>_API_KEY` (`GEMINI_API_KEY`, `OPENROUTER_API_KEY`,
+  `OPENAI_API_KEY`, `GROQ_API_KEY` ...). It may hold several keys (see below).
+- `input_token_limit` defaults to 128000 (a wrong guess refuses early instead of paying for a
+  rejected call).
+- Models are tried in order. A model is skipped when its key is missing or the transcript is over
+  its `input_token_limit`; the next one takes over when every key of a model is rate-limited or
+  rejected, or on a 5xx / network error. A bad *answer* (empty, cut off, missing sections) is not
+  a reason to fall back: it is a transient failure retried by the pipeline. If every model is
+  turned away the transient error wins over a permanent one, so the pipeline still retries.
+- `Summary.provider` and the usage ledger record the model that actually answered.
+- Via env: `NOTES_MODELS='[{"model": "gemini/gemini-2.5-flash"}]'` (JSON).
+- With `notes_models` empty, `notes_provider` / `notes_model` / `gemini_*` / `openrouter_*` build a
+  single model exactly as before, so an older `config.yaml` keeps working.
 
 ### Multiple keys per service
 

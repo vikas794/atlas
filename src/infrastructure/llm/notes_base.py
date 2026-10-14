@@ -266,6 +266,7 @@ _NETWORK_EXCEPTION_NAMES = frozenset(
         "APIConnectionError",
         "APITimeoutError",
         "ConnectionError",
+        "Timeout",  # litellm.Timeout
     }
 )
 
@@ -339,7 +340,7 @@ def classify_provider_exception(
             f"{provider_label} does not know the model {model!r}{shown}. Check NOTES_MODEL "
             "(or the provider-specific model setting)."
         )
-    if _TOO_LARGE_TEXT.search(raw):
+    if "ContextWindowExceededError" in mro_names or _TOO_LARGE_TEXT.search(raw):
         return failure(
             FailureType.TRANSCRIPT_TOO_LARGE,
             f"The transcript is too large for {model}: {provider_label} rejected the "
@@ -350,20 +351,24 @@ def classify_provider_exception(
             FailureType.RATE_LIMITED,
             f"{provider_label} is rate-limiting requests{shown}.",
         )
+    # By exception type first: LiteLLM gives its connection errors a 500 status code, which
+    # would otherwise read as a provider outage.
+    if mro_names & _NETWORK_EXCEPTION_NAMES or (status is None and _NETWORK_TEXT.search(raw)):
+        return failure(
+            FailureType.NETWORK_ERROR,
+            f"A network error interrupted the request to {provider_label}.",
+        )
     if status is not None and status >= 500:
         return failure(
             FailureType.PROVIDER_ERROR,
             f"{provider_label} returned a server error{shown}.",
         )
-    if status is not None and _BLOCKED_TEXT.search(raw):
+    if "ContentPolicyViolationError" in mro_names or (
+        status is not None and _BLOCKED_TEXT.search(raw)
+    ):
         return failure(
             FailureType.OUTPUT_MALFORMED,
             f"{provider_label} refused to generate notes for this transcript (content filter).",
-        )
-    if status is None and (mro_names & _NETWORK_EXCEPTION_NAMES or _NETWORK_TEXT.search(raw)):
-        return failure(
-            FailureType.NETWORK_ERROR,
-            f"A network error interrupted the request to {provider_label}.",
         )
     return failure(
         FailureType.PROVIDER_ERROR,

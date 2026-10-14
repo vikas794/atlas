@@ -123,7 +123,7 @@ members-only, transcripts disabled by the uploader, and "No transcript is availa
 language." (no subtitle track at all; any existing track is used even if it is not
 `transcript_language`). Nothing in Atlas can fix these; Retry only helps if the video changed.
 
-### `config_error`: Gemini / OpenRouter key missing or rejected
+### `config_error`: LLM key missing or rejected
 
 - `GEMINI_API_KEY is not set. Add your Google AI Studio (Gemini) API key to .env as GEMINI_API_KEY=<key> to generate notes.`
 - `Gemini rejected the API key (HTTP 400). Check that GEMINI_API_KEY in .env holds a valid key with access to this model.`
@@ -131,9 +131,12 @@ language." (no subtitle track at all; any existing track is used even if it is n
 
 Cause: a permanent `config_error`, so the video fails without spending retries. Fix the key or
 model in `.env` / `config.yaml`, restart Atlas, then press Retry on the failed videos.
-The same kind is used for a missing or invalid prompt file.
+The same kind is used for a missing or invalid prompt file. With several models in
+`notes_models` a model with a missing or rejected key is skipped and the next one is used; the
+error is raised only when every model was turned away (`GET /api/diagnostics` lists which keys
+are missing).
 
-### Gemini / OpenRouter 429, 5xx or timeout
+### LLM 429, 5xx or timeout
 
 `Gemini is rate-limiting requests (HTTP 429).`, `Gemini returned a server error (HTTP 503).`,
 `A network error interrupted the request to Gemini.` These are transient and retried with
@@ -150,8 +153,9 @@ automatically, then Retry or Regenerate.
 ### Transcript too large
 
 `The transcript is about N tokens (M characters), which is over the L-token input limit for this model.`
-Cause: the estimate (characters / 4) exceeds `gemini_input_token_limit` /
-`openrouter_input_token_limit`, or the provider rejected the prompt as too long. Permanent;
+Cause: the estimate (characters / 4) exceeds the model's `input_token_limit` (in
+`notes_models`, or `gemini_input_token_limit` / `openrouter_input_token_limit` for the legacy
+settings) for every configured model, or the provider rejected the prompt as too long. Permanent;
 Atlas never truncates. Fix: use a model with a larger context and raise the matching limit,
 then Retry.
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -13,6 +13,8 @@ from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 
 NOTES_PROVIDERS = ("gemini", "openrouter")
+#: Keys an entry of ``notes_models`` may carry (see ``AtlasSettings.notes_models``).
+NOTES_MODEL_KEYS = ("model", "api_key_env", "api_base", "input_token_limit")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 
@@ -101,7 +103,12 @@ class AtlasSettings:
     transcript_output_folder: str = "transcripts"
 
     # --- Notes generation (playlist -> per-video Markdown notes) ----------
-    notes_provider: str = "gemini"  # gemini | openrouter
+    #: Ordered LiteLLM models, tried first to last (the rest are fallbacks). Each entry is a
+    #: mapping with ``model`` ("<litellm-provider>/<model>", e.g. "gemini/gemini-2.5-flash") and
+    #: optional ``api_key_env``, ``api_base`` (OpenAI-compatible gateways such as OmniRoute) and
+    #: ``input_token_limit``. Empty -> derived from the legacy ``notes_provider`` settings below.
+    notes_models: list[dict[str, Any]] = field(default_factory=list)
+    notes_provider: str = "gemini"  # legacy single-provider shorthand: gemini | openrouter
     notes_model: str = ""  # empty -> the provider's own default model
     gemini_model: str = "gemini-2.5-flash"
     gemini_input_token_limit: int = 1000000
@@ -163,6 +170,35 @@ class AtlasSettings:
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
+    def _notes_models_problems(self) -> list[str]:
+        found: list[str] = []
+        for index, entry in enumerate(self.notes_models, start=1):
+            where = f"notes_models[{index}]"
+            if not isinstance(entry, dict):
+                found.append(f"{where}: must be a mapping with at least a 'model' key")
+                continue
+            unknown = sorted(set(entry) - set(NOTES_MODEL_KEYS))
+            if unknown:
+                found.append(
+                    f"{where}: unknown key(s) {', '.join(unknown)} "
+                    f"(allowed: {', '.join(NOTES_MODEL_KEYS)})"
+                )
+            model = entry.get("model")
+            if not isinstance(model, str) or "/" not in model.strip("/ "):
+                found.append(
+                    f"{where}.model: must look like '<provider>/<model>', e.g. "
+                    f"'gemini/gemini-2.5-flash' (got {model!r})"
+                )
+            for key in ("api_key_env", "api_base"):
+                if key in entry and not isinstance(entry[key], str):
+                    found.append(f"{where}.{key}: must be text (got {entry[key]!r})")
+            limit = entry.get("input_token_limit")
+            if limit is not None and (
+                isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
+            ):
+                found.append(f"{where}.input_token_limit: must be a whole number of at least 1")
+        return found
+
     def problems(self) -> list[str]:
         """Human-readable reasons this configuration cannot run (empty when it is valid)."""
         found: list[str] = []
@@ -200,6 +236,7 @@ class AtlasSettings:
              "must be greater than 0")  # fmt: skip
         for name in ("gemini_input_token_limit", "openrouter_input_token_limit"):
             need(getattr(self, name) >= 1, name, "must be at least 1")
+        found.extend(self._notes_models_problems())
         prompts_dir = Path(self.prompts_base_dir)
         if not prompts_dir.is_absolute():
             prompts_dir = repo_root() / prompts_dir
@@ -221,6 +258,7 @@ class AtlasSettings:
 #: Documented, unprefixed environment variable names -> AtlasSettings field names. These are
 #: the names ``.env.example`` lists; ``ATLAS_<FIELD>`` still wins when both are set.
 ENV_ALIASES: dict[str, str] = {
+    "NOTES_MODELS": "notes_models",
     "NOTES_PROVIDER": "notes_provider",
     "NOTES_MODEL": "notes_model",
     "NOTES_PROMPT_NAME": "notes_prompt_name",
@@ -261,6 +299,14 @@ def _coerce_field(field_name: str, raw: str) -> Any:
         if lowered in _FALSE:
             return False
         raise ValueError(f"not a boolean: {raw!r}")
+    if declared.startswith("list"):
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"not a JSON list: {raw!r}") from exc
+        if not isinstance(value, list):
+            raise ValueError(f"not a JSON list: {raw!r}")
+        return value
     if declared.startswith("int"):
         return int(text)
     if declared.startswith("float"):
@@ -296,6 +342,9 @@ def _check_yaml_value(name: str, value: Any) -> str | None:
     if declared.startswith("bool"):
         ok = isinstance(value, bool)
         expected = "true or false"
+    elif declared.startswith("list"):
+        ok = isinstance(value, list)
+        expected = "a list"
     elif declared.startswith("int"):
         ok = isinstance(value, int) and not isinstance(value, bool)
         expected = "a whole number"

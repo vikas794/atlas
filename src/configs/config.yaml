@@ -37,9 +37,18 @@ transcript_language: "en"
 transcript_output_folder: "transcripts"
 
 # --- Notes generation ----------------------------------------------------------
-notes_provider: "gemini"  # gemini | openrouter
+# Models are LiteLLM names (<provider>/<model>), tried in order; later ones are fallbacks.
+# Uncomment to use instead of the single-model shorthand below (see docs/CONFIG.md):
+# notes_models:
+#   - model: "gemini/gemini-3.5-flash"
+#     input_token_limit: 1000000
+#   - model: "openrouter/openai/gpt-5-mini"
+#   - model: "openai/gpt-5-mini"                # OpenAI-compatible gateway, e.g. OmniRoute
+#     api_base: "http://localhost:20128/v1"
+#     api_key_env: "OMNIROUTE_API_KEY"
+notes_provider: "gemini"  # single-model shorthand (used when notes_models is empty): gemini | openrouter
 notes_model: ""  # empty -> use gemini_model / openrouter_model / the provider default
-gemini_model: "gemini-2.5-flash"
+gemini_model: "gemini-3.5-flash"
 gemini_input_token_limit: 1000000
 openrouter_model: ""
 openrouter_base_url: "https://openrouter.ai/api/v1"

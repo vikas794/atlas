@@ -27,7 +27,7 @@ flowchart LR
   end
   I --> YT["YouTube Data API v3<br/>youtube/playlist.py"]
   I --> YD["yt-dlp subtitles<br/>transcript/ytdlp/provider.py"]
-  I --> LLM["Gemini / OpenRouter<br/>llm/gemini, llm/openai"]
+  I --> LLM["LiteLLM<br/>Gemini / OpenRouter / OpenAI / OmniRoute ...<br/>llm/litellm_notes"]
   I --> DB[("SQLite (WAL)<br/>storage/")]
   I --> GD["Google Drive + Docs<br/>google/drive.py, publisher.py"]
 ```
@@ -38,7 +38,7 @@ flowchart LR
 | Composition root | `src/transport/http/fastapi/dependencies.py` | The only module that knows both ports and adapters. Builds everything lazily, so the app starts without any API key; a missing key surfaces as `ConfigurationError` (HTTP 503 `CONFIG_MISSING`) when the feature is used. |
 | Application | `src/application/` | `IngestPlaylistUseCase`, `ProcessVideoUseCase`, `PublishPlaylistUseCase`, the user actions in `actions.py` (approve, approve-all, edit, retry, regenerate, reprocess, delete, transcript cleanup) and `PlaylistWorker`. Depends only on ports. |
 | Domain | `src/domain/` | `Playlist`, `Video`, `Transcript`, `Summary`, `Stage`, `FailureType`/`FailureKind` (`models/playlist.py`); pure services (`stage_machine`, `backoff`, `failure_classifier`, `sync_diff`, `playlist_url`, `doc_naming`, `markdown_to_docs`); ports in `interfaces/`. |
-| Infrastructure | `src/infrastructure/` | `youtube/playlist.py` (playlist listing), `transcript/ytdlp/provider.py`, `llm/` (Gemini, OpenRouter, `factory.py`, cost table), `storage/` (connection + migration runner, `PlaylistRepository`, `SqlUsageLedger`), `google/` (`GoogleDriveExporter` for OAuth and raw API calls, `GoogleDrivePublisher` for idempotent publishing). |
+| Infrastructure | `src/infrastructure/` | `youtube/playlist.py` (playlist listing), `transcript/ytdlp/provider.py`, `llm/` (`litellm_notes.py` single LiteLLM adapter, `models.py` model list, `factory.py`, cost table), `storage/` (connection + migration runner, `PlaylistRepository`, `SqlUsageLedger`), `google/` (`GoogleDriveExporter` for OAuth and raw API calls, `GoogleDrivePublisher` for idempotent publishing). |
 | Entry points | `backend/__main__.py`, `backend/main.py`, `backend/spa.py`, `backend/services/diagnostics.py` | Startup checks (config, port), the FastAPI app and lifespan, serving `frontend/dist` with an SPA fallback, `GET /api/diagnostics`. |
 | Config / shared | `src/config/settings.py`, `src/configs/config.yaml`, `src/prompts/`, `src/shared/` | `AtlasSettings` (see CONFIG.md), versioned prompt files, logging, secret redaction, file helpers. |
 
@@ -46,7 +46,7 @@ Ports (`src/domain/interfaces/`): `PlaylistProviderPort`, `TranscriptProviderPor
 `NotesGeneratorPort`, `PlaylistRepositoryPort`, `DrivePublisherPort`, `UsageLedgerPort`.
 
 **Single owner of retries.** Adapters make one provider call and raise a classified error
-(yt-dlp runs with `retries: 0`; the Gemini and OpenAI SDKs are built without retry options).
+(yt-dlp runs with `retries: 0`; LiteLLM is called with `num_retries=0`).
 `ProcessVideoUseCase` decides whether and when to retry and persists that decision, so retries
 survive a restart and are bounded. The one exception is Drive: `GoogleDrivePublisher` retries
 each Drive/Docs call in place (section 5).
@@ -189,7 +189,7 @@ sequenceDiagram
     participant W as PlaylistWorker
     participant PV as ProcessVideoUseCase
     participant YD as yt-dlp
-    participant LLM as Gemini OpenRouter
+    participant LLM as LiteLLM providers
     participant PUB as PublishPlaylistUseCase
     participant GD as Google Drive Docs
 
@@ -315,12 +315,16 @@ Where the type comes from:
   `transcript_too_large`; 429 is `rate_limited`; 5xx is `provider_error`; content-filter text is
   `output_malformed`; timeouts and connection errors are `network_error`. A missing key or
   prompt file is also a `config_error`. Before calling, `check_input_size` estimates tokens as
-  characters / 4 and refuses a transcript over `gemini_input_token_limit` /
-  `openrouter_input_token_limit` (`transcript_too_large`, never truncated).
+  characters / 4 and refuses a transcript over the model's `input_token_limit`
+  (`transcript_too_large`, never truncated; the next configured model is tried instead).
+  LiteLLM raises OpenAI-style exceptions; the classifier reads their status code and class name
+  (`ContextWindowExceededError`, `ContentPolicyViolationError`, `APIConnectionError` / `Timeout`).
 - **Multiple API keys**: `src/shared/api_keys.py` parses a comma-separated / numbered list per
   service into a thread-safe `KeyPool` (round-robin, per-key cooldown, disable). The YouTube
-  provider (`_execute`) and the LLM adapters (`notes_base.call_with_keys`) fail over to the next
-  key on a key-scoped error (quota, 429, rejected key, 402) and re-raise anything else.
+  provider (`_execute`) and the LLM adapter (`notes_base.call_with_keys`, once per configured
+  model) fail over to the next key on a key-scoped error (quota, 429, rejected key, 402) and
+  re-raise anything else. When a model is turned away entirely, `LiteLLMNotesGenerator` falls
+  back to the next model in `notes_models`.
   Output checks (`validate_notes`, `check_finish_reason`) raise `output_malformed` for empty,
   too-short, section-less, cut-off or blocked responses.
 - Any other exception in `ProcessVideoUseCase` is a permanent `internal_error` (traceback logged).
@@ -528,21 +532,21 @@ The UI polls; there are no websockets.
 
 ## 10. Adding an LLM provider
 
-Three places, plus two optional ones:
+Usually just config: every provider goes through one adapter,
+`src/infrastructure/llm/litellm_notes.py::LiteLLMNotesGenerator`, built by `factory.py` from the
+ordered `notes_models` list (`src/infrastructure/llm/models.py::resolve_model_specs`).
 
-1. **Config** (`src/config/settings.py`): add the name to `NOTES_PROVIDERS` (validation), and add
-   any provider-specific fields (for example `<name>_model`, `<name>_api_key_env`,
-   `<name>_input_token_limit`) to `AtlasSettings` and `src/configs/config.yaml`. Every field
-   gets an `ATLAS_<FIELD>` override automatically; add an `ENV_ALIASES` entry only if you want a
-   short name.
-2. **One adapter** under `src/infrastructure/llm/<name>/notes.py` implementing
-   `NotesGeneratorPort.generate_notes(*, title, transcript) -> GeneratedNotes`. Reuse
-   `notes_base`: `NotesPromptSource` (prompt file and version), `render_prompt`,
-   `check_input_size`, `classify_provider_exception`, `check_finish_reason`, `validate_notes`,
-   `request_timeout_seconds`. Make exactly one call (disable SDK retries), raise
-   `NotesGeneratorConfigError` for a missing key, and record a `UsageRecord`.
-3. **One factory branch** in `src/infrastructure/llm/factory.py::build_notes_generator`, importing
-   the adapter inside the branch so no SDK is imported unless selected.
-4. Optional: prices in `src/infrastructure/llm/cost.py` (unknown providers cost 0.0), and the key
-   check in `backend/services/diagnostics.py::check_llm_key`, which currently knows only
-   `openrouter` and treats every other provider as Gemini.
+1. Pick the model's LiteLLM name (`<provider>/<model>`, see https://docs.litellm.ai/docs/providers)
+   and add an entry to `notes_models` in `src/configs/config.yaml`; set `api_base` for an
+   OpenAI-compatible gateway (OmniRoute, a local server) and `api_key_env` when the key variable
+   is not `<PROVIDER>_API_KEY`. Put the key in `.env`. See `docs/CONFIG.md`.
+2. Optional: prices in `src/infrastructure/llm/cost.py`. LiteLLM's own price (when it knows the
+   model) is used first; unknown models then cost 0.0.
+3. Optional: a conventional key variable for the provider in `models.py::_DEFAULT_KEY_ENVS`.
+
+The adapter reuses `notes_base` (prompt file and version, `render_prompt`, `check_input_size`,
+`classify_provider_exception`, `check_finish_reason`, `validate_notes`, `call_with_keys`), so a new
+model gets the same failure taxonomy, key rotation and usage recording without code. Atlas calls
+`litellm.acompletion` directly with its own `KeyPool` rather than `litellm.Router`, so key
+cooldowns and retries stay in one place (`ProcessVideoUseCase` owns retries). LiteLLM is pinned
+exactly in `pyproject.toml`; review its changelog before bumping.

@@ -19,7 +19,7 @@ from src.domain.interfaces.notes_generator import GeneratedNotes
 from src.domain.interfaces.transcript_provider import TranscriptResult
 from src.domain.models.playlist import FailureKind, FailureType, PipelineError, Stage
 from src.domain.services.sync_diff import PlaylistEntry
-from src.infrastructure.llm.gemini.notes import GeminiNotesGenerator
+from src.infrastructure.llm.litellm_notes import LiteLLMNotesGenerator
 from src.infrastructure.storage import db
 from src.infrastructure.storage.playlist_repo import PlaylistRepository
 
@@ -207,32 +207,33 @@ async def test_transient_failures_recover_through_the_worker(repo: PlaylistRepos
     assert video.retry_count == 2 and video.next_retry_at is None
 
 
-class FakeGeminiClient:
-    """Google SDK double that always fails with a rate limit; counts provider calls."""
+class FakeCompletion:
+    """``litellm.acompletion`` double that always fails with a rate limit; counts provider calls."""
 
     def __init__(self) -> None:
         self.calls = 0
-        outer = self
 
-        class Models:
-            async def generate_content(self, *, model: str, contents: str) -> Any:
-                outer.calls += 1
-                raise RuntimeError("429 Too Many Requests: slow down")
-
-        self.aio = type("Aio", (), {"models": Models()})()
+    async def __call__(self, **_: Any) -> Any:
+        self.calls += 1
+        raise RuntimeError("429 Too Many Requests: slow down")
 
 
 async def test_total_llm_calls_per_video_are_bounded_by_one_retry_layer(
-    repo: PlaylistRepository,
+    repo: PlaylistRepository, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Retries used to multiply (adapter wrapper x use case = up to 20 calls)."""
     from src.config.settings import AtlasSettings
+    from src.shared.api_keys import KeyPool, reset_pools
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key-not-real")
+    # Parking the single key after a 429 would short-circuit later attempts; this test counts
+    # how many provider calls the pipeline's own retry layer makes.
+    monkeypatch.setattr(KeyPool, "cool_down", lambda self, key, seconds=0: None)
+    reset_pools()
 
     _, videos = await add_videos(repo)
-    client = FakeGeminiClient()
-    generator = GeminiNotesGenerator(
-        AtlasSettings().to_loader(), client_factory=lambda: client
-    )
+    client = FakeCompletion()
+    generator = LiteLLMNotesGenerator(AtlasSettings().to_loader(), completion=client)
     worker = make_worker(repo, Transcripts(), generator, max_auto_retries=3)
 
     await worker.start()

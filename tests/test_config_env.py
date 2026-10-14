@@ -18,13 +18,10 @@ from src.config.settings import (
     repo_root,
 )
 from src.infrastructure.llm.factory import build_notes_generator
-from src.infrastructure.llm.gemini.notes import GeminiNotesGenerator
+from src.infrastructure.llm.models import DEFAULT_OPENROUTER_MODEL, resolve_model_specs
 from src.infrastructure.llm.notes_base import NotesPromptSource
-from src.infrastructure.llm.openai.notes import (
-    DEFAULT_OPENROUTER_MODEL,
-    OPENROUTER_BASE_URL,
-    OpenRouterNotesGenerator,
-)
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 @pytest.fixture(autouse=True)
@@ -37,45 +34,98 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("src.config.settings.load_dotenv", lambda *a, **k: False)
 
 
-def test_notes_provider_env_selects_the_openrouter_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+def _primary(monkeypatch_unused: object = None):
+    """The first (primary) model spec the factory builds from the current settings."""
+    return build_notes_generator(load_settings().to_loader()).specs[0]
+
+
+def test_notes_provider_env_selects_the_openrouter_model(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NOTES_PROVIDER", "openrouter")
 
-    generator = build_notes_generator(load_settings().to_loader())
-
-    assert isinstance(generator, OpenRouterNotesGenerator)
+    assert _primary().provider == "openrouter"
 
 
 def test_without_overrides_the_default_provider_is_gemini() -> None:
-    assert isinstance(build_notes_generator(load_settings().to_loader()), GeminiNotesGenerator)
+    assert _primary().provider == "gemini"
 
 
 def test_documented_llm_variables_reach_the_adapters(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NOTES_PROVIDER", "gemini")
     monkeypatch.setenv("GEMINI_MODEL", "gemini-2.5-pro")
     monkeypatch.setenv("GEMINI_INPUT_TOKEN_LIMIT", "12345")
-    gemini = build_notes_generator(load_settings().to_loader())
+    gemini = _primary()
     assert gemini.model == "gemini-2.5-pro"
     assert gemini.input_token_limit == 12345  # a real int, not a string
 
     monkeypatch.setenv("NOTES_MODEL", "gemini-custom")  # NOTES_MODEL beats GEMINI_MODEL
-    assert build_notes_generator(load_settings().to_loader()).model == "gemini-custom"
+    assert _primary().model == "gemini-custom"
 
     monkeypatch.setenv("NOTES_PROVIDER", "openrouter")
     monkeypatch.delenv("NOTES_MODEL")
     monkeypatch.setenv("OPENROUTER_MODEL", "anthropic/claude-sonnet")
     monkeypatch.setenv("OPENROUTER_BASE_URL", "https://proxy.example/v1")
-    router = build_notes_generator(load_settings().to_loader())
+    router = _primary()
     assert router.model == "anthropic/claude-sonnet"
-    assert router.base_url == "https://proxy.example/v1"
+    assert router.api_base == "https://proxy.example/v1"
 
 
 def test_openrouter_defaults_when_nothing_is_set(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NOTES_PROVIDER", "openrouter")
 
-    router = build_notes_generator(load_settings().to_loader())
+    router = _primary()
 
     assert router.model == DEFAULT_OPENROUTER_MODEL
-    assert router.base_url == OPENROUTER_BASE_URL
+    assert router.api_base == OPENROUTER_BASE_URL
+
+
+def test_notes_models_env_is_a_json_list_and_beats_the_legacy_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NOTES_PROVIDER", "openrouter")
+    monkeypatch.setenv(
+        "NOTES_MODELS",
+        '[{"model": "openai/gpt-5-mini", "api_base": "http://localhost:20128/v1"},'
+        ' {"model": "gemini/gemini-2.5-flash"}]',
+    )
+
+    settings = load_settings()
+    first, second = resolve_model_specs(settings.to_loader())
+
+    assert settings.notes_models[0]["model"] == "openai/gpt-5-mini"
+    assert (first.provider, first.api_base) == ("openai", "http://localhost:20128/v1")
+    assert second.litellm_model == "gemini/gemini-2.5-flash"
+
+
+@pytest.mark.parametrize("raw", ["not json", '{"model": "gemini/x"}'])
+def test_notes_models_env_must_be_a_json_list(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
+    monkeypatch.setenv("NOTES_MODELS", raw)
+
+    with pytest.raises(SettingsError, match="NOTES_MODELS"):
+        load_settings()
+
+
+def test_notes_models_entries_are_validated(tmp_path: Path) -> None:
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "\n".join(
+            [
+                "notes_models:",
+                "  - model: gemini/gemini-2.5-flash",
+                "  - model: gpt-5",
+                "  - model: openai/gpt-5-mini",
+                "    temperature: 0.2",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SettingsError) as excinfo:
+        load_settings(config)
+
+    text = "\n".join(excinfo.value.problems)
+    assert "notes_models[2].model" in text
+    assert "notes_models[3]: unknown key(s) temperature" in text
 
 
 def test_the_settings_loader_reads_the_environment_at_call_time(
@@ -114,7 +164,7 @@ def test_empty_values_count_as_unset_so_copying_env_example_works(
     loader = loaded.to_loader()
     for f in fields(AtlasSettings):
         assert loader(f.name) == getattr(baseline, f.name), f.name
-    assert isinstance(build_notes_generator(loader), GeminiNotesGenerator)
+    assert build_notes_generator(loader).provider == "gemini"
 
 
 def test_whitespace_only_values_are_also_unset(monkeypatch: pytest.MonkeyPatch) -> None:

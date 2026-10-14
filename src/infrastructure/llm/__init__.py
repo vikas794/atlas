@@ -1,10 +1,9 @@
 """LLM infrastructure for the playlist-to-notes pipeline.
 
-Importing this package pulls in **no provider SDK**. ``google.genai`` and
-``openai`` are imported inside the adapters' client factories, so the pipeline,
-the CLI and the test suite all work with no API key present. The concrete
-adapters are reachable through :func:`build_notes_generator`, which imports them
-on demand based on ``notes_provider``.
+Importing this package pulls in **no provider SDK**. ``litellm`` is imported on first use
+inside the adapter, so the pipeline, the CLI and the test suite all work with no API key
+present. The adapter is reachable through :func:`build_notes_generator`, which builds it from
+the ``notes_models`` setting.
 """
 
 from __future__ import annotations

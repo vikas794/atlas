@@ -3,7 +3,7 @@
 Every scenario runs the REAL use cases, worker, repository (temporary SQLite) and, where it
 matters, the REAL adapters: ``YouTubePlaylistProvider`` over a stubbed googleapiclient
 service, ``YtDlpTranscriptProvider`` over stubbed yt-dlp boundaries, and
-``GeminiNotesGenerator`` over a client double that raises genuine ``google.genai`` errors.
+``LiteLLMNotesGenerator`` over a completion double that raises genuine ``litellm`` errors.
 Nothing touches the network.
 """
 
@@ -14,8 +14,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
+import litellm
 import pytest
-from google.genai import errors as genai_errors
 from yt_dlp.utils import DownloadError
 
 from src.application.use_cases.playlist.actions import RetryVideoUseCase
@@ -27,7 +28,7 @@ from src.domain.interfaces.notes_generator import GeneratedNotes
 from src.domain.interfaces.transcript_provider import TranscriptResult
 from src.domain.models.playlist import FailureKind, FailureType, PipelineError, Stage
 from src.domain.services.sync_diff import PlaylistEntry
-from src.infrastructure.llm.gemini.notes import GeminiNotesGenerator
+from src.infrastructure.llm.litellm_notes import LiteLLMNotesGenerator
 from src.infrastructure.storage import db
 from src.infrastructure.storage.playlist_repo import PlaylistRepository
 from src.infrastructure.transcript.ytdlp import provider as ytdlp_module
@@ -318,42 +319,52 @@ async def test_video_without_any_transcript_fails_fast_and_is_never_retried(
     assert notes.calls == []
 
 
-def gemini_429() -> genai_errors.APIError:
-    body = {"error": {"code": 429, "message": "Resource exhausted", "status": "RESOURCE_EXHAUSTED"}}
-    return genai_errors.ClientError(429, body)
+def llm_error(cls: type[Exception], code: int, message: str) -> Exception:
+    response = httpx.Response(code, request=httpx.Request("POST", "https://provider.example"))
+    return cls(message=message, model="m", llm_provider="gemini", response=response)  # type: ignore[call-arg]
+
+
+def gemini_429() -> Exception:
+    return llm_error(litellm.RateLimitError, 429, "Resource exhausted")
+
+
+@pytest.fixture(autouse=True)
+def _llm_keys(monkeypatch: pytest.MonkeyPatch):
+    """A fake Gemini key, and no key cooldown: these tests are about the pipeline's own retry
+    layer, so a 429 must not park the (single) key and short-circuit the next attempt."""
+    from src.shared.api_keys import KeyPool, reset_pools
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key-not-real")
+    monkeypatch.setattr(KeyPool, "cool_down", lambda self, key, seconds=0: None)
+    reset_pools()
+    yield
+    reset_pools()
 
 
 class GeminiClient:
-    """``google.genai`` client double: raises the scripted errors, then answers."""
+    """``litellm.acompletion`` double: raises the scripted errors, then answers."""
 
     def __init__(self, errors: list[Exception]) -> None:
         self.errors = list(errors)
         self.calls = 0
-        outer = self
 
-        class _Models:
-            async def generate_content(self, *, model: str, contents: str) -> Any:
-                outer.calls += 1
-                if outer.errors:
-                    raise outer.errors.pop(0)
-                finish = type("Candidate", (), {"finish_reason": "STOP"})()
-                return type(
-                    "Response",
-                    (),
-                    {"text": GOOD_NOTES, "usage_metadata": None, "candidates": [finish]},
-                )()
-
-        self.aio = type("Aio", (), {"models": _Models()})()
+    async def __call__(self, **_: Any) -> Any:
+        self.calls += 1
+        if self.errors:
+            raise self.errors.pop(0)
+        message = type("Message", (), {"content": GOOD_NOTES})()
+        choice = type("Choice", (), {"message": message, "finish_reason": "stop"})()
+        return type("Response", (), {"choices": [choice], "usage": None})()
 
 
-def gemini(client: GeminiClient) -> GeminiNotesGenerator:
+def gemini(client: GeminiClient) -> LiteLLMNotesGenerator:
     settings = {
         "gemini_model": "gemini-2.5-flash",
         "notes_prompt_name": "notes_v1_1.yaml",
         "prompts_base_dir": "src/prompts",
     }
-    return GeminiNotesGenerator(
-        lambda key, default=None: settings.get(key, default), client_factory=lambda: client
+    return LiteLLMNotesGenerator(
+        lambda key, default=None: settings.get(key, default), completion=client
     )
 
 
@@ -459,8 +470,8 @@ async def test_invalid_gemini_key_fails_permanently_after_one_call(
     repo: PlaylistRepository,
 ) -> None:
     playlist_pk = await _ingest(repo, ["v1"])
-    body = {"error": {"code": 400, "message": "API key not valid.", "status": "INVALID_ARGUMENT"}}
-    client = GeminiClient([genai_errors.ClientError(400, body) for _ in range(5)])
+    error = llm_error(litellm.BadRequestError, 400, "API key not valid.")
+    client = GeminiClient([error for _ in range(5)])
     worker, _ = worker_for(repo, Transcripts(), gemini(client))
     await worker.start()
     try:
