@@ -355,6 +355,12 @@ With the defaults (`backoff_base_seconds: 5`, `backoff_cap_seconds: 300`) the wa
 automatic retries 1-4 are about 5, 10, 20 and 40 seconds (each plus up to 20%). The delay is
 persisted as `next_retry_at` (UTC ISO timestamp), so a restart keeps the schedule.
 
+A rate-limited **YouTube transcript fetch** (`rate_limited` while the video is in
+`fetching_transcript`) uses its own, longer policy: `rate_limit_backoff_base_seconds: 60`,
+`rate_limit_backoff_cap_seconds: 900`, `rate_limit_max_auto_retries: 6`, because throttles last
+minutes. A rate-limited LLM call keeps the regular policy above. The yt-dlp adapter also
+serializes fetches behind one lock, spaced `transcript_min_interval_seconds` apart.
+
 **Per-phase budget.** `retry_count` is reset to 0 when the transcript is stored
 (`update_stage(..., reset_retries=True)`), so the notes phase starts with a full
 `max_auto_retries` budget instead of inheriting what YouTube throttling used up. Each phase

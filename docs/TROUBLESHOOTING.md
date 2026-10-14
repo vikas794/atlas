@@ -110,14 +110,24 @@ stored for a new playlist. Submit again later; the quota resets daily.
 
 Cause: YouTube throttles subtitle downloads from your IP (`HTTP Error 429: Too Many Requests`,
 or "Video unavailable ... try again later"). It is transient `rate_limited`: the video is
-retried after about 5, 10, 20 and 40 seconds (`max_auto_retries: 4`, plus jitter). If all fail
+retried after about 1, 2, 4, 8, 15 and 15 minutes (`rate_limit_backoff_*`,
+`rate_limit_max_auto_retries: 6`, plus jitter). If all fail
 the video stays `failed` with `retries_exhausted` and the reason
 `YouTube is rate-limiting requests. Automatic retries are used up; press Retry to try again.`
 (seen in a real run). It is never retried forever.
 
-Fix: wait (often tens of minutes) and press Retry. Lower `max_concurrent_videos` (for example to
-1) so fewer requests hit YouTube at once; raising `backoff_base_seconds` /
-`backoff_cap_seconds` spreads automatic retries out.
+Atlas already fetches transcripts one at a time, `transcript_min_interval_seconds` (4s) apart.
+If it still happens:
+
+1. Wait (often tens of minutes) and press Retry; or raise `transcript_min_interval_seconds`
+   (for example 10) and the `rate_limit_backoff_*` values.
+2. Give yt-dlp logged-in cookies: set `ytdlp_cookies_file` (a Netscape `cookies.txt`) or
+   `ytdlp_cookies_from_browser` (for example `chrome`). Use a throwaway Google account, since
+   heavy scraping can get an account flagged, and never commit the file.
+3. Update yt-dlp (`pip install -U yt-dlp`; the version in use is logged at startup). YouTube
+   changes often and old versions get blocked. `pyproject.toml` pins an exact version, so bump
+   the pin too.
+4. A VPN or datacenter IP is throttled fastest; a home connection is far less likely to be.
 
 ### Permanent video failures
 

@@ -63,6 +63,9 @@ both. "Env" lists the override names in precedence order.
 |---|---|---|---|---|
 | `database_path` | `"data/atlas.sqlite3"` | The SQLite file holding all state. Created and migrated on startup. | not empty | `ATLAS_DATABASE_PATH`, `ATLAS_DB_PATH` |
 | `transcript_output_folder` | `"transcripts"` | Where raw subtitle files are kept (one per fetch); transcript cleanup only deletes files inside it. | not empty | `ATLAS_TRANSCRIPT_OUTPUT_FOLDER` |
+| `transcript_min_interval_seconds` | `4.0` | YouTube transcript fetches run one at a time (whatever `max_concurrent_videos` is), at least this far apart (plus up to 25% jitter); also yt-dlp's `sleep_interval_subtitles`. `0` turns pacing off. | >= 0 | `ATLAS_TRANSCRIPT_MIN_INTERVAL_SECONDS` |
+| `ytdlp_cookies_file` | `""` | Optional Netscape `cookies.txt` for yt-dlp; logged-in requests are throttled far less. Use a throwaway Google account. Wins over the browser setting. Never commit this file. | path or empty | `ATLAS_YTDLP_COOKIES_FILE` |
+| `ytdlp_cookies_from_browser` | `""` | Optional browser name (`chrome`, `firefox`, `edge`, ...) to read cookies from. | name or empty | `ATLAS_YTDLP_COOKIES_FROM_BROWSER` |
 
 ### Secrets (names, not values)
 
@@ -114,6 +117,9 @@ These hold the **name** of the environment variable that contains the key.
 | `max_auto_retries` | `4` | Automatic retries of a transient failure per phase (transcript, then notes); each phase makes at most `1 + max_auto_retries` attempts, then waits for a manual Retry. | >= 0 | `ATLAS_MAX_AUTO_RETRIES` |
 | `backoff_base_seconds` | `5.0` | Base of the retry delay `min(cap, base * 2^(n-1))` plus up to 20% jitter, stored as `next_retry_at`. | >= 0 (0 = retry immediately) | `ATLAS_BACKOFF_BASE_SECONDS` |
 | `backoff_cap_seconds` | `300.0` | Cap of that delay. | >= `backoff_base_seconds` | `ATLAS_BACKOFF_CAP_SECONDS` |
+| `rate_limit_max_auto_retries` | `6` | Automatic retries when the *YouTube transcript fetch* is rate-limited (replaces `max_auto_retries` for that case only; an LLM 429 keeps the regular policy). | >= 0 | `ATLAS_RATE_LIMIT_MAX_AUTO_RETRIES` |
+| `rate_limit_backoff_base_seconds` | `60.0` | First delay for a throttled transcript fetch (doubles per attempt). | >= 0 | `ATLAS_RATE_LIMIT_BACKOFF_BASE_SECONDS` |
+| `rate_limit_backoff_cap_seconds` | `900.0` | Cap of that delay. | >= `rate_limit_backoff_base_seconds` | `ATLAS_RATE_LIMIT_BACKOFF_CAP_SECONDS` |
 | `worker_poll_interval_seconds` | `2.0` | How often the idle worker looks for due retries and queued videos (it is also woken by new work). | > 0 | `ATLAS_WORKER_POLL_INTERVAL_SECONDS` |
 | `worker_shutdown_timeout_seconds` | `5.0` | Grace period for running jobs on shutdown; the rest are cancelled and recovered on the next start. | >= 0 | `ATLAS_WORKER_SHUTDOWN_TIMEOUT_SECONDS` |
 

@@ -26,15 +26,21 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import random
 import re
 import shutil
 import tempfile
+import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 from uuid import uuid4
 
-from yt_dlp import YoutubeDL
+from typing import Any, cast
+from yt_dlp import _Params, _Params, YoutubeDL
+from yt_dlp import version as yt_dlp_version
 
 from src.config.settings import SettingsLoader, repo_root
 from src.domain.interfaces.transcript_provider import TranscriptProviderPort, TranscriptResult
@@ -85,7 +91,7 @@ def download_subtitles(options: dict[str, Any], urls: list[str]) -> None:
     Keeping it a free function with no ``self`` makes it a one-line monkeypatch
     seam for the test suite.
     """
-    with YoutubeDL(options) as ydl:
+    with YoutubeDL(cast(_Params, options)) as ydl:
         ydl.download(urls)
 
 
@@ -95,7 +101,7 @@ def list_subtitle_languages(options: dict[str, Any], url: str) -> list[str]:
     Manual tracks come first, then automatic captions. Like :func:`download_subtitles` this
     blocks, so callers use :func:`asyncio.to_thread`, and it is a one-line monkeypatch seam.
     """
-    with YoutubeDL({**options, "skip_download": True}) as ydl:
+    with YoutubeDL(cast(_Params, options)) as ydl:
         info = ydl.extract_info(url, download=False) or {}
     manual = [code for code in (info.get("subtitles") or {}) if code != "live_chat"]
     automatic = [
@@ -275,6 +281,29 @@ class YtDlpTranscriptProvider(TranscriptProviderPort):
         if not folder.is_absolute():
             folder = repo_root() / folder
         self._output_folder = ensure_output_folder(str(folder))
+        # YouTube throttles bursts, so transcript fetches run one at a time, spaced apart,
+        # however many videos the worker processes concurrently.
+        self._min_interval = max(
+            0.0, float(settings("transcript_min_interval_seconds", 4.0) or 0.0)
+        )
+        self._cookies_file = str(settings("ytdlp_cookies_file", "") or "").strip()
+        self._cookies_browser = str(settings("ytdlp_cookies_from_browser", "") or "").strip()
+        self._fetch_lock = asyncio.Lock()
+        self._last_fetch_end = 0.0
+        logger.info("yt-dlp %s", yt_dlp_version.__version__)
+
+    @asynccontextmanager
+    async def _paced(self) -> AsyncIterator[None]:
+        """One YouTube fetch at a time, at least ``transcript_min_interval_seconds`` apart."""
+        async with self._fetch_lock:
+            if self._min_interval > 0 and self._last_fetch_end:
+                wait = self._last_fetch_end + self._min_interval - time.monotonic()
+                if wait > 0:
+                    await asyncio.sleep(wait + random.uniform(0.0, self._min_interval * 0.25))
+            try:
+                yield
+            finally:
+                self._last_fetch_end = time.monotonic()
 
     # ------------------------------------------------------------------
     # Public API
@@ -298,20 +327,21 @@ class YtDlpTranscriptProvider(TranscriptProviderPort):
         )
         try:
             options = self._ydl_options(languages, work_dir)
-            try:
-                # Never block the event loop: yt-dlp is synchronous and slow.
-                await asyncio.to_thread(download_subtitles, options, [url])
-            except Exception as error:
-                detail = str(error) or type(error).__name__
-                logger.debug("yt-dlp download failed for %s: %s", video_id, safe_detail(detail))
-                raise _transcript_error(detail) from error
+            async with self._paced():
+                try:
+                    # Never block the event loop: yt-dlp is synchronous and slow.
+                    await asyncio.to_thread(download_subtitles, options, [url])
+                except Exception as error:
+                    detail = str(error) or type(error).__name__
+                    logger.debug("yt-dlp download failed for %s: %s", video_id, safe_detail(detail))
+                    raise _transcript_error(detail) from error
 
-            subtitle_path = self._locate_subtitle(work_dir, languages)
-            if subtitle_path is None:
-                # Neither the requested language nor English exists. If *any* subtitle track
-                # exists, use it as is and record its language (PRD section 20); only a video
-                # with no subtitles at all fails (NO_USABLE_LANGUAGE).
-                subtitle_path = await self._fetch_fallback_subtitle(url, languages, work_dir)
+                subtitle_path = self._locate_subtitle(work_dir, languages)
+                if subtitle_path is None:
+                    # Neither the requested language nor English exists. If *any* subtitle track
+                    # exists, use it as is and record its language (PRD section 20); only a video
+                    # with no subtitles at all fails (NO_USABLE_LANGUAGE).
+                    subtitle_path = await self._fetch_fallback_subtitle(url, languages, work_dir)
 
             raw = subtitle_path.read_text(encoding="utf-8", errors="replace")
             cleaned = clean_transcript_text(raw)
@@ -390,7 +420,7 @@ class YtDlpTranscriptProvider(TranscriptProviderPort):
         the output template points at a unique per-attempt directory so two
         concurrent fetches can never read each other's subtitle file.
         """
-        return {
+        options: dict[str, Any] = {
             "skip_download": True,
             "writesubtitles": True,
             "writeautomaticsub": True,
@@ -408,6 +438,16 @@ class YtDlpTranscriptProvider(TranscriptProviderPort):
             "sleep_interval": 1,
             "max_sleep_interval": 3,
         }
+        if self._min_interval > 0:
+            # yt-dlp's plain sleep_interval does not cover subtitle requests, which are the
+            # ones YouTube throttles.
+            options["sleep_interval_subtitles"] = max(1, round(self._min_interval))
+            options["sleep_interval_requests"] = 1
+        if self._cookies_file:
+            options["cookiefile"] = self._cookies_file
+        elif self._cookies_browser:
+            options["cookiesfrombrowser"] = (self._cookies_browser,)
+        return options
 
     async def _fetch_fallback_subtitle(
         self, url: str, languages: list[str], work_dir: Path

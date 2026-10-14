@@ -92,6 +92,7 @@ def make_settings(output_folder: Path, **overrides: Any) -> Callable[[str, Any],
         "transcript_language": "en",
         "transcript_output_folder": str(output_folder),
         "transcript_failure_cooldown_seconds": 120.0,
+        "transcript_min_interval_seconds": 0.0,
         "backoff_base_seconds": 5.0,
         "backoff_cap_seconds": 300.0,
         "max_auto_retries": 4,
@@ -590,6 +591,67 @@ async def test_batch_fetch_propagates_the_first_failure(
         await provider.fetch_transcripts([VIDEO_ID, OTHER_VIDEO_ID])
 
     assert excinfo.value.failure_type is FailureType.TRANSCRIPTS_DISABLED
+
+
+# ---------------------------------------------------------------------------
+# 8b. pacing, subtitle sleeps and cookies
+# ---------------------------------------------------------------------------
+async def test_fetches_run_one_at_a_time_and_spaced_apart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    active = 0
+    peak = 0
+    starts: list[float] = []
+    guard = threading.Lock()
+
+    def stub(options: dict[str, Any], urls: list[str]) -> None:
+        nonlocal active, peak
+        with guard:
+            active += 1
+            peak = max(peak, active)
+            starts.append(time.monotonic())
+        time.sleep(0.02)
+        write_subtitle(options, urls[0], language="en", payload=SRT_PAYLOAD)
+        with guard:
+            active -= 1
+
+    install_download_stub(monkeypatch, stub)
+    provider = build_provider(tmp_path, transcript_min_interval_seconds=0.2)
+
+    await asyncio.gather(
+        provider.fetch_transcript("aaaaaaaaaaa"), provider.fetch_transcript("bbbbbbbbbbb")
+    )
+
+    assert peak == 1
+    assert starts[1] - starts[0] >= 0.2
+
+
+def test_ydl_options_pace_subtitle_requests_and_carry_cookies(tmp_path: Path) -> None:
+    provider = YtDlpTranscriptProvider(
+        make_settings(
+            tmp_path / "transcripts",
+            transcript_min_interval_seconds=4.0,
+            ytdlp_cookies_file="cookies.txt",
+            ytdlp_cookies_from_browser="chrome",
+        )
+    )
+
+    options = provider._ydl_options(["en"], tmp_path)
+
+    assert options["sleep_interval_subtitles"] == 4
+    assert options["cookiefile"] == "cookies.txt"
+    assert "cookiesfrombrowser" not in options  # the file wins over the browser
+
+
+def test_ydl_options_have_no_cookies_by_default(tmp_path: Path) -> None:
+    provider = YtDlpTranscriptProvider(make_settings(tmp_path / "transcripts"))
+
+    options = provider._ydl_options(["en"], tmp_path)
+
+    assert "cookiefile" not in options and "cookiesfrombrowser" not in options
+    assert "sleep_interval_subtitles" not in options  # interval 0 = pacing off
 
 
 # ---------------------------------------------------------------------------

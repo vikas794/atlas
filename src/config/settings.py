@@ -101,6 +101,14 @@ class AtlasSettings:
     # --- Transcripts -----------------------------------------------------
     transcript_language: str = "en"
     transcript_output_folder: str = "transcripts"
+    #: Minimum gap between two YouTube transcript fetches (they run one at a time); it is also
+    #: yt-dlp's pause between subtitle requests. Spreads load so YouTube does not throttle.
+    transcript_min_interval_seconds: float = 4.0
+    #: Optional logged-in cookies for yt-dlp (far fewer throttles/bot checks). Either a
+    #: Netscape cookies.txt path or a browser name (chrome, firefox, edge, ...). Use a
+    #: throwaway Google account. Empty = anonymous.
+    ytdlp_cookies_file: str = ""
+    ytdlp_cookies_from_browser: str = ""
 
     # --- Notes generation (playlist -> per-video Markdown notes) ----------
     #: Ordered LiteLLM models, tried first to last (the rest are fallbacks). Each entry is a
@@ -123,6 +131,11 @@ class AtlasSettings:
     max_auto_retries: int = 4
     backoff_base_seconds: float = 5.0
     backoff_cap_seconds: float = 300.0
+    #: YouTube throttles last minutes, so a rate-limited transcript fetch backs off longer and
+    #: gets more automatic retries than other transient failures.
+    rate_limit_max_auto_retries: int = 6
+    rate_limit_backoff_base_seconds: float = 60.0
+    rate_limit_backoff_cap_seconds: float = 900.0
     worker_poll_interval_seconds: float = 2.0
     worker_shutdown_timeout_seconds: float = 5.0
 
@@ -220,12 +233,16 @@ class AtlasSettings:
         need(bool(self.host.strip()), "host", "must not be empty")
         need(1 <= self.port <= 65535, "port", "must be between 1 and 65535")
         need(self.max_concurrent_videos >= 1, "max_concurrent_videos", "must be at least 1")
-        for name in ("max_auto_retries", "drive_max_retries"):
+        for name in ("max_auto_retries", "drive_max_retries", "rate_limit_max_auto_retries"):
             need(getattr(self, name) >= 0, name, "must be 0 or more")
         for name in (
             "backoff_base_seconds", "drive_backoff_base_seconds", "worker_shutdown_timeout_seconds",
+            "rate_limit_backoff_base_seconds", "transcript_min_interval_seconds",
         ):  # fmt: skip
             need(getattr(self, name) >= 0, name, "must be 0 or more")
+        need(self.rate_limit_backoff_cap_seconds >= self.rate_limit_backoff_base_seconds,
+             "rate_limit_backoff_cap_seconds",
+             "must be at least rate_limit_backoff_base_seconds")  # fmt: skip
         need(self.backoff_cap_seconds >= self.backoff_base_seconds, "backoff_cap_seconds",
              "must be at least backoff_base_seconds")  # fmt: skip
         need(self.drive_backoff_cap_seconds >= self.drive_backoff_base_seconds,

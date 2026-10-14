@@ -69,6 +69,9 @@ class ProcessVideoUseCase:
         max_auto_retries: int = 3,
         backoff_base_seconds: float = 5.0,
         backoff_cap_seconds: float = 60.0,
+        rate_limit_max_auto_retries: int | None = None,
+        rate_limit_backoff_base_seconds: float | None = None,
+        rate_limit_backoff_cap_seconds: float | None = None,
     ) -> None:
         self.repo = repo
         self.transcript_provider = transcript_provider
@@ -76,6 +79,21 @@ class ProcessVideoUseCase:
         self.max_auto_retries = max_auto_retries
         self.backoff_base_seconds = backoff_base_seconds
         self.backoff_cap_seconds = backoff_cap_seconds
+        # A throttled YouTube transcript fetch recovers over minutes, not seconds; None keeps
+        # the regular policy.
+        self.rate_limit_max_auto_retries = (
+            max_auto_retries if rate_limit_max_auto_retries is None else rate_limit_max_auto_retries
+        )
+        self.rate_limit_backoff_base_seconds = (
+            backoff_base_seconds
+            if rate_limit_backoff_base_seconds is None
+            else rate_limit_backoff_base_seconds
+        )
+        self.rate_limit_backoff_cap_seconds = (
+            backoff_cap_seconds
+            if rate_limit_backoff_cap_seconds is None
+            else rate_limit_backoff_cap_seconds
+        )
 
     async def execute(self, video_pk: int) -> Video | None:
         """Run the video pipeline for a single video.
@@ -145,9 +163,14 @@ class ProcessVideoUseCase:
 
     async def _reuse_first_occurrence(self, video: Video, token: int) -> Video | None:
         """Give a duplicate row its own copy of the first occurrence's summary."""
-        copied = await self.repo.copy_summary(video.duplicate_of, video.id, token=token)
+        source_video_pk = video.duplicate_of
+        if source_video_pk is None:
+            return video
+
+        assert video.id is not None  # Persisted videos always have a primary key.
+        copied = await self.repo.copy_summary(source_video_pk, video.id, token=token)
         if copied is None:
-            first = await self.repo.get_video(video.duplicate_of)
+            first = await self.repo.get_video(source_video_pk)
             if first is not None and first.stage == Stage.FAILED and first.next_retry_at is None:
                 # The first occurrence failed for good: show that failure here too rather
                 # than leaving this row queued forever. A manual retry of this row re-checks.
@@ -176,7 +199,10 @@ class ProcessVideoUseCase:
     async def _run(self, video: Video, token: int) -> None:
         """Transcript phase then notes phase, persisting each stage around its side effect."""
         ctx = _ctx(video)
+        # Persisted videos must have a primary key.
         video_pk = video.id
+        if video_pk is None:
+            raise ValueError("Cannot process a video without a primary key")
         regenerate = video.regen_requested
         # A duplicate has no transcript of its own: it reads its first occurrence's.
         source_pk = video.duplicate_of or video_pk
@@ -264,12 +290,17 @@ class ProcessVideoUseCase:
         reason = error.reason
 
         try:
-            if failure_kind == FailureKind.TRANSIENT and video.retry_count < self.max_auto_retries:
+            throttled = (
+                failure_type == FailureType.RATE_LIMITED
+                and video.stage == Stage.FETCHING_TRANSCRIPT
+            )
+            max_retries = self.rate_limit_max_auto_retries if throttled else self.max_auto_retries
+            if failure_kind == FailureKind.TRANSIENT and video.retry_count < max_retries:
                 next_attempt = video.retry_count + 1
                 delay = compute_delay(
                     next_attempt,
-                    self.backoff_base_seconds,
-                    self.backoff_cap_seconds,
+                    self.rate_limit_backoff_base_seconds if throttled else self.backoff_base_seconds,
+                    self.rate_limit_backoff_cap_seconds if throttled else self.backoff_cap_seconds,
                 )
                 next_retry_at = iso_after(delay)
                 await self.repo.update_stage(
@@ -285,7 +316,7 @@ class ProcessVideoUseCase:
                 logger.info(
                     "Scheduled automatic retry %d/%d in %.1fs",
                     next_attempt,
-                    self.max_auto_retries,
+                    max_retries,
                     delay,
                     extra={**ctx, "failure_type": failure_type.value},
                 )

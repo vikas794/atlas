@@ -258,7 +258,10 @@ def ytdlp(
     monkeypatch.setattr(ytdlp_module, "list_subtitle_languages", lambda options, url: [])
     folder = tmp_path / "subs"
     return YtDlpTranscriptProvider(
-        lambda key, default=None: {"transcript_output_folder": str(folder)}.get(key, default)
+        lambda key, default=None: {
+            "transcript_output_folder": str(folder),
+            "transcript_min_interval_seconds": 0.0,
+        }.get(key, default)
     )
 
 
@@ -689,6 +692,55 @@ async def test_transcript_retries_do_not_use_up_the_notes_retry_budget(
     (video,) = await repo.list_videos(playlist_pk)
     assert video.stage == Stage.PENDING_REVIEW
     assert len(transcripts.calls) == 3 and len(notes.calls) == 3
+
+
+async def test_youtube_throttle_uses_the_longer_rate_limit_backoff_and_retry_budget(
+    repo: PlaylistRepository,
+) -> None:
+    playlist_pk = await _ingest(repo, ["v1"])
+    (video,) = await repo.list_videos(playlist_pk)
+    throttled = PipelineError(FailureType.RATE_LIMITED, "YouTube is rate-limiting requests.")
+    process = ProcessVideoUseCase(
+        repo,
+        Transcripts({"v1": [throttled]}),
+        Notes(),
+        max_auto_retries=0,  # the regular budget is spent: only the throttle policy may retry
+        backoff_base_seconds=5.0,
+        backoff_cap_seconds=60.0,
+        rate_limit_max_auto_retries=3,
+        rate_limit_backoff_base_seconds=120.0,
+        rate_limit_backoff_cap_seconds=900.0,
+    )
+
+    before = datetime.now(UTC)
+    failed = await process.execute(video.id)
+
+    assert failed.stage == Stage.FAILED
+    assert failed.failure_type == FailureType.RATE_LIMITED
+    assert failed.retry_count == 1 and failed.auto_retry is True
+    delay = (datetime.fromisoformat(failed.next_retry_at) - before).total_seconds()
+    assert 119 <= delay <= 120 * 1.2 + 2
+
+
+async def test_llm_rate_limit_keeps_the_regular_backoff(repo: PlaylistRepository) -> None:
+    playlist_pk = await _ingest(repo, ["v1"])
+    (video,) = await repo.list_videos(playlist_pk)
+    llm_429 = PipelineError(FailureType.RATE_LIMITED, "Gemini is rate-limiting requests.")
+    process = ProcessVideoUseCase(
+        repo,
+        Transcripts(),
+        Notes([llm_429]),
+        max_auto_retries=0,
+        rate_limit_max_auto_retries=3,
+        rate_limit_backoff_base_seconds=120.0,
+        rate_limit_backoff_cap_seconds=900.0,
+    )
+
+    failed = await process.execute(video.id)
+
+    # Regular budget (0) is used up: a Gemini 429 must not borrow the YouTube throttle policy.
+    assert failed.stage == Stage.FAILED
+    assert failed.next_retry_at is None and failed.retry_count == 0
 
 
 async def test_a_stale_task_cannot_schedule_a_retry_after_a_manual_retry(

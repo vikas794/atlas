@@ -35,6 +35,9 @@ drive_backoff_cap_seconds: 10.0
 # --- Transcripts ---------------------------------------------------------------
 transcript_language: "en"
 transcript_output_folder: "transcripts"
+transcript_min_interval_seconds: 4.0  # YouTube fetches run one at a time, at least this far apart
+ytdlp_cookies_file: ""  # optional cookies.txt (Netscape) to avoid YouTube throttling/bot checks
+ytdlp_cookies_from_browser: ""  # or a browser name: chrome | firefox | edge ... (use a throwaway account)
 
 # --- Notes generation ----------------------------------------------------------
 # Models are LiteLLM names (<provider>/<model>), tried in order; later ones are fallbacks.
@@ -61,6 +64,9 @@ max_concurrent_videos: 2
 max_auto_retries: 4
 backoff_base_seconds: 5.0
 backoff_cap_seconds: 300.0
+rate_limit_max_auto_retries: 6  # YouTube transcript throttling: more tries, much longer waits
+rate_limit_backoff_base_seconds: 60.0
+rate_limit_backoff_cap_seconds: 900.0
 worker_poll_interval_seconds: 2.0
 worker_shutdown_timeout_seconds: 5.0
 

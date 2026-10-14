@@ -146,6 +146,9 @@ def get_process_video_use_case() -> ProcessVideoUseCase:
         max_auto_retries=settings.max_auto_retries,
         backoff_base_seconds=settings.backoff_base_seconds,
         backoff_cap_seconds=settings.backoff_cap_seconds,
+        rate_limit_max_auto_retries=settings.rate_limit_max_auto_retries,
+        rate_limit_backoff_base_seconds=settings.rate_limit_backoff_base_seconds,
+        rate_limit_backoff_cap_seconds=settings.rate_limit_backoff_cap_seconds,
     )
 
 
