@@ -139,6 +139,25 @@ missing, and each feature fails with a message naming the variable.
 | `GEMINI_API_KEY` | Notes when `notes_provider` is `gemini` (default); a Google AI Studio key | Each video fails with a permanent `config_error`, no retries |
 | `OPENROUTER_API_KEY` | Notes when `notes_provider` is `openrouter` | Same as above |
 
+### Multiple keys per service
+
+Each of the three variables accepts several keys, so one key's rate limit or quota no longer stalls
+Atlas. Use either form (they can be mixed; duplicates are ignored):
+
+```
+GEMINI_API_KEY=keyA,keyB,keyC          # comma, semicolon or whitespace separated
+GEMINI_API_KEY_2=keyD                  # numbered extras: _2, _3, ...
+```
+
+Keys are used round-robin. A key that is rate-limited (HTTP 429) is parked for 60 s, one that is
+out of YouTube quota or out of OpenRouter credit for an hour, and a rejected key is dropped until
+`.env` changes; the call moves to the next key immediately. If every key is turned away the
+failure is the normal transient `rate_limited` and the pipeline's usual backoff applies. A
+failure that another key cannot fix (unknown model, private playlist, oversized transcript, 5xx)
+is never rotated. Quotas are per Google Cloud / AI Studio *project*, so keys must come from
+different projects to add capacity. `GET /api/diagnostics` shows the key count, never a value.
+Implementation: `src/shared/api_keys.py`.
+
 Google Drive uses no key in `.env`: upload the OAuth client JSON on the Settings screen (or save it
 at `google_creds_path`) and complete the consent once; the result is `token.json`. Both files are
 gitignored, as are `.env` and `secrets/`.

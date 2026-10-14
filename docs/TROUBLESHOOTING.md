@@ -92,6 +92,9 @@ or check the id. A playlist with no listable videos and no title is also a 404
 - `The YouTube API rejected the configured key (YOUTUBE_API_KEY). Check that it is valid and that the YouTube Data API v3 is enabled for its project.`:
   the key is wrong, expired, restricted, or the API is not enabled in its Google Cloud project.
 
+Several keys can be set (`YOUTUBE_API_KEY=keyA,keyB`); a rejected one is skipped while a valid
+one remains. See "Multiple keys per service" in CONFIG.md.
+
 ### 503 `RATE_LIMITED` on ingest
 
 `The YouTube Data API quota was exceeded; try again later.` The daily Data API quota (or a

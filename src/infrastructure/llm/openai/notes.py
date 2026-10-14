@@ -9,7 +9,6 @@ adapter is the same code shape as a plain OpenAI call with a different
 from __future__ import annotations
 
 import logging
-import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +19,7 @@ from src.infrastructure.llm.cost import CostCalculator
 from src.infrastructure.llm.notes_base import (
     NotesGeneratorConfigError,
     NotesPromptSource,
+    call_with_keys,
     check_finish_reason,
     check_input_size,
     classify_provider_exception,
@@ -27,6 +27,8 @@ from src.infrastructure.llm.notes_base import (
     request_timeout_seconds,
     validate_notes,
 )
+
+from src.shared.api_keys import KeyPool, pool_for, read_api_keys
 
 if TYPE_CHECKING:
     from src.domain.interfaces.usage_ledger import UsageLedgerPort
@@ -74,7 +76,7 @@ class OpenRouterNotesGenerator:
         self._settings = settings_loader
         self._usage_ledger = usage_ledger
         self._client_factory = client_factory
-        self._client: Any | None = None
+        self._clients: dict[str, Any] = {}
         self._prompt = NotesPromptSource(settings_loader)
 
     # --- configuration ---------------------------------------------------
@@ -108,34 +110,48 @@ class OpenRouterNotesGenerator:
         """Name of the environment variable holding the key. Safe to log."""
         return str(self._settings("openrouter_api_key_env", "OPENROUTER_API_KEY"))
 
+    def _api_keys(self) -> tuple[str, ...]:
+        """Every configured key (``OPENROUTER_API_KEY`` may hold a comma-separated list, plus
+        ``OPENROUTER_API_KEY_2``, ``_3`` ...). Never log or store the result."""
+        return read_api_keys(self._api_key_env())
+
     def _api_key(self) -> str:
-        """The key value, or ``""`` when unset. Never log or store the result."""
-        return str(os.environ.get(self._api_key_env(), "") or "").strip()
+        """The first key, or ``""`` when unset. Never log or store the result."""
+        keys = self._api_keys()
+        return keys[0] if keys else ""
+
+    def _pool(self) -> KeyPool:
+        return pool_for(self._api_key_env())
 
     def _require_api_key(self) -> str:
         key = self._api_key()
         if not key:
             raise NotesGeneratorConfigError(
                 f"{self._api_key_env()} is not set. Add your OpenRouter API key to .env as "
-                f"{self._api_key_env()}=<key> to generate notes."
+                f"{self._api_key_env()}=<key> to generate notes. Several keys can be given, "
+                "separated by commas, to spread rate limits."
             )
         return key
 
-    def _client_or_default(self) -> Any:
-        if self._client_factory is not None:
-            return self._client_factory()
-        if self._client is None:
+    def _client_for(self, key: str) -> Any:
+        client = self._clients.get(key)
+        if client is None:
             from openai import AsyncOpenAI  # imported lazily: keeps module import cheap
 
-            self._client = AsyncOpenAI(
-                api_key=self._require_api_key(),
+            client = self._clients[key] = AsyncOpenAI(
+                api_key=key,
                 base_url=self.base_url,
                 timeout=request_timeout_seconds(self._settings),
                 # Atlas owns the retry policy; a second, invisible SDK retry loop
                 # would double every wait and hide real failure counts.
                 max_retries=0,
             )
-        return self._client
+        return client
+
+    def _client_or_default(self) -> Any:
+        if self._client_factory is not None:
+            return self._client_factory()
+        return self._client_for(self._require_api_key())
 
     # --- generation ------------------------------------------------------
 
@@ -162,14 +178,15 @@ class OpenRouterNotesGenerator:
         self, model: str, prompt_text: str
     ) -> tuple[str, int, int, object | None]:
         """Single provider call; returns ``(text, input_tokens, output_tokens, finish)``."""
-        client = self._client_or_default()
-        try:
-            response = await client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt_text}],
+        if self._client_factory is not None:
+            response = await self._request(self._client_factory(), model, prompt_text)
+        else:
+            self._require_api_key()
+            response = await call_with_keys(
+                self._pool(),
+                lambda key: self._request(self._client_for(key), model, prompt_text),
+                provider_label="OpenRouter",
             )
-        except Exception as exc:
-            raise self._classify(exc) from exc
 
         choices = getattr(response, "choices", None) or []
         content = ""
@@ -182,6 +199,16 @@ class OpenRouterNotesGenerator:
         input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
         output_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
         return content, input_tokens, output_tokens, finish
+
+    async def _request(self, client: Any, model: str, prompt_text: str) -> Any:
+        """One SDK call; any failure is raised already classified."""
+        try:
+            return await client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt_text}],
+            )
+        except Exception as exc:
+            raise self._classify(exc) from exc
 
     def _classify(self, exc: Exception) -> Exception:
         """Map an SDK exception onto the PRD section 8 taxonomy.
@@ -196,7 +223,7 @@ class OpenRouterNotesGenerator:
             provider_label="OpenRouter",
             api_key_env=self._api_key_env(),
             model=self.model,
-            secrets=(self._api_key(),),
+            secrets=self._api_keys(),
         )
         logger.warning(
             "OpenRouter call failed (%s): %s",

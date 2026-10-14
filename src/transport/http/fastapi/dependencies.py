@@ -41,6 +41,7 @@ from src.infrastructure.google.publisher import GoogleDrivePublisher
 from src.infrastructure.llm.factory import build_notes_generator
 from src.infrastructure.storage.playlist_repo import PlaylistRepository
 from src.infrastructure.storage.sql import SqlUsageLedger
+from src.shared.api_keys import reset_pools
 from src.shared.files import delete_files
 
 
@@ -261,5 +262,6 @@ def reset_dependency_caches() -> None:
     global _worker, _youtube_provider
     _worker = None
     _youtube_provider = None
+    reset_pools()
     for cached in _CACHED_FACTORIES:
         cached.cache_clear()

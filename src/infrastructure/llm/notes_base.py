@@ -34,8 +34,9 @@ import hashlib
 import logging
 import math
 import re
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import yaml
 
@@ -47,9 +48,12 @@ from src.domain.models.playlist import (
 )
 from src.domain.services.failure_classifier import safe_diagnostic
 from src.infrastructure.llm.base import SettingsLoader
+from src.shared.api_keys import LONG_COOLDOWN_SECONDS, KeyPool
 from src.shared.redaction import redact_text
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 #: The only two placeholders the prompt file is allowed to carry.
 TITLE_PLACEHOLDER = "{{Title}}"
@@ -312,20 +316,23 @@ def classify_provider_exception(
     def failure(failure_type: FailureType, reason: str) -> NotesGenerationError:
         return NotesGenerationError(failure_type, reason, diagnostic=diagnostic)
 
-    def config_error(message: str) -> NotesGeneratorConfigError:
+    def config_error(message: str, key_problem: str | None = None) -> NotesGeneratorConfigError:
         error = NotesGeneratorConfigError(message)
         error.diagnostic = diagnostic  # type: ignore[attr-defined]  # log-only, redacted
+        error.key_problem = key_problem  # type: ignore[attr-defined]  # see call_with_keys
         return error
 
     if (status in (401, 403) and not _BLOCKED_TEXT.search(raw)) or _AUTH_TEXT.search(raw):
         return config_error(
             f"{provider_label} rejected the API key{shown}. Check that {api_key_env} in .env "
-            "holds a valid key with access to this model."
+            "holds a valid key with access to this model.",
+            key_problem="rejected",
         )
     if status == 402:
         return config_error(
             f"{provider_label} refused the request for lack of credits{shown}; top up the "
-            f"account behind {api_key_env}."
+            f"account behind {api_key_env}.",
+            key_problem="credits",
         )
     if status == 404:
         return config_error(
@@ -362,6 +369,70 @@ def classify_provider_exception(
         FailureType.PROVIDER_ERROR,
         f"{provider_label} returned an error{shown}.",
     )
+
+
+def _key_problem_of(error: BaseException) -> str | None:
+    """Whether a classified error is about the API key in use, not about the request.
+
+    ``"rejected"`` / ``"credits"`` (permanent for that key) or ``"rate_limited"`` (temporary);
+    None for anything another key could not fix (unknown model, oversized prompt, 5xx ...).
+    """
+    declared = getattr(error, "key_problem", None)
+    if declared:
+        return str(declared)
+    if isinstance(error, NotesGenerationError) and error.failure_type is FailureType.RATE_LIMITED:
+        return "rate_limited"
+    return None
+
+
+async def call_with_keys(
+    pool: KeyPool,
+    attempt: Callable[[str], Awaitable[_T]],
+    *,
+    provider_label: str,
+) -> _T:
+    """Run ``attempt(key)`` with each pooled key in turn until one is not turned away.
+
+    ``attempt`` must raise errors already classified by :func:`classify_provider_exception`.
+    A rate-limited key is parked for a minute, a rejected or out-of-credit key is set aside, and
+    the call moves on to the next key immediately. An error that is not about the key is raised
+    as is. When every key has been turned away the last error is raised, so the pipeline's own
+    retry/backoff treats it exactly like a single-key failure.
+    """
+    tried: set[str] = set()
+    last: Exception | None = None
+    while True:
+        key = pool.acquire(exclude=tried)
+        if key is None:
+            if last is not None:
+                raise last
+            raise NotesGenerationError(
+                FailureType.RATE_LIMITED,
+                f"Every configured {provider_label} API key is rate-limited or unusable right now.",
+            )
+        tried.add(key)
+        try:
+            return await attempt(key)
+        except Exception as exc:
+            problem = _key_problem_of(exc)
+            if problem is None:
+                raise
+            if problem == "rate_limited":
+                pool.cool_down(key)
+            elif problem == "credits":
+                pool.cool_down(key, LONG_COOLDOWN_SECONDS)
+            else:
+                pool.disable(key)
+            logger.warning(
+                "%s key %s; %d of %d key(s) left to try",
+                provider_label,
+                {"rate_limited": "rate-limited", "credits": "out of credits"}.get(
+                    problem, "rejected"
+                ),
+                len(pool) - len(tried),
+                len(pool),
+            )
+            last = exc
 
 
 def check_finish_reason(finish_reason: object, *, provider_label: str) -> None:
@@ -482,6 +553,7 @@ __all__ = [
     "TITLE_PLACEHOLDER",
     "TRANSCRIPT_PLACEHOLDER",
     "NotesGeneratorConfigError",
+    "call_with_keys",
     "check_finish_reason",
     "classify_provider_exception",
     "NotesPromptSource",

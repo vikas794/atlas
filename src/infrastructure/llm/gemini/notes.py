@@ -9,7 +9,6 @@ works with neither the SDK installed nor a key configured.
 from __future__ import annotations
 
 import logging
-import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +19,7 @@ from src.infrastructure.llm.cost import CostCalculator
 from src.infrastructure.llm.notes_base import (
     NotesGeneratorConfigError,
     NotesPromptSource,
+    call_with_keys,
     check_finish_reason,
     check_input_size,
     classify_provider_exception,
@@ -27,6 +27,8 @@ from src.infrastructure.llm.notes_base import (
     request_timeout_seconds,
     validate_notes,
 )
+
+from src.shared.api_keys import KeyPool, pool_for, read_api_keys
 
 if TYPE_CHECKING:
     from src.domain.interfaces.usage_ledger import UsageLedgerPort
@@ -67,7 +69,7 @@ class GeminiNotesGenerator:
         self._settings = settings_loader
         self._usage_ledger = usage_ledger
         self._client_factory = client_factory
-        self._client: Any | None = None
+        self._clients: dict[str, Any] = {}
         self._prompt = NotesPromptSource(settings_loader)
 
     # --- configuration ---------------------------------------------------
@@ -93,9 +95,18 @@ class GeminiNotesGenerator:
         """Name of the environment variable holding the key. Safe to log."""
         return str(self._settings("gemini_api_key_env", "GEMINI_API_KEY"))
 
+    def _api_keys(self) -> tuple[str, ...]:
+        """Every configured key (``GEMINI_API_KEY`` may hold a comma-separated list, plus
+        ``GEMINI_API_KEY_2``, ``_3`` ...). Never log or store the result."""
+        return read_api_keys(self._api_key_env())
+
     def _api_key(self) -> str:
-        """The key value, or ``""`` when unset. Never log or store the result."""
-        return str(os.environ.get(self._api_key_env(), "") or "").strip()
+        """The first key, or ``""`` when unset. Never log or store the result."""
+        keys = self._api_keys()
+        return keys[0] if keys else ""
+
+    def _pool(self) -> KeyPool:
+        return pool_for(self._api_key_env())
 
     def _require_api_key(self) -> str:
         """Same as :meth:`_api_key` but refuses to return an empty value.
@@ -107,26 +118,31 @@ class GeminiNotesGenerator:
         if not key:
             raise NotesGeneratorConfigError(
                 f"{self._api_key_env()} is not set. Add your Google AI Studio (Gemini) API key "
-                f"to .env as {self._api_key_env()}=<key> to generate notes."
+                f"to .env as {self._api_key_env()}=<key> to generate notes. Several keys can be "
+                "given, separated by commas, to spread rate limits."
             )
         return key
 
-    def _client_or_default(self) -> Any:
-        if self._client_factory is not None:
-            return self._client_factory()
-        if self._client is None:
+    def _client_for(self, key: str) -> Any:
+        client = self._clients.get(key)
+        if client is None:
             from google import genai  # imported lazily: keeps module import cheap
             from google.genai import types
 
-            self._client = genai.Client(
-                api_key=self._require_api_key(),
+            client = self._clients[key] = genai.Client(
+                api_key=key,
                 # HttpOptions.timeout is in milliseconds. No retry_options: the SDK then
                 # makes exactly one attempt, and ProcessVideoUseCase owns retries.
                 http_options=types.HttpOptions(
                     timeout=int(request_timeout_seconds(self._settings) * 1000)
                 ),
             )
-        return self._client
+        return client
+
+    def _client_or_default(self) -> Any:
+        if self._client_factory is not None:
+            return self._client_factory()
+        return self._client_for(self._require_api_key())
 
     # --- generation ------------------------------------------------------
 
@@ -163,14 +179,15 @@ class GeminiNotesGenerator:
         Token counts are 0 when the SDK does not report them -- an undercount in
         the ledger is better than a guess, and never a reason to fail a call.
         """
-        client = self._client_or_default()
-        try:
-            response = await client.aio.models.generate_content(
-                model=model,
-                contents=prompt_text,
+        if self._client_factory is not None:
+            response = await self._request(self._client_factory(), model, prompt_text)
+        else:
+            self._require_api_key()
+            response = await call_with_keys(
+                self._pool(),
+                lambda key: self._request(self._client_for(key), model, prompt_text),
+                provider_label="Gemini",
             )
-        except Exception as exc:
-            raise self._classify(exc) from exc
 
         try:
             text = getattr(response, "text", None) or ""
@@ -190,6 +207,13 @@ class GeminiNotesGenerator:
             finish = "SAFETY" if blocked else None
         return text, input_tokens, output_tokens, finish
 
+    async def _request(self, client: Any, model: str, prompt_text: str) -> Any:
+        """One SDK call; any failure is raised already classified."""
+        try:
+            return await client.aio.models.generate_content(model=model, contents=prompt_text)
+        except Exception as exc:
+            raise self._classify(exc) from exc
+
     def _classify(self, exc: Exception) -> Exception:
         """Map an SDK exception onto the PRD section 8 taxonomy.
 
@@ -203,7 +227,7 @@ class GeminiNotesGenerator:
             provider_label="Gemini",
             api_key_env=self._api_key_env(),
             model=self.model,
-            secrets=(self._api_key(),),
+            secrets=self._api_keys(),
         )
         logger.warning(
             "Gemini call failed (%s): %s",

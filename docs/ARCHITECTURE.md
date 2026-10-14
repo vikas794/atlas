@@ -181,44 +181,59 @@ Why these shapes:
 
 ```mermaid
 sequenceDiagram
-  actor U as User (browser)
-  participant API as FastAPI routers
-  participant ING as IngestPlaylistUseCase
-  participant YT as YouTube Data API
-  participant DB as SQLite
-  participant W as PlaylistWorker
-  participant PV as ProcessVideoUseCase
-  participant YD as yt-dlp
-  participant LLM as Gemini / OpenRouter
-  participant PUB as PublishPlaylistUseCase
-  participant GD as Google Drive / Docs
+    actor U as User Browser
+    participant API as FastAPI Routers
+    participant ING as IngestPlaylistUseCase
+    participant YT as YouTube Data API
+    participant DB as SQLite
+    participant W as PlaylistWorker
+    participant PV as ProcessVideoUseCase
+    participant YD as yt-dlp
+    participant LLM as Gemini OpenRouter
+    participant PUB as PublishPlaylistUseCase
+    participant GD as Google Drive Docs
 
-  U->>API: POST /api/playlists {url}
-  API->>ING: ingest(url)
-  ING->>ING: parse_playlist_url (400 INVALID_URL)
-  ING->>YT: playlist title + playlistItems (pages of 50)
-  YT-->>ING: entries (private/deleted placeholders skipped, positions 1..n)
-  ING->>DB: create playlist + videos (stage queued), or diff and append on re-sync
-  API-->>U: 201 new / 200 re-synced; worker.wake()
-  loop every tick (wake or poll interval)
-    W->>DB: list_transient_due + list_queued_videos
-    W->>PV: execute(video) (at most max_concurrent_videos at once)
-    PV->>DB: stage fetching_transcript
-    PV->>YD: download subtitles (thread)
-    PV->>DB: store transcript, stage transcript_ready
-    PV->>DB: stage generating_notes
-    PV->>LLM: one generate call with the rendered prompt
-    PV->>DB: store summary, stage pending_review
-  end
-  U->>API: edit (PUT /summary), approve / approve-all
-  API->>DB: stage approved
-  U->>API: POST /api/playlists/{id}/publish
-  API->>GD: ensure_authorized (409 DRIVE_AUTH_REQUIRED if not)
-  API->>DB: status publishing; worker.enqueue_publish
-  API-->>U: 202 accepted (UI polls the playlist status)
-  W->>PUB: run(playlist)
-  PUB->>GD: folder, index Doc, video Docs
-  PUB->>DB: ids as each object exists; videos published; status published / publish_failed
+    U->>API: POST playlists with URL
+    API->>ING: ingest URL
+    ING->>ING: parse playlist URL
+    Note right of ING: Invalid URL returns 400 INVALID_URL
+    ING->>YT: Fetch playlist title and items in pages of 50
+    YT-->>ING: Return entries and skip private or deleted items
+    ING->>DB: Create playlist and queued videos or append new videos on resync
+    API-->>U: Return 201 for new playlist or 200 for resync
+    API->>W: Wake worker
+
+    loop Every tick or wake signal
+        W->>DB: List due transient jobs and queued videos
+        W->>PV: Execute video with concurrency limit
+        PV->>DB: Set stage fetching_transcript
+        PV->>YD: Download subtitles in thread
+        PV->>DB: Store transcript
+        PV->>DB: Set stage transcript_ready
+        PV->>DB: Set stage generating_notes
+        PV->>LLM: Generate notes using rendered prompt
+        PV->>DB: Store summary and set stage pending_review
+    end
+
+    U->>API: Edit summary or approve videos
+    API->>DB: Set stage approved
+    U->>API: Request playlist publish
+    API->>GD: Check authorization
+
+    alt Drive authorization missing
+        GD-->>API: Authorization required
+        API-->>U: 409 DRIVE_AUTH_REQUIRED
+    else Drive authorized
+        API->>DB: Set status publishing
+        API->>W: Enqueue publish job
+        API-->>U: 202 accepted
+        W->>PUB: Run publish playlist
+        PUB->>GD: Create folder and index document
+        PUB->>GD: Create video documents
+        PUB->>DB: Save document IDs as objects are created
+        PUB->>DB: Mark videos published
+        PUB->>DB: Set status published or publish_failed
+    end
 ```
 
 Every stage is written before and after its side effect, so a crash leaves a stage that crash
@@ -302,6 +317,10 @@ Where the type comes from:
   prompt file is also a `config_error`. Before calling, `check_input_size` estimates tokens as
   characters / 4 and refuses a transcript over `gemini_input_token_limit` /
   `openrouter_input_token_limit` (`transcript_too_large`, never truncated).
+- **Multiple API keys**: `src/shared/api_keys.py` parses a comma-separated / numbered list per
+  service into a thread-safe `KeyPool` (round-robin, per-key cooldown, disable). The YouTube
+  provider (`_execute`) and the LLM adapters (`notes_base.call_with_keys`) fail over to the next
+  key on a key-scoped error (quota, 429, rejected key, 402) and re-raise anything else.
   Output checks (`validate_notes`, `check_finish_reason`) raise `output_malformed` for empty,
   too-short, section-less, cut-off or blocked responses.
 - Any other exception in `ProcessVideoUseCase` is a permanent `internal_error` (traceback logged).
@@ -350,48 +369,62 @@ Anything else fails the publish with a redacted `drive_error` reason.
 
 ```mermaid
 sequenceDiagram
-  participant API as POST /publish
+  participant API as Publish API
   participant UC as PublishPlaylistUseCase
   participant W as PlaylistWorker
   participant P as GoogleDrivePublisher
-  participant G as Drive / Docs API
+  participant G as Drive Docs API
   participant DB as SQLite
 
-  API->>P: ensure_authorized() (refreshes token; 409 DRIVE_AUTH_REQUIRED on invalid_grant / no token)
-  API->>DB: begin_publish: status publishing (409 CONFLICT if already publishing)
-  API-->>API: 202, worker.enqueue_publish
-  W->>UC: run(playlist)
-  UC->>UC: select entries: approved videos; published videos edited since publish or without drive_doc_id; rename-only entries if pad width grew
-  UC->>P: publish_playlist(entries, index titles, stored ids, progress sink)
-  alt stored folder id
-    P->>G: file_state(folder)
-    G-->>P: missing / trashed raises DriveFolderMissing
-    Note over UC: forget folder, index and all Doc ids, publish again into a new folder
-  else no folder id
-    P->>G: create folder tagged appProperties {atlasKind: playlist-folder, atlasPlaylist}
-    P->>DB: folder_created -> drive_folder_id
-  end
-  opt no index Doc id
-    P->>G: find tagged index Doc, else create empty Doc
-    P->>DB: index_doc_created -> drive_index_doc_id
-  end
-  opt index text changed (index_digest) or new index Doc
-    P->>G: replace index Doc body
-    P->>DB: index_written -> index_digest
-  end
-  loop entries in position order
-    alt stored drive_doc_id and file_state ok
-      P->>G: replace Doc body in place (or rename only)
-    else missing, trashed or never created
-      P->>G: find Doc tagged {atlasKind: video, atlasVideo}, else create empty Doc
-      P->>DB: doc_created -> drive_doc_id
-      P->>G: replace body (full-body replace, safe to repeat)
-    end
-    P->>DB: doc_published -> drive_doc_id, mark_published (published_digest)
-  end
-  UC->>DB: finish_publish: published, or publish_failed + redacted last_publish_error
-```
+  API->>P: ensure_authorized
+  Note right of P: Refresh token. Invalid grant or missing token returns 409 DRIVE_AUTH_REQUIRED
+  API->>DB: begin_publish
+  Note right of DB: Set status publishing. Existing publishing status returns 409 CONFLICT
+  API-->>API: Return 202 and enqueue publish job
 
+  W->>UC: run playlist
+  UC->>UC: Select approved videos and entries needing republish
+  Note right of UC: Include edited or unpublished videos and rename entries if padding width increased
+  UC->>P: publish_playlist with entries titles IDs and progress sink
+
+  alt Stored folder ID exists
+    P->>G: Check folder state
+    G-->>P: Missing or trashed folder raises DriveFolderMissing
+    Note over UC: Forget folder index and document IDs, then publish into a new folder
+  else No folder ID
+    P->>G: Create tagged playlist folder
+    P->>DB: Save drive_folder_id
+  end
+
+  opt Index document ID missing
+    P->>G: Find tagged index document or create an empty document
+    P->>DB: Save drive_index_doc_id
+  end
+
+  opt Index digest changed or index document is new
+    P->>G: Replace index document body
+    P->>DB: Save index_digest
+  end
+
+  loop Entries in position order
+    alt Stored document ID exists and file state is valid
+      P->>G: Replace document body or rename only
+    else Document missing trashed or not created
+      P->>G: Find tagged video document or create an empty document
+      P->>DB: Save drive_doc_id
+      P->>G: Replace full document body safely
+    end
+    P->>DB: Save document ID and mark published
+    Note right of DB: Store published_digest
+  end
+
+  UC->>DB: finish_publish
+  alt Publish succeeds
+    DB-->>UC: Status published
+  else Publish fails
+    DB-->>UC: Status publish_failed and redacted last_publish_error
+  end
+```
 Idempotency and resume:
 
 - **Ids are persisted the moment each object exists** (progress sink), before anything else can

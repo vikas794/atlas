@@ -29,6 +29,7 @@ from googleapiclient.errors import HttpError
 from src.domain.exceptions import ConfigurationError, ProviderError
 from src.domain.models.playlist import FailureType, PipelineError
 from src.domain.services.sync_diff import PlaylistEntry
+from src.shared.api_keys import LONG_COOLDOWN_SECONDS, KeyPool, pool_for, read_api_keys
 from src.shared.redaction import redact_text
 
 logger = logging.getLogger(__name__)
@@ -89,23 +90,89 @@ class YouTubePlaylistProvider:
         api_key_env: str = DEFAULT_API_KEY_ENV,
         service_factory: Callable[[], Any] | None = None,
     ) -> None:
-        self.api_key = (api_key or os.getenv(api_key_env) or "").strip()
-        if not self.api_key and service_factory is None:
+        explicit = (api_key or "").strip()
+        self._api_key_env = api_key_env
+        #: A pool of one for an explicit key; otherwise the shared pool for ``api_key_env``,
+        #: re-read on every call so a key added to ``.env`` is picked up without a restart.
+        self._own_pool = KeyPool([explicit]) if explicit else None
+        keys = (explicit,) if explicit else read_api_keys(api_key_env)
+        #: The first configured key (kept for callers that only know about a single key).
+        self.api_key = keys[0] if keys else ""
+        if not keys and service_factory is None:
             raise ConfigurationError(
                 f"{api_key_env} is not set. Create a YouTube Data API v3 key in Google Cloud "
-                f"and put it in .env as {api_key_env}=<key> (it is required to list playlists)."
+                f"and put it in .env as {api_key_env}=<key> (it is required to list playlists). "
+                "Several keys can be given, separated by commas, to spread the quota."
             )
         self._service_factory = service_factory
 
-    def _service(self) -> Any:
+    def _pool(self) -> KeyPool:
+        return self._own_pool or pool_for(self._api_key_env)
+
+    def _secrets(self) -> tuple[str, ...]:
+        return self._pool().keys or (self.api_key,)
+
+    def _service(self, key: str | None = None) -> Any:
         """A new service per call: ``httplib2`` objects must not be shared across threads."""
         if self._service_factory is not None:
             return self._service_factory()
-        return build("youtube", "v3", developerKey=self.api_key, cache_discovery=False)
+        return build("youtube", "v3", developerKey=key or self.api_key, cache_discovery=False)
+
+    def _key_problem(self, exc: Exception) -> str | None:
+        """``"rejected"`` / ``"quota"`` when ``exc`` is about the key itself, else None."""
+        if not isinstance(exc, HttpError):
+            return None
+        reasons = _error_reasons(exc)
+        detail = redact_text(str(exc), *self._secrets()).lower()
+        if reasons & _KEY_REJECTED_REASONS or any(m in detail for m in _KEY_REJECTED_MESSAGES):
+            return "rejected"
+        if reasons & _QUOTA_REASONS:
+            return "quota"
+        return None
+
+    def _execute(self, what: str, call: Callable[[Any], Any]) -> Any:
+        """Run ``call(service)``, moving to the next key when one is out of quota or rejected.
+
+        Non-key failures propagate untouched for the caller to translate. When every key has
+        failed for key reasons, the last failure is raised already translated.
+        """
+        if self._service_factory is not None:
+            return call(self._service_factory())
+        pool = self._pool()
+        tried: set[str] = set()
+        last: Exception | None = None
+        while True:
+            key = pool.acquire(exclude=tried)
+            if key is None:
+                if last is not None:
+                    raise last
+                raise PipelineError(
+                    FailureType.RATE_LIMITED,
+                    "Every configured YouTube API key is out of quota right now; try again later.",
+                )
+            tried.add(key)
+            try:
+                return call(self._service(key))
+            except Exception as exc:
+                problem = self._key_problem(exc)
+                if problem is None:
+                    raise
+                if problem == "rejected":
+                    pool.disable(key)
+                else:
+                    pool.cool_down(key, LONG_COOLDOWN_SECONDS)
+                logger.warning(
+                    "YouTube %s: a key was %s; %d of %d key(s) left to try",
+                    what,
+                    "rejected" if problem == "rejected" else "out of quota",
+                    len(pool) - len(tried),
+                    len(pool),
+                )
+                last = self._translate(exc, what)
 
     def _translate(self, exc: Exception, what: str) -> Exception:
         """Map a client exception to a classified, redacted Atlas error."""
-        detail = redact_text(str(exc), self.api_key)
+        detail = redact_text(str(exc), *self._secrets())
         if isinstance(exc, HttpError):
             status = int(getattr(exc.resp, "status", 0) or 0)
             reasons = _error_reasons(exc)
@@ -128,7 +195,7 @@ class YouTubePlaylistProvider:
                 )
             # str(HttpError) embeds the request URL; the API's own reason is what a user
             # can act on, and it is what reaches the HTTP error body.
-            reason = redact_text(str(getattr(exc, "reason", "") or ""), self.api_key).strip()
+            reason = redact_text(str(getattr(exc, "reason", "") or ""), *self._secrets()).strip()
             return ProviderError(
                 f"YouTube {what} failed (HTTP {status}): {reason or 'unexpected error'}",
                 provider="youtube",
@@ -153,17 +220,17 @@ class YouTubePlaylistProvider:
         entries: list[PlaylistEntry] = []
         page_token: str | None = None
         try:
-            service = self._service()
             while True:
-                response = (
-                    service.playlistItems()
+                response = self._execute(
+                    "playlist fetch",
+                    lambda service, token=page_token: service.playlistItems()
                     .list(
                         part="snippet,contentDetails",
                         playlistId=playlist_id,
                         maxResults=PAGE_SIZE,
-                        pageToken=page_token,
+                        pageToken=token,
                     )
-                    .execute()
+                    .execute(),
                 )
                 for item in response.get("items", []):
                     snippet = item.get("snippet", {})
@@ -198,7 +265,10 @@ class YouTubePlaylistProvider:
     def get_playlist_title(self, playlist_id: str) -> str:
         """Return the playlist title, or ``"Untitled Playlist"`` when the API has none."""
         try:
-            response = self._service().playlists().list(part="snippet", id=playlist_id).execute()
+            response = self._execute(
+                "playlist title lookup",
+                lambda service: service.playlists().list(part="snippet", id=playlist_id).execute(),
+            )
         except (PipelineError, ConfigurationError):
             raise
         except Exception as exc:

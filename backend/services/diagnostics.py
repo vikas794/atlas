@@ -25,6 +25,7 @@ from src.config.settings import (
     load_settings,
     repo_root,
 )
+from src.shared.api_keys import read_api_keys
 from src.shared.oauth_client import client_secrets_problem
 
 Status = Literal["ok", "warning", "error"]
@@ -118,13 +119,21 @@ def _nearest_existing(path: Path) -> Path:
 
 
 def _key_is_set(env_name: str) -> bool:
-    return bool(os.environ.get(env_name, "").strip())
+    return bool(read_api_keys(env_name))
+
+
+def _key_summary(env_name: str) -> str:
+    """``NAME is set`` or ``NAME is set (3 keys, rotated on rate limits)``; never a value."""
+    count = len(read_api_keys(env_name))
+    if count > 1:
+        return f"{env_name} is set ({count} keys, rotated when one is rate-limited)"
+    return f"{env_name} is set"
 
 
 def check_youtube_key(settings: AtlasSettings) -> Check:
     name = settings.youtube_api_key_env
     if _key_is_set(name):
-        return _check("youtube_key", "ok", f"{name} is set.")
+        return _check("youtube_key", "ok", f"{_key_summary(name)}.")
     return _check(
         "youtube_key",
         "error",
