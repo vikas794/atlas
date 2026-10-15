@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
   Check,
+  ChevronDown,
   Copy,
   HelpCircle,
   RefreshCw,
@@ -113,16 +114,43 @@ async function writeClipboard(text: string): Promise<void> {
 function CheckRow({ check }: { check: DiagnosticCheck }) {
   const spec = checkStatus(check.status)
   const { Icon } = spec
-  return (
-    <li className="flex items-start gap-3 border-b border-border px-4 py-3 last:border-b-0">
-      <Icon aria-hidden="true" className={cn('mt-1 size-icon shrink-0', TONE_TEXT[spec.tone])} />
-      <div className="min-w-0 flex-1">
-        <p className="text-body font-medium text-text">{check.label}</p>
-        {check.message ? <p className="text-label text-text-muted">{check.message}</p> : null}
-      </div>
+  const [open, setOpen] = useState(false)
+  const panelId = useId()
+  const header = (
+    <>
+      <Icon aria-hidden="true" className={cn('size-icon shrink-0', TONE_TEXT[spec.tone])} />
+      <span className="min-w-0 flex-1 text-body font-medium text-text">{check.label}</span>
       <Badge tone={spec.tone} className="shrink-0">
         {spec.label}
       </Badge>
+    </>
+  )
+  if (!check.message) {
+    return (
+      <li className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0">
+        {header}
+        <span aria-hidden="true" className="size-icon shrink-0" />
+      </li>
+    )
+  }
+  return (
+    <li className="border-b border-border last:border-b-0">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-surface-muted"
+      >
+        {header}
+        <ChevronDown
+          aria-hidden="true"
+          className={cn('size-icon shrink-0 text-text-muted transition', open && 'rotate-180')}
+        />
+      </button>
+      <div id={panelId} hidden={!open} className="px-4 pb-3 pl-11">
+        <p className="text-label text-text-muted">{check.message}</p>
+      </div>
     </li>
   )
 }

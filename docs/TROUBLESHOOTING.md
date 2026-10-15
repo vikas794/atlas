@@ -9,7 +9,9 @@ Settings screen is where you upload the OAuth client file and authorize Drive.
 
 ## Where to look
 
-- **Logs**: the terminal, and `logs/atlas.log` (setting `log_file`; rotating, 5 MB x 3 backups,
+- **Logs**: the terminal (with `scripts/dev.*` the backend's output goes to
+  `logs/backend-dev.log` (stdout) and `logs/backend-dev.err.log` (stderr, where the log lines
+  land) instead, both overwritten on every start), and `logs/atlas.log` (setting `log_file`; rotating, 5 MB x 3 backups,
   secrets redacted; disable with `log_file_logging: false`). Pipeline lines carry
   `playlist_id=... video_id=...`. Set `log_level: DEBUG` for more.
 - **Recent errors**: the Diagnostics screen (`recent_errors` in `/api/diagnostics`), an in-memory buffer of the last 50

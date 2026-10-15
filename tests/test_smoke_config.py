@@ -169,7 +169,7 @@ def test_new_pipeline_fields_have_expected_defaults() -> None:
     expected = {
         "notes_provider": "gemini",
         "notes_model": "",
-        "gemini_model": "gemini-2.5-flash",
+        "gemini_model": "gemini-3.5-flash",
         "gemini_input_token_limit": 1000000,
         "notes_prompt_name": "notes_v1_1.yaml",
         "max_concurrent_videos": 2,

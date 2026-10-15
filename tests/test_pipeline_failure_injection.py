@@ -362,7 +362,7 @@ class GeminiClient:
 
 def gemini(client: GeminiClient) -> LiteLLMNotesGenerator:
     settings = {
-        "gemini_model": "gemini-2.5-flash",
+        "gemini_model": "gemini-3.5-flash",
         "notes_prompt_name": "notes_v1_1.yaml",
         "prompts_base_dir": "src/prompts",
     }

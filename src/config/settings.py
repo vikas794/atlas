@@ -112,13 +112,13 @@ class AtlasSettings:
 
     # --- Notes generation (playlist -> per-video Markdown notes) ----------
     #: Ordered LiteLLM models, tried first to last (the rest are fallbacks). Each entry is a
-    #: mapping with ``model`` ("<litellm-provider>/<model>", e.g. "gemini/gemini-2.5-flash") and
+    #: mapping with ``model`` ("<litellm-provider>/<model>", e.g. "gemini/gemini-3.5-flash") and
     #: optional ``api_key_env``, ``api_base`` (OpenAI-compatible gateways such as OmniRoute) and
     #: ``input_token_limit``. Empty -> derived from the legacy ``notes_provider`` settings below.
     notes_models: list[dict[str, Any]] = field(default_factory=list)
     notes_provider: str = "gemini"  # legacy single-provider shorthand: gemini | openrouter
     notes_model: str = ""  # empty -> the provider's own default model
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.5-flash"
     gemini_input_token_limit: int = 1000000
     openrouter_model: str = ""  # used when notes_model is empty
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
@@ -200,7 +200,7 @@ class AtlasSettings:
             if not isinstance(model, str) or "/" not in model.strip("/ "):
                 found.append(
                     f"{where}.model: must look like '<provider>/<model>', e.g. "
-                    f"'gemini/gemini-2.5-flash' (got {model!r})"
+                    f"'gemini/gemini-3.5-flash' (got {model!r})"
                 )
             for key in ("api_key_env", "api_base"):
                 if key in entry and not isinstance(entry[key], str):

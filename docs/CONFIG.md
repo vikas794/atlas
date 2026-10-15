@@ -97,7 +97,7 @@ These hold the **name** of the environment variable that contains the key.
 
 | Setting | Default | Effect | Validation | Env |
 |---|---|---|---|---|
-| `notes_models` | `[]` | Ordered list of LiteLLM models, tried first to last (later ones are fallbacks). Each entry: `model` (`<provider>/<model>`, required), `api_key_env`, `api_base`, `input_token_limit`. See [Choosing models](#choosing-models-litellm). Empty falls back to the single-model shorthand below. | each entry needs `model` like `gemini/gemini-2.5-flash`; no other keys | `ATLAS_NOTES_MODELS`, `NOTES_MODELS` (a JSON list) |
+| `notes_models` | `[]` | Ordered list of LiteLLM models, tried first to last (later ones are fallbacks). Each entry: `model` (`<provider>/<model>`, required), `api_key_env`, `api_base`, `input_token_limit`. See [Choosing models](#choosing-models-litellm). Empty falls back to the single-model shorthand below. | each entry needs `model` like `gemini/gemini-3.5-flash`; no other keys | `ATLAS_NOTES_MODELS`, `NOTES_MODELS` (a JSON list) |
 | `notes_provider` | `"gemini"` | Legacy single-model shorthand, used only when `notes_models` is empty. | `gemini` or `openrouter` | `ATLAS_NOTES_PROVIDER`, `NOTES_PROVIDER` |
 | `notes_model` | `""` | Legacy shorthand: model for the active `notes_provider`. Empty uses `gemini_model` / `openrouter_model` / the OpenRouter default. | none | `ATLAS_NOTES_MODEL`, `NOTES_MODEL` |
 | `gemini_model` | `"gemini-3.5-flash"` | Gemini model when `notes_model` is empty. | none | `ATLAS_GEMINI_MODEL`, `GEMINI_MODEL` |
@@ -155,7 +155,7 @@ config entry, not code. `model` is LiteLLM's `<provider>/<model>` string. Exampl
 
 ```yaml
 notes_models:
-  - model: "gemini/gemini-2.5-flash"          # primary; key from GEMINI_API_KEY
+  - model: "gemini/gemini-3.5-flash"          # primary; key from GEMINI_API_KEY
     input_token_limit: 1000000
   - model: "openrouter/openai/gpt-5-mini"     # fallback; key from OPENROUTER_API_KEY
   - model: "openai/gpt-5-mini"                # any OpenAI-compatible gateway, e.g. OmniRoute
@@ -173,7 +173,7 @@ notes_models:
   a reason to fall back: it is a transient failure retried by the pipeline. If every model is
   turned away the transient error wins over a permanent one, so the pipeline still retries.
 - `Summary.provider` and the usage ledger record the model that actually answered.
-- Via env: `NOTES_MODELS='[{"model": "gemini/gemini-2.5-flash"}]'` (JSON).
+- Via env: `NOTES_MODELS='[{"model": "gemini/gemini-3.5-flash"}]'` (JSON).
 - With `notes_models` empty, `notes_provider` / `notes_model` / `gemini_*` / `openrouter_*` build a
   single model exactly as before, so an older `config.yaml` keeps working.
 

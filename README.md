@@ -54,7 +54,9 @@ Ctrl+C stops it; the worker shuts down gracefully and resumes interrupted work o
 
 **Dev mode** (hot reload): `.\scripts\dev.ps1` or `./scripts/dev.sh` runs the backend with
 `--reload` plus the Vite dev server. Open `http://127.0.0.1:5173`; Ctrl+C stops both. Vite
-proxies `/api` to the configured backend port (the script passes it as `ATLAS_API_URL`).
+proxies `/api` to the configured backend port (the script passes it as `ATLAS_API_URL`). The
+backend's output is written to `logs/backend-dev.log` (stdout) and `logs/backend-dev.err.log`
+(stderr, including the log lines), both overwritten on every start.
 
 Health: the **Diagnostics** screen in the UI (`/diagnostics`; JSON at `GET /api/diagnostics`) shows configuration, database, keys
 set or not, Drive files and token, frontend build, last 50 warnings and errors, never secret

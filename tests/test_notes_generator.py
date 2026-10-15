@@ -151,7 +151,7 @@ def gemini_settings() -> FakeLoader:
     return FakeLoader(
         notes_provider="gemini",
         notes_model="",
-        gemini_model="gemini-2.5-flash",
+        gemini_model="gemini-3.5-flash",
         gemini_input_token_limit=1_000_000,
         notes_prompt_name="notes_v1.yaml",
         gemini_api_key_env="GEMINI_API_KEY",
@@ -174,7 +174,7 @@ def chain_settings(gemini_settings: FakeLoader) -> FakeLoader:
     """Gemini first, OpenRouter as the fallback, both listed in ``notes_models``."""
     return gemini_settings.override(
         notes_models=[
-            {"model": "gemini/gemini-2.5-flash", "input_token_limit": 1_000_000},
+            {"model": "gemini/gemini-3.5-flash", "input_token_limit": 1_000_000},
             {"model": "openrouter/openai/gpt-5-mini"},
         ]
     )
@@ -393,12 +393,12 @@ class TestSingleModel:
         )
 
         assert result.provider == "gemini"
-        assert result.model == "gemini-2.5-flash"
+        assert result.model == "gemini-3.5-flash"
         assert result.prompt_version == "notes_v1"
         assert result.content == GOOD_NOTES
 
         sent = completion.calls[0]
-        assert sent["model"] == "gemini/gemini-2.5-flash"
+        assert sent["model"] == "gemini/gemini-3.5-flash"
         assert sent["api_key"] == TEST_GEMINI_KEY
         assert sent["num_retries"] == 0  # ProcessVideoUseCase owns retries
         assert sent["messages"][0]["role"] == "user"
@@ -478,11 +478,11 @@ class TestSingleModel:
         record = ledger.records[0]
         assert record.provider == "gemini"
         assert record.operation == "generate_notes"
-        assert record.model == "gemini-2.5-flash"
+        assert record.model == "gemini-3.5-flash"
         assert record.input_tokens == 1200
         assert record.output_tokens == 345
         assert record.total_tokens == 1545
-        assert record.cost_usd > 0.0  # gemini-2.5-flash is priced in CostCalculator
+        assert record.cost_usd > 0.0  # gemini-3.5-flash is priced in CostCalculator
         assert record.cache_hit is False
 
     async def test_missing_token_counts_default_to_zero(self, gemini_settings: FakeLoader) -> None:
@@ -674,7 +674,7 @@ class TestConfiguredModels:
 
         assert (result.provider, result.model) == ("openrouter", "openai/gpt-5-mini")
         assert [call["model"] for call in completion.calls] == [
-            "gemini/gemini-2.5-flash",
+            "gemini/gemini-3.5-flash",
             "openrouter/openai/gpt-5-mini",
         ]
         # The ledger records the model that actually answered.
@@ -712,7 +712,7 @@ class TestConfiguredModels:
         settings = gemini_settings.override(
             notes_models=[
                 {"model": "openrouter/openai/gpt-5-mini", "input_token_limit": 10},
-                {"model": "gemini/gemini-2.5-flash", "input_token_limit": 1_000_000},
+                {"model": "gemini/gemini-3.5-flash", "input_token_limit": 1_000_000},
             ]
         )
         completion = FakeCompletion()
@@ -805,7 +805,7 @@ class TestBuildNotesGenerator:
 
         assert generator.provider == "gemini"
         assert [spec.litellm_model for spec in generator.specs] == [
-            "gemini/gemini-2.5-flash",
+            "gemini/gemini-3.5-flash",
             "openrouter/openai/gpt-5-mini",
         ]
 

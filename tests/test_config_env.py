@@ -85,7 +85,7 @@ def test_notes_models_env_is_a_json_list_and_beats_the_legacy_provider(
     monkeypatch.setenv(
         "NOTES_MODELS",
         '[{"model": "openai/gpt-5-mini", "api_base": "http://localhost:20128/v1"},'
-        ' {"model": "gemini/gemini-2.5-flash"}]',
+        ' {"model": "gemini/gemini-3.5-flash"}]',
     )
 
     settings = load_settings()
@@ -93,7 +93,7 @@ def test_notes_models_env_is_a_json_list_and_beats_the_legacy_provider(
 
     assert settings.notes_models[0]["model"] == "openai/gpt-5-mini"
     assert (first.provider, first.api_base) == ("openai", "http://localhost:20128/v1")
-    assert second.litellm_model == "gemini/gemini-2.5-flash"
+    assert second.litellm_model == "gemini/gemini-3.5-flash"
 
 
 @pytest.mark.parametrize("raw", ["not json", '{"model": "gemini/x"}'])
@@ -110,7 +110,7 @@ def test_notes_models_entries_are_validated(tmp_path: Path) -> None:
         "\n".join(
             [
                 "notes_models:",
-                "  - model: gemini/gemini-2.5-flash",
+                "  - model: gemini/gemini-3.5-flash",
                 "  - model: gpt-5",
                 "  - model: openai/gpt-5-mini",
                 "    temperature: 0.2",

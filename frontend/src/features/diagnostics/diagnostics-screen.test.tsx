@@ -45,6 +45,22 @@ describe('DiagnosticsScreen', () => {
     expect(screen.getByText('1 OK, 1 warning, 1 error')).toBeInTheDocument()
   })
 
+  it('collapses check messages by default and toggles them like an accordion', async () => {
+    mockApi().on('GET', '/api/diagnostics', DIAGNOSTICS)
+    renderRoute('/diagnostics')
+
+    const toggle = await screen.findByRole('button', { name: /Database/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByText('SQLite at data/atlas.db')).not.toBeVisible()
+
+    await userEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('SQLite at data/atlas.db')).toBeVisible()
+
+    await userEvent.click(toggle)
+    expect(screen.getByText('SQLite at data/atlas.db')).not.toBeVisible()
+  })
+
   it('lists the recent backend errors', async () => {
     mockApi().on('GET', '/api/diagnostics', DIAGNOSTICS)
     renderRoute('/diagnostics')

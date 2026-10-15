@@ -19,7 +19,12 @@ if [ -z "${ATLAS_API_URL:-}" ]; then
 fi
 echo "Vite proxies /api to $ATLAS_API_URL"
 
-uv run --locked python -m backend --reload &
+# Backend output goes to logs/backend-dev.log (stdout) and logs/backend-dev.err.log (stderr,
+# where the Python logging lands); both are overwritten on every start.
+LOG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/logs"
+mkdir -p "$LOG_DIR"
+echo "Backend logs: $LOG_DIR/backend-dev.log, $LOG_DIR/backend-dev.err.log"
+uv run --locked python -m backend --reload >"$LOG_DIR/backend-dev.log" 2>"$LOG_DIR/backend-dev.err.log" &
 BACKEND_PID=$!
 stop_backend() {
   if kill -0 "$BACKEND_PID" 2>/dev/null; then

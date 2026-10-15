@@ -44,7 +44,7 @@ def _settings(**overrides: Any):
     values = {
         "notes_provider": "gemini",
         "notes_model": "",
-        "gemini_model": "gemini-2.5-flash",
+        "gemini_model": "gemini-3.5-flash",
         "gemini_input_token_limit": 1_000_000,
         "notes_prompt_name": "notes_v1_1.yaml",
         "gemini_api_key_env": "GEMINI_API_KEY",
@@ -329,7 +329,7 @@ async def test_usage_is_recorded_with_provider_tokens_and_priced() -> None:
     (record,) = ledger.records
     assert record.output_tokens == 1000
     assert record.cost_usd > 0
-    assert CostCalculator.calculate_cost("gemini", "gemini-2.5-flash-lite", 10**6, 0) == 0.10
+    assert CostCalculator.calculate_cost("gemini", "gemini-3.5-flash-lite", 10**6, 0) == 0.10
 
 
 def test_a_placeholder_inside_the_title_is_not_substituted() -> None:

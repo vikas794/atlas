@@ -5,7 +5,7 @@ fallbacks). Specs come from the ``notes_models`` setting; when that is empty the
 from the legacy single-provider settings (``notes_provider``, ``gemini_model`` ...), so an
 existing ``config.yaml`` keeps working.
 
-A model is named the way LiteLLM names it, ``<provider>/<model>``: ``gemini/gemini-2.5-flash``,
+A model is named the way LiteLLM names it, ``<provider>/<model>``: ``gemini/gemini-3.5-flash``,
 ``openrouter/openai/gpt-5-mini``, ``openai/gpt-5-mini``. Any OpenAI-compatible gateway (OmniRoute,
 a local server) is ``openai/<model>`` plus an ``api_base``. Supporting a new provider is
 therefore a config entry, not code.
@@ -32,7 +32,7 @@ _DEFAULT_KEY_ENVS = {
 #: common use: a wrong guess then refuses early instead of paying for a call the provider rejects.
 DEFAULT_INPUT_TOKEN_LIMIT = 128_000
 
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
 DEFAULT_OPENROUTER_MODEL = "openai/gpt-5-mini"
 DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 _DEFAULT_GEMINI_INPUT_TOKEN_LIMIT = 1_000_000
@@ -42,7 +42,7 @@ _DEFAULT_GEMINI_INPUT_TOKEN_LIMIT = 1_000_000
 class ModelSpec:
     """One model the notes generator may call."""
 
-    #: LiteLLM model string, e.g. ``gemini/gemini-2.5-flash``.
+    #: LiteLLM model string, e.g. ``gemini/gemini-3.5-flash``.
     litellm_model: str
     #: Name of the environment variable holding the key(s). Safe to log.
     api_key_env: str

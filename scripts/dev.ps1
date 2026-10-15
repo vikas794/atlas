@@ -19,9 +19,18 @@ if (-not $env:ATLAS_API_URL) {
 }
 Write-Host "Vite proxies /api to $env:ATLAS_API_URL"
 
+# Backend output goes to logs\backend-dev.log (stdout) and logs\backend-dev.err.log (stderr,
+# where the Python logging lands); both are overwritten on every start.
+$LogDir = Join-Path $PSScriptRoot "..\logs"
+New-Item -ItemType Directory -Force $LogDir | Out-Null
+$LogDir = (Resolve-Path $LogDir).Path
+Write-Host "Backend logs: $LogDir\backend-dev.log, $LogDir\backend-dev.err.log"
+
 # Same console, so Ctrl+C reaches the backend too and it shuts down gracefully.
 $backend = Start-Process -FilePath "uv" -ArgumentList "run", "--locked", "python", "-m", "backend", "--reload" `
-    -NoNewWindow -PassThru
+    -NoNewWindow -PassThru `
+    -RedirectStandardOutput (Join-Path $LogDir "backend-dev.log") `
+    -RedirectStandardError (Join-Path $LogDir "backend-dev.err.log")
 try {
     & $Npm --prefix frontend run dev
 } finally {

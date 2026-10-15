@@ -60,7 +60,7 @@ against mocked externals; **Partial**; **Open** = a decision is needed (section 
 | §16 API contract, `{code, message, details}` envelope | `routers/*`, `errors.py`, `backend/spa.py` | V | `test_error_envelope.py` (22), real curl of 400/404/409/422 above |
 | §17 config in one place, `.env.example`, startup validation | `config/settings.py`, `src/configs/config.yaml` | V | `test_config_validation.py`; bad value → plain problem list, exit 2 |
 | §17 secrets never logged / returned | `shared/redaction.py`, `errors.py` | V | `test_redaction.py`, `test_http_errors_never_leak_the_api_key`, `test_a_server_error_message_carries_no_request_url` |
-| §18 prompt file versioned; model + prompt version recorded | `src/prompts/notes_v1_1.yaml`, `NotesPromptSource` | V | Real summary recorded `prompt=notes_v1.1 model=gemini-2.5-flash` |
+| §18 prompt file versioned; model + prompt version recorded | `src/prompts/notes_v1_1.yaml`, `NotesPromptSource` | V | Real summary recorded `prompt=notes_v1.1 model=gemini-3.5-flash` |
 | §18 output validation, truncation, too-large input | `notes_base.validate_notes`, `check_finish_reason`, `check_input_size` | V | `test_gemini_output_cut_off_at_max_tokens_is_rejected`, `TestCheckInputSize` |
 | §20 duplicate video in a playlist | `process_video._reuse_first_occurrence` | V | `test_duplicate_reuses_the_first_summary_without_an_llm_call`, `test_duplicate_of_a_permanently_failed_video_is_not_left_queued_forever` |
 | §20 private/deleted videos inside a playlist | `fetch_playlist_videos` (skipped) | **Open** (Q1) | `test_private_and_deleted_videos_are_skipped_and_numbering_stays_dense` |

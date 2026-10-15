@@ -43,6 +43,14 @@ This project is indexed by GitNexus as **atlas** (2437 symbols, 5162 relationshi
 
 <!-- gitnexus:end -->
 
+# Coding Skills
+
+Installed in `.claude/skills/`; read the `SKILL.md` before applying.
+
+- **`karpathy-guidelines`** (`.claude/skills/karpathy-guidelines/SKILL.md`): apply on any code writing, review, or refactor. Avoid overcomplication, make surgical changes, surface assumptions, define verifiable success criteria.
+- **`ponytail`** (`.claude/skills/ponytail/SKILL.md`): lazy-senior-dev mode (smallest change that fully solves the task, YAGNI, stdlib first). Levels: lite, full (default), ultra. Related: `ponytail-review` (review a change), `ponytail-audit` (whole-repo audit), `ponytail-debt` (list `shortcut:` comments), `ponytail-gain`, `ponytail-help`.
+- These do not override the PRD, `docs/design.md`, or the GitNexus rules below; if "smallest change" conflicts with a PRD requirement, the PRD wins.
+
 # Atlas Product Spec & Design Source of Truth
 
 - **`docs/Atlas_PRD.md`** is the source of truth for *what* to build: scope, functional requirements, data model, pipeline state machine, API contract, failure handling, Drive publishing, and milestone acceptance criteria. Read the relevant sections before implementing any feature, and do not add behavior the PRD lists as out of scope for v1.
