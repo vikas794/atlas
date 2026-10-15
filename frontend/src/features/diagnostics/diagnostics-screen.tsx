@@ -114,43 +114,16 @@ async function writeClipboard(text: string): Promise<void> {
 function CheckRow({ check }: { check: DiagnosticCheck }) {
   const spec = checkStatus(check.status)
   const { Icon } = spec
-  const [open, setOpen] = useState(false)
-  const panelId = useId()
-  const header = (
-    <>
-      <Icon aria-hidden="true" className={cn('size-icon shrink-0', TONE_TEXT[spec.tone])} />
-      <span className="min-w-0 flex-1 text-body font-medium text-text">{check.label}</span>
-      <Badge tone={spec.tone} className="shrink-0">
-        {spec.label}
-      </Badge>
-    </>
-  )
-  if (!check.message) {
-    return (
-      <li className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0">
-        {header}
-        <span aria-hidden="true" className="size-icon shrink-0" />
-      </li>
-    )
-  }
   return (
-    <li className="border-b border-border last:border-b-0">
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls={panelId}
-        onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-surface-muted"
-      >
-        {header}
-        <ChevronDown
-          aria-hidden="true"
-          className={cn('size-icon shrink-0 text-text-muted transition', open && 'rotate-180')}
-        />
-      </button>
-      <div id={panelId} hidden={!open} className="px-4 pb-3 pl-11">
-        <p className="text-label text-text-muted">{check.message}</p>
+    <li className="border-b border-border px-4 py-3 last:border-b-0">
+      <div className="flex items-center gap-3">
+        <Icon aria-hidden="true" className={cn('size-icon shrink-0', TONE_TEXT[spec.tone])} />
+        <span className="min-w-0 flex-1 text-body font-medium text-text">{check.label}</span>
+        <Badge tone={spec.tone} className="shrink-0">
+          {spec.label}
+        </Badge>
       </div>
+      {check.message ? <p className="pl-8 text-label text-text-muted">{check.message}</p> : null}
     </li>
   )
 }
@@ -189,6 +162,8 @@ export function DiagnosticsScreen() {
         old ? { ...old, recent_errors: [] } : old,
       ),
   })
+  const [checksOpen, setChecksOpen] = useState(false)
+  const checksPanelId = useId()
   const [filter, setFilter] = useState<LevelFilter>('all')
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   useEffect(() => {
@@ -268,18 +243,37 @@ export function DiagnosticsScreen() {
       ) : (
         <>
           <section className="space-y-3" aria-labelledby="checks-heading">
-            <div className="flex items-center justify-between">
+            <button
+              type="button"
+              aria-expanded={checksOpen}
+              aria-controls={checksPanelId}
+              onClick={() => setChecksOpen((value) => !value)}
+              className="flex w-full items-center justify-between gap-3 rounded text-left transition hover:bg-surface-muted"
+            >
               <h2 id="checks-heading" className="text-section text-text">
                 Checks
               </h2>
-              {counts ? (
-                <span className="text-label tabular-nums text-text-muted">
-                  {counts.ok} OK, {pluralize(counts.warning, 'warning')},{' '}
-                  {pluralize(counts.error, 'error')}
-                </span>
-              ) : null}
-            </div>
-            <div className="rounded border border-border bg-surface">
+              <span className="flex items-center gap-3">
+                {counts ? (
+                  <span className="text-label tabular-nums text-text-muted">
+                    {counts.ok} OK, {pluralize(counts.warning, 'warning')},{' '}
+                    {pluralize(counts.error, 'error')}
+                  </span>
+                ) : null}
+                <ChevronDown
+                  aria-hidden="true"
+                  className={cn(
+                    'size-icon shrink-0 text-text-muted transition',
+                    checksOpen && 'rotate-180',
+                  )}
+                />
+              </span>
+            </button>
+            <div
+              id={checksPanelId}
+              hidden={!checksOpen}
+              className="rounded border border-border bg-surface"
+            >
               {!data ? (
                 <SkeletonListRows rows={4} />
               ) : data.checks.length === 0 ? (

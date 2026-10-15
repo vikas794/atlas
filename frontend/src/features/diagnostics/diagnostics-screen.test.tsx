@@ -31,6 +31,7 @@ describe('DiagnosticsScreen', () => {
     mockApi().on('GET', '/api/diagnostics', DIAGNOSTICS)
     renderRoute('/diagnostics')
 
+    await userEvent.click(await screen.findByRole('button', { name: /^Checks/ }))
     const list = await screen.findByRole('list', { name: 'Diagnostic checks' })
     const rows = within(list).getAllByRole('listitem')
     expect(rows).toHaveLength(3)
@@ -45,20 +46,21 @@ describe('DiagnosticsScreen', () => {
     expect(screen.getByText('1 OK, 1 warning, 1 error')).toBeInTheDocument()
   })
 
-  it('collapses check messages by default and toggles them like an accordion', async () => {
+  it('hides and shows all checks with the head accordion', async () => {
     mockApi().on('GET', '/api/diagnostics', DIAGNOSTICS)
     renderRoute('/diagnostics')
 
-    const toggle = await screen.findByRole('button', { name: /Database/ })
-    expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.getByText('SQLite at data/atlas.db')).not.toBeVisible()
+    const head = await screen.findByRole('button', { name: /^Checks/ })
+    expect(head).toHaveAttribute('aria-expanded', 'false')
+    expect(await screen.findByText('1 OK, 1 warning, 1 error')).toBeVisible()
+    expect(screen.queryByRole('list', { name: 'Diagnostic checks' })).toBeNull()
 
-    await userEvent.click(toggle)
-    expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByText('SQLite at data/atlas.db')).toBeVisible()
+    await userEvent.click(head)
+    expect(head).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('list', { name: 'Diagnostic checks' })).toBeVisible()
 
-    await userEvent.click(toggle)
-    expect(screen.getByText('SQLite at data/atlas.db')).not.toBeVisible()
+    await userEvent.click(head)
+    expect(screen.queryByRole('list', { name: 'Diagnostic checks' })).toBeNull()
   })
 
   it('lists the recent backend errors', async () => {
@@ -177,7 +179,7 @@ describe('DiagnosticsScreen', () => {
 
     api.on('GET', '/api/diagnostics', DIAGNOSTICS)
     await user.click(within(alert).getByRole('button', { name: 'Retry' }))
-    expect(await screen.findByRole('list', { name: 'Diagnostic checks' })).toBeInTheDocument()
+    expect(await screen.findByText('1 OK, 1 warning, 1 error')).toBeInTheDocument()
   })
 
   it('shows the backend error message for a server failure', async () => {
