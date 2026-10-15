@@ -64,4 +64,23 @@ describe('GoogleAuthPanel', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('Failed to authenticate: Consent was denied')).toBeInTheDocument()
   })
+
+  it('collapses the setup steps behind an accordion once Drive is connected', async () => {
+    mockApi().on('GET', '/api/drive/status', {
+      configured: true,
+      state: 'connected',
+      message: 'Google Drive is connected.',
+    })
+    const user = userEvent.setup()
+    renderRoute('/settings')
+
+    const toggle = await screen.findByRole('button', { name: /Google Drive integration/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('button', { name: 'Authenticate account' })).not.toBeInTheDocument()
+
+    await user.click(toggle)
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: 'Authenticate account' })).toBeVisible()
+  })
 })

@@ -5,7 +5,9 @@ Symptom, cause, fix. Messages are quoted as Atlas prints them. Start with the
 `GET /api/diagnostics`): it checks the configuration, database, keys (set / not set, never the
 value), Drive credentials and token (an expired token is actually refreshed, so a revoked one
 shows as a warning), and the frontend build, and lists the last 50 warnings and errors. The
-Settings screen is where you upload the OAuth client file and authorize Drive.
+Settings screen is where you upload the OAuth client file and authorize Drive. Once Drive is
+connected, the setup steps collapse behind the "Google Drive integration" header; click it to
+expand them again.
 
 ## Where to look
 
