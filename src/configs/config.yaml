@@ -61,7 +61,7 @@ notes_request_timeout_seconds: 300.0  # one LLM call; a timeout is retried like 
 nvidia_model: "deepseek-ai/deepseek-v4.1-flash"  # used when notes_provider is nvidia
 nvidia_base_url: "https://integrate.api.nvidia.com/v1"
 nvidia_input_token_limit: 128000
-nvidia_request_timeout_seconds: 1800.0  # NVIDIA is slow; overrides notes_request_timeout_seconds
+nvidia_request_timeout_seconds: 3600.0  # NVIDIA is slow; overrides notes_request_timeout_seconds
 
 # --- Pipeline concurrency & retries --------------------------------------------
 max_concurrent_videos: 2

@@ -137,7 +137,7 @@ class AtlasSettings:
     nvidia_model: str = "deepseek-ai/deepseek-v4.1-flash"
     nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
     nvidia_input_token_limit: int = 128000
-    nvidia_request_timeout_seconds: float = 1800.0
+    nvidia_request_timeout_seconds: float = 3600.0
     notes_prompt_name: str = "notes_v1_2.yaml"  # the prompt file's own `version` is recorded
     notes_request_timeout_seconds: float = 300.0  # a hung LLM call must not hold a slot forever
 

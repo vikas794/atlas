@@ -40,7 +40,7 @@ DEFAULT_FREELLMAPI_BASE_URL = "http://localhost:3001/v1"
 DEFAULT_NVIDIA_MODEL = "deepseek-ai/deepseek-v4.1-flash"
 DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 #: NVIDIA's hosted models answer slowly; the generic notes timeout would abort them.
-DEFAULT_NVIDIA_REQUEST_TIMEOUT_SECONDS = 1800.0
+DEFAULT_NVIDIA_REQUEST_TIMEOUT_SECONDS = 3600.0
 _DEFAULT_GEMINI_INPUT_TOKEN_LIMIT = 1_000_000
 
 #: The Gemini models offered in the UI dropdown (newest first).

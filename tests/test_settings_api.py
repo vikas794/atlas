@@ -228,7 +228,7 @@ def test_nvidia_provider_builds_a_spec_with_a_long_timeout() -> None:
     assert spec.api_base == "https://integrate.api.nvidia.com/v1"
     assert spec.api_key_env == "NVIDIA_API_KEY"
     assert spec.provider == "nvidia"
-    assert spec.request_timeout_seconds == 1800.0
+    assert spec.request_timeout_seconds == 3600.0
 
 
 def test_the_notes_prompt_endpoint_returns_the_current_prompt_file(client: TestClient) -> None:
