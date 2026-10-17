@@ -27,7 +27,7 @@ flowchart LR
   end
   I --> YT["YouTube Data API v3<br/>youtube/playlist.py"]
   I --> YD["yt-dlp subtitles<br/>transcript/ytdlp/provider.py"]
-  I --> LLM["LiteLLM<br/>Gemini / OpenRouter / OpenAI / OmniRoute ...<br/>llm/litellm_notes"]
+  I --> LLM["LiteLLM<br/>Gemini / OpenRouter / OpenAI / FreeLLMAPI ...<br/>llm/litellm_notes"]
   I --> DB[("SQLite (WAL)<br/>storage/")]
   I --> GD["Google Drive + Docs<br/>google/drive.py, publisher.py"]
 ```
@@ -575,7 +575,7 @@ ordered `notes_models` list (`src/infrastructure/llm/models.py::resolve_model_sp
 
 1. Pick the model's LiteLLM name (`<provider>/<model>`, see https://docs.litellm.ai/docs/providers)
    and add an entry to `notes_models` in `src/configs/config.yaml`; set `api_base` for an
-   OpenAI-compatible gateway (OmniRoute, a local server) and `api_key_env` when the key variable
+   OpenAI-compatible gateway (FreeLLMAPI, a local server) and `api_key_env` when the key variable
    is not `<PROVIDER>_API_KEY`. Put the key in `.env`. See `docs/CONFIG.md`.
 2. Optional: prices in `src/infrastructure/llm/cost.py`. LiteLLM's own price (when it knows the
    model) is used first; unknown models then cost 0.0.

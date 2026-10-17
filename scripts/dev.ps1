@@ -1,5 +1,5 @@
 # Development: backend with auto-reload + Vite dev server (hot reload, proxies /api to the
-# backend). Open http://127.0.0.1:5173. Ctrl+C stops both.
+# backend). Open http://127.0.0.1:5174. Ctrl+C stops both.
 . "$PSScriptRoot\_common.ps1"
 
 Require-Command "uv" "Install it from https://docs.astral.sh/uv/getting-started/installation/"

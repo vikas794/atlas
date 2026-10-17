@@ -19,10 +19,10 @@ type Draft = Record<string, string | boolean>
 const RUN_MODE_KEY = 'max_concurrent_videos'
 
 /** Notes fields the model picker owns, so the generic list skips them. */
-const PICKER_KEYS = new Set(['notes_provider', 'gemini_model', 'omniroute_model', 'openrouter_model'])
+const PICKER_KEYS = new Set(['notes_provider', 'gemini_model', 'freellmapi_model', 'openrouter_model'])
 const MODEL_KEY_BY_PROVIDER: Record<string, string> = {
   gemini: 'gemini_model',
-  omniroute: 'omniroute_model',
+  freellmapi: 'freellmapi_model',
   openrouter: 'openrouter_model',
 }
 
@@ -335,7 +335,7 @@ function Group({
 
 /**
  * Which AI model writes the notes: a provider dropdown, then a model dropdown for it. Gemini
- * offers a fixed list; OmniRoute's list is fetched from the gateway (searchable, since it is long).
+ * offers a fixed list; FreeLLMAPI's list is fetched from the gateway (searchable, since it is long).
  */
 function ModelPicker({
   fieldsByKey,
@@ -354,7 +354,7 @@ function ModelPicker({
   const providerField = fieldsByKey.get('notes_provider')
   const provider = providerField ? String(valueOf(providerField)) : ''
   const modelField = fieldsByKey.get(MODEL_KEY_BY_PROVIDER[provider] ?? '')
-  const hasList = provider === 'gemini' || provider === 'omniroute'
+  const hasList = provider === 'gemini' || provider === 'freellmapi'
 
   const models = useQuery({
     queryKey: queryKeys.models(provider),
@@ -423,14 +423,14 @@ function ModelPicker({
                 id={modelId}
                 className="input max-w-md"
                 type="text"
-                list={provider === 'omniroute' ? listId : undefined}
+                list={provider === 'freellmapi' ? listId : undefined}
                 value={current}
                 disabled={modelDisabled}
-                placeholder={provider === 'omniroute' ? 'Search or type a model id' : undefined}
+                placeholder={provider === 'freellmapi' ? 'Search or type a model id' : undefined}
                 aria-invalid={errorOf(modelField.key) ? true : undefined}
                 onChange={(event) => onChange(modelField.key, event.target.value)}
               />
-              {provider === 'omniroute' ? (
+              {provider === 'freellmapi' ? (
                 <>
                   <datalist id={listId}>
                     {options.map((name) => (
@@ -453,7 +453,7 @@ function ModelPicker({
             <p role="alert" className="text-label text-st-error-fg">
               Could not load the model list: {errorMessage(models.error)}
             </p>
-          ) : provider === 'omniroute' && models.data ? (
+          ) : provider === 'freellmapi' && models.data ? (
             <p className="text-label text-text-muted">{options.length} models available.</p>
           ) : null}
           {errorOf(modelField.key) ? (

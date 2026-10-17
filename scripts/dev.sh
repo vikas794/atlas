@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Development: backend with auto-reload + Vite dev server (hot reload, proxies /api to the
-# backend). Open http://127.0.0.1:5173. Ctrl+C stops both.
+# backend). Open http://127.0.0.1:5174. Ctrl+C stops both.
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 require uv "$UV_HINT"

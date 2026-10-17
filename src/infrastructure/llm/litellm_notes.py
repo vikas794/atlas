@@ -1,6 +1,6 @@
 """Notes generator on top of LiteLLM: one adapter for every provider.
 
-LiteLLM gives every provider (Gemini, OpenRouter, OpenAI, OmniRoute, ...) the same
+LiteLLM gives every provider (Gemini, OpenRouter, OpenAI, FreeLLMAPI, ...) the same
 chat-completions call and the same OpenAI-style exceptions, so this module replaces the
 per-provider adapters. Which models are used, and in which fallback order, is configuration
 (:mod:`src.infrastructure.llm.models`), not code.

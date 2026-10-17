@@ -229,7 +229,7 @@ export function resetSettings() {
   return request<SettingsResponse>('/api/settings', { method: 'DELETE' })
 }
 
-/** Models selectable for the notes provider (Gemini: fixed list; OmniRoute: fetched live). */
+/** Models selectable for the notes provider (Gemini: fixed list; FreeLLMAPI: fetched live). */
 export function getModels(provider: string) {
   return request<ModelListResponse>(`/api/settings/models?provider=${encodeURIComponent(provider)}`)
 }

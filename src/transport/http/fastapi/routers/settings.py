@@ -167,15 +167,15 @@ async def get_settings() -> SettingsResponse:
     return await asyncio.to_thread(_snapshot)
 
 
-def _fetch_omniroute_models() -> list[str]:
-    """Model ids from OmniRoute's ``GET <models_url>/models`` (sorted, de-duplicated)."""
+def _fetch_freellmapi_models() -> list[str]:
+    """Model ids from FreeLLMAPI's ``GET <models_url>/models`` (sorted, de-duplicated)."""
     settings = load_settings()
-    base = (settings.omniroute_models_url or settings.omniroute_base_url).strip().rstrip("/")
-    keys = read_api_keys(settings.omniroute_api_key_env)
+    base = (settings.freellmapi_models_url or settings.freellmapi_base_url).strip().rstrip("/")
+    keys = read_api_keys(settings.freellmapi_api_key_env)
     if not keys:
         raise HTTPError(
             status_code=400,
-            detail=f"{settings.omniroute_api_key_env} is not set. Add the OmniRoute API key "
+            detail=f"{settings.freellmapi_api_key_env} is not set. Add the FreeLLMAPI API key "
             "to .env to list its models.",
             error_code="CONFIG_MISSING",
         )
@@ -188,13 +188,13 @@ def _fetch_omniroute_models() -> list[str]:
     except urllib.error.HTTPError as exc:
         raise HTTPError(
             status_code=502,
-            detail=f"OmniRoute answered {exc.code} for {base}/models.",
+            detail=f"FreeLLMAPI answered {exc.code} for {base}/models.",
             error_code="PROVIDER_ERROR",
         ) from exc
     except (urllib.error.URLError, OSError, ValueError) as exc:
         raise HTTPError(
             status_code=502,
-            detail=f"Could not reach OmniRoute at {base}: {getattr(exc, 'reason', exc)}",
+            detail=f"Could not reach FreeLLMAPI at {base}: {getattr(exc, 'reason', exc)}",
             error_code="PROVIDER_ERROR",
         ) from exc
     data = payload.get("data") if isinstance(payload, dict) else None
@@ -204,11 +204,11 @@ def _fetch_omniroute_models() -> list[str]:
 
 @router.get("/models", response_model=ModelListResponse)
 async def list_models(provider: str) -> ModelListResponse:
-    """The models selectable for ``provider``: a fixed Gemini list, or OmniRoute's live list."""
+    """The models selectable for ``provider``: a fixed Gemini list, or FreeLLMAPI's live list."""
     if provider == "gemini":
         return ModelListResponse(provider=provider, models=list(GEMINI_MODEL_CHOICES))
-    if provider == "omniroute":
-        models = await asyncio.to_thread(_fetch_omniroute_models)
+    if provider == "freellmapi":
+        models = await asyncio.to_thread(_fetch_freellmapi_models)
         return ModelListResponse(provider=provider, models=models)
     raise HTTPError(
         status_code=404,

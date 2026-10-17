@@ -66,7 +66,7 @@ page answers 503 and `/api/diagnostics` shows a `frontend_build` warning. `scrip
 warns before starting.
 
 Fix: `.\scripts\build.ps1` or `./scripts/build.sh`, then reload (no restart needed). Rebuild
-after every frontend change. In dev mode use `http://127.0.0.1:5173` instead.
+after every frontend change. In dev mode use `http://127.0.0.1:5174` instead.
 
 ### PowerShell refuses to run the scripts
 

@@ -1,7 +1,7 @@
 # Atlas
 
 Atlas turns a YouTube playlist into study notes: it fetches each video's transcript, has an LLM
-(Gemini by default; any LiteLLM provider such as OpenRouter, OpenAI or OmniRoute, with
+(Gemini by default; any LiteLLM provider such as OpenRouter, OpenAI or FreeLLMAPI, with
 fallbacks) write Markdown notes, lets you review, edit and approve them
 in a local web UI, and publishes the approved notes as numbered Google Docs plus an index Doc in
 one Drive folder. It is a local, single-user tool: one process, one SQLite file, no login.
@@ -53,7 +53,7 @@ is free first, and exits with a message if not. Without a build the page explain
 Ctrl+C stops it; the worker shuts down gracefully and resumes interrupted work on the next start.
 
 **Dev mode** (hot reload): `.\scripts\dev.ps1` or `./scripts/dev.sh` runs the backend with
-`--reload` plus the Vite dev server. Open `http://127.0.0.1:5173`; Ctrl+C stops both. Vite
+`--reload` plus the Vite dev server. Open `http://127.0.0.1:5174`; Ctrl+C stops both. Vite
 proxies `/api` to the configured backend port (the script passes it as `ATLAS_API_URL`). The
 backend's output is written to `logs/backend-dev.log` (stdout) and `logs/backend-dev.err.log`
 (stderr, including the log lines), both overwritten on every start.

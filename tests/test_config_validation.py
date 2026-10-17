@@ -104,7 +104,7 @@ def test_env_example_holds_only_secrets_and_no_values() -> None:
     from src.config.settings import repo_root
 
     template = dotenv_values(repo_root() / ".env.example")
-    assert set(template) == {"YOUTUBE_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OMNIROUTE_API_KEY"}
+    assert set(template) == {"YOUTUBE_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "FREELLMAPI_API_KEY"}
     assert all(not value for value in template.values())
 
 
@@ -138,10 +138,10 @@ def test_configured_origins_are_the_only_ones_allowed() -> None:
     def ping() -> dict:
         return {}
 
-    install_cors(probe, ["http://localhost:5173"])
+    install_cors(probe, ["http://localhost:5174"])
     client = TestClient(probe)
-    ok = client.get("/ping", headers={"Origin": "http://localhost:5173"})
-    assert ok.headers["access-control-allow-origin"] == "http://localhost:5173"
+    ok = client.get("/ping", headers={"Origin": "http://localhost:5174"})
+    assert ok.headers["access-control-allow-origin"] == "http://localhost:5174"
     assert "access-control-allow-credentials" not in ok.headers
     other = client.get("/ping", headers={"Origin": "http://evil.example"})
     assert "access-control-allow-origin" not in other.headers

@@ -84,7 +84,7 @@ def test_notes_models_env_is_a_json_list_and_beats_the_legacy_provider(
     monkeypatch.setenv("NOTES_PROVIDER", "openrouter")
     monkeypatch.setenv(
         "NOTES_MODELS",
-        '[{"model": "openai/gpt-5-mini", "api_base": "http://localhost:20128/v1"},'
+        '[{"model": "openai/gpt-5-mini", "api_base": "http://localhost:3001/v1"},'
         ' {"model": "gemini/gemini-3.5-flash"}]',
     )
 
@@ -92,7 +92,7 @@ def test_notes_models_env_is_a_json_list_and_beats_the_legacy_provider(
     first, second = resolve_model_specs(settings.to_loader())
 
     assert settings.notes_models[0]["model"] == "openai/gpt-5-mini"
-    assert (first.provider, first.api_base) == ("openai", "http://localhost:20128/v1")
+    assert (first.provider, first.api_base) == ("openai", "http://localhost:3001/v1")
     assert second.litellm_model == "gemini/gemini-3.5-flash"
 
 
@@ -243,7 +243,7 @@ def test_every_key_in_env_example_is_actually_read() -> None:
         {f"ATLAS_{name.upper()}" for name in field_names}
         | set(ENV_ALIASES)
         | {"ATLAS_DB_PATH"}  # legacy alias of ATLAS_DATABASE_PATH
-        | {"GEMINI_API_KEY", "OPENROUTER_API_KEY", "OMNIROUTE_API_KEY", "YOUTUBE_API_KEY"}  # secrets, read by name
+        | {"GEMINI_API_KEY", "OPENROUTER_API_KEY", "FREELLMAPI_API_KEY", "YOUTUBE_API_KEY"}  # secrets, read by name
     )
 
     unknown = [key for key in dotenv_values(repo_root() / ".env.example") if key not in recognised]

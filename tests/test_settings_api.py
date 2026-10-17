@@ -177,15 +177,15 @@ def test_gemini_model_list_is_fixed(client: TestClient) -> None:
     assert "gemini-3.1-pro-preview" in body["models"]
 
 
-def test_omniroute_model_list_needs_a_key(
+def test_freellmapi_model_list_needs_a_key(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("OMNIROUTE_API_KEY", raising=False)
-    response = client.get("/api/settings/models", params={"provider": "omniroute"})
+    monkeypatch.delenv("FREELLMAPI_API_KEY", raising=False)
+    response = client.get("/api/settings/models", params={"provider": "freellmapi"})
     assert response.status_code == 400
 
 
-def test_omniroute_model_list_is_fetched_and_sorted(
+def test_freellmapi_model_list_is_fetched_and_sorted(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import io
@@ -193,7 +193,7 @@ def test_omniroute_model_list_is_fetched_and_sorted(
 
     from src.transport.http.fastapi.routers import settings as router
 
-    monkeypatch.setenv("OMNIROUTE_API_KEY", "k")
+    monkeypatch.setenv("FREELLMAPI_API_KEY", "k")
     seen: dict[str, str] = {}
 
     def fake_urlopen(request, timeout):  # noqa: ANN001
@@ -202,20 +202,20 @@ def test_omniroute_model_list_is_fetched_and_sorted(
         return io.BytesIO(json.dumps({"data": [{"id": "b"}, {"id": "a"}, {"id": "a"}]}).encode())
 
     monkeypatch.setattr(router.urllib.request, "urlopen", fake_urlopen)
-    body = client.get("/api/settings/models", params={"provider": "omniroute"}).json()
+    body = client.get("/api/settings/models", params={"provider": "freellmapi"}).json()
     assert body["models"] == ["a", "b"]
-    assert seen == {"url": "http://localhost:20128/v1/models", "auth": "Bearer k"}
+    assert seen == {"url": "http://localhost:3001/v1/models", "auth": "Bearer k"}
 
 
-def test_omniroute_provider_builds_an_openai_compatible_spec() -> None:
+def test_freellmapi_provider_builds_an_openai_compatible_spec() -> None:
     from src.infrastructure.llm.models import resolve_model_specs
 
-    values = {"notes_provider": "omniroute", "omniroute_model": "gh/gemini-3.6-flash"}
+    values = {"notes_provider": "freellmapi", "freellmapi_model": "gh/gemini-3.6-flash"}
     (spec,) = resolve_model_specs(lambda key, default=None: values.get(key, default))
     assert spec.litellm_model == "openai/gh/gemini-3.6-flash"
-    assert spec.api_base == "http://localhost:20128/v1"
-    assert spec.api_key_env == "OMNIROUTE_API_KEY"
-    assert spec.provider == "omniroute"
+    assert spec.api_base == "http://localhost:3001/v1"
+    assert spec.api_key_env == "FREELLMAPI_API_KEY"
+    assert spec.provider == "freellmapi"
     assert spec.model == "gh/gemini-3.6-flash"
 
 

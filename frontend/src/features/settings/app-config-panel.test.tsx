@@ -238,7 +238,7 @@ describe('AppConfigPanel', () => {
           group: 'notes',
           label: 'Notes provider',
           kind: 'text',
-          choices: ['gemini', 'openrouter', 'omniroute'],
+          choices: ['gemini', 'openrouter', 'freellmapi'],
           value: 'gemini',
           default: 'gemini',
         }),

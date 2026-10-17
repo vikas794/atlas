@@ -627,8 +627,8 @@ class TestConfiguredModels:
             notes_models=[
                 {
                     "model": "openai/gpt-5-mini",
-                    "api_base": "http://localhost:20128/v1",
-                    "api_key_env": "OMNIROUTE_API_KEY",
+                    "api_base": "http://localhost:3001/v1",
+                    "api_key_env": "FREELLMAPI_API_KEY",
                     "input_token_limit": 200_000,
                 },
                 {"model": "groq/llama-3.3-70b-versatile"},
@@ -638,8 +638,8 @@ class TestConfiguredModels:
         first, second = resolve_model_specs(settings)
 
         assert (first.provider, first.model) == ("openai", "gpt-5-mini")
-        assert first.api_base == "http://localhost:20128/v1"
-        assert first.api_key_env == "OMNIROUTE_API_KEY"
+        assert first.api_base == "http://localhost:3001/v1"
+        assert first.api_key_env == "FREELLMAPI_API_KEY"
         assert first.input_token_limit == 200_000
         assert second.api_key_env == "GROQ_API_KEY"  # default derived from the provider name
         assert second.api_base is None
@@ -652,13 +652,13 @@ class TestConfiguredModels:
     async def test_a_custom_endpoint_is_passed_to_the_provider_call(
         self, gemini_settings: FakeLoader, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("OMNIROUTE_API_KEY", "omni-test-key")
+        monkeypatch.setenv("FREELLMAPI_API_KEY", "omni-test-key")
         settings = gemini_settings.override(
             notes_models=[
                 {
                     "model": "openai/gpt-5-mini",
-                    "api_base": "http://localhost:20128/v1",
-                    "api_key_env": "OMNIROUTE_API_KEY",
+                    "api_base": "http://localhost:3001/v1",
+                    "api_key_env": "FREELLMAPI_API_KEY",
                 }
             ]
         )
@@ -671,7 +671,7 @@ class TestConfiguredModels:
         assert result.provider == "openai"
         sent = completion.calls[0]
         assert sent["model"] == "openai/gpt-5-mini"
-        assert sent["api_base"] == "http://localhost:20128/v1"
+        assert sent["api_base"] == "http://localhost:3001/v1"
         assert sent["api_key"] == "omni-test-key"
 
     async def test_keys_of_one_model_rotate_before_falling_back(
@@ -841,12 +841,12 @@ class TestBuildNotesGenerator:
 
     def test_the_real_settings_loader_reads_notes_models(self) -> None:
         loader = AtlasSettings(
-            notes_models=[{"model": "openai/gpt-5-mini", "api_base": "http://localhost:20128/v1"}]
+            notes_models=[{"model": "openai/gpt-5-mini", "api_base": "http://localhost:3001/v1"}]
         ).to_loader()
 
         (spec,) = build_notes_generator(loader).specs
 
-        assert spec.api_base == "http://localhost:20128/v1"
+        assert spec.api_base == "http://localhost:3001/v1"
         assert spec.api_key_env == "OPENAI_API_KEY"
 
 

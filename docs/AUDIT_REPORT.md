@@ -213,7 +213,7 @@ once on the Settings screen.
 **Dev mode** (backend `--reload` + Vite with `/api` proxied to the configured port):
 
 ```powershell
-.\scripts\dev.ps1                            # Windows → http://127.0.0.1:5173
+.\scripts\dev.ps1                            # Windows → http://127.0.0.1:5174
 ```
 ```bash
 ./scripts/dev.sh                             # macOS / Linux

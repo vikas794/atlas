@@ -57,9 +57,9 @@ Drive panel owns those), `database_path` (it locates the saved settings, so set 
 `config.yaml` or the environment) and `notes_models` (edit it in `config.yaml`).
 
 - **Choosing the AI model.** Under "Notes generation", pick the AI provider, then the model.
-  Gemini offers a fixed list; OmniRoute's list is fetched live (`GET
-  /api/settings/models?provider=omniroute`, authenticated with `OMNIROUTE_API_KEY`, from
-  `omniroute_models_url` or `omniroute_base_url`) into a searchable field, with a Refresh button.
+  Gemini offers a fixed list; FreeLLMAPI's list is fetched live (`GET
+  /api/settings/models?provider=freellmapi`, authenticated with `FREELLMAPI_API_KEY`, from
+  `freellmapi_models_url` or `freellmapi_base_url`) into a searchable field, with a Refresh button.
   Saving applies it to new work at once. `notes_models`, when set in `config.yaml`, still wins.
 - **Serial or parallel.** "Run mode" is `max_concurrent_videos`: Serial stores `1`, Parallel
   stores 2 or more. Transcript fetches are one at a time and paced either way.
@@ -132,17 +132,17 @@ These hold the **name** of the environment variable that contains the key.
 | Setting | Default | Effect | Validation | Env |
 |---|---|---|---|---|
 | `notes_models` | `[]` | Ordered list of LiteLLM models, tried first to last (later ones are fallbacks). Each entry: `model` (`<provider>/<model>`, required), `api_key_env`, `api_base`, `input_token_limit`. See [Choosing models](#choosing-models-litellm). Empty falls back to the single-model shorthand below. | each entry needs `model` like `gemini/gemini-3.5-flash`; no other keys | `ATLAS_NOTES_MODELS`, `NOTES_MODELS` (a JSON list) |
-| `notes_provider` | `"gemini"` | Legacy single-model shorthand, used only when `notes_models` is empty. | `gemini`, `openrouter` or `omniroute` | `ATLAS_NOTES_PROVIDER`, `NOTES_PROVIDER` |
-| `notes_model` | `""` | Legacy shorthand: model for the active `notes_provider`. Advanced override; leave empty to use the model picked in the UI (`gemini_model` / `omniroute_model` / `openrouter_model`). | none | `ATLAS_NOTES_MODEL`, `NOTES_MODEL` |
+| `notes_provider` | `"gemini"` | Legacy single-model shorthand, used only when `notes_models` is empty. | `gemini`, `openrouter` or `freellmapi` | `ATLAS_NOTES_PROVIDER`, `NOTES_PROVIDER` |
+| `notes_model` | `""` | Legacy shorthand: model for the active `notes_provider`. Advanced override; leave empty to use the model picked in the UI (`gemini_model` / `freellmapi_model` / `openrouter_model`). | none | `ATLAS_NOTES_MODEL`, `NOTES_MODEL` |
 | `gemini_model` | `"gemini-3.5-flash"` | Gemini model when `notes_model` is empty. The UI dropdown offers `gemini-3.8-flash`, `gemini-3.6-flash`, `gemini-3-flash-preview`, `gemini-flash-latest`, `gemini-3.1-pro-preview`. | none | `ATLAS_GEMINI_MODEL`, `GEMINI_MODEL` |
 | `gemini_input_token_limit` | `1000000` | Pre-flight limit: a transcript estimated (characters / 4) above this fails as permanent `transcript_too_large` without calling Gemini. | >= 1 | `ATLAS_GEMINI_INPUT_TOKEN_LIMIT`, `GEMINI_INPUT_TOKEN_LIMIT` |
 | `openrouter_model` | `""` | OpenRouter model when `notes_model` is empty; empty means `openai/gpt-5-mini`. | none | `ATLAS_OPENROUTER_MODEL`, `OPENROUTER_MODEL` |
 | `openrouter_base_url` | `"https://openrouter.ai/api/v1"` | OpenAI-compatible endpoint for the OpenRouter adapter. | none | `ATLAS_OPENROUTER_BASE_URL`, `OPENROUTER_BASE_URL` |
 | `openrouter_input_token_limit` | `128000` | Same pre-flight limit for OpenRouter; raise it when you pin a model with a bigger context. | >= 1 | `ATLAS_OPENROUTER_INPUT_TOKEN_LIMIT`, `OPENROUTER_INPUT_TOKEN_LIMIT` |
-| `omniroute_model` | `""` | OmniRoute model id (sent as `openai/<id>`) when `notes_provider` is `omniroute` and `notes_model` is empty. Required for that provider. | none | `ATLAS_OMNIROUTE_MODEL`, `OMNIROUTE_MODEL` |
-| `omniroute_base_url` | `"http://localhost:20128/v1"` | OpenAI-compatible endpoint notes are sent to. | none | `ATLAS_OMNIROUTE_BASE_URL`, `OMNIROUTE_BASE_URL` |
-| `omniroute_models_url` | `""` | Base URL the UI fetches `/models` from (for example a tunnel to the same gateway). Empty uses `omniroute_base_url`. | none | `ATLAS_OMNIROUTE_MODELS_URL`, `OMNIROUTE_MODELS_URL` |
-| `omniroute_input_token_limit` | `128000` | Pre-flight limit for OmniRoute models. | >= 1 | `ATLAS_OMNIROUTE_INPUT_TOKEN_LIMIT`, `OMNIROUTE_INPUT_TOKEN_LIMIT` |
+| `freellmapi_model` | `""` | FreeLLMAPI model id (sent as `openai/<id>`) when `notes_provider` is `freellmapi` and `notes_model` is empty. Required for that provider. | none | `ATLAS_FREELLMAPI_MODEL`, `FREELLMAPI_MODEL` |
+| `freellmapi_base_url` | `"http://localhost:3001/v1"` | OpenAI-compatible endpoint notes are sent to. | none | `ATLAS_FREELLMAPI_BASE_URL`, `FREELLMAPI_BASE_URL` |
+| `freellmapi_models_url` | `""` | Base URL the UI fetches `/models` from (for example a tunnel to the same gateway). Empty uses `freellmapi_base_url`. | none | `ATLAS_FREELLMAPI_MODELS_URL`, `FREELLMAPI_MODELS_URL` |
+| `freellmapi_input_token_limit` | `128000` | Pre-flight limit for FreeLLMAPI models. | >= 1 | `ATLAS_FREELLMAPI_INPUT_TOKEN_LIMIT`, `FREELLMAPI_INPUT_TOKEN_LIMIT` |
 | `notes_prompt_name` | `"notes_v1_2.yaml"` | Prompt file inside `prompts_base_dir`. The file's own `version` key (e.g. `notes_v1.2`) is stored on each summary (`custom` for a one-off regenerate prompt typed in the review screen, which never changes this file). The file must contain `{{Title}}` and `{{Transcript}}`. `notes_v1_2` makes the model start the notes with a short `Summary` section, which the Drive index shows next to each video; older prompt files still work (the index then uses the first sentences of the Notes section). | not empty; file must exist | `ATLAS_NOTES_PROMPT_NAME`, `NOTES_PROMPT_NAME` |
 | `notes_request_timeout_seconds` | `300.0` | Timeout of one LLM call. A timeout is a transient `network_error`, retried with backoff. | > 0 | `ATLAS_NOTES_REQUEST_TIMEOUT_SECONDS` |
 | `prompts_base_dir` | `"src/prompts"` | Folder holding prompt files (`notes_v1.yaml`, `notes_v1_1.yaml`, `notes_v1_2.yaml`). | not empty | `ATLAS_PROMPTS_BASE_DIR` |
@@ -183,7 +183,7 @@ missing, and each feature fails with a message naming the variable.
 | `YOUTUBE_API_KEY` | Listing a playlist (YouTube Data API v3, enabled in Google Cloud) | `POST /api/playlists` answers 503 `CONFIG_MISSING` |
 | `GEMINI_API_KEY` | Notes with a `gemini/...` model (the default); a Google AI Studio key | That model is skipped; with no other model, each video fails with a permanent `config_error`, no retries |
 | `OPENROUTER_API_KEY` | Notes with an `openrouter/...` model | Same as above |
-| `OMNIROUTE_API_KEY` | Notes with the `omniroute` provider, and listing its models in Settings | `GET /api/settings/models?provider=omniroute` answers 400 `CONFIG_MISSING`; notes fail as above |
+| `FREELLMAPI_API_KEY` | Notes with the `freellmapi` provider, and listing its models in Settings | `GET /api/settings/models?provider=freellmapi` answers 400 `CONFIG_MISSING`; notes fail as above |
 | `<PROVIDER>_API_KEY` / the entry's `api_key_env` | Notes with any other `notes_models` entry | Same as above |
 
 ### Choosing models (LiteLLM)
@@ -197,9 +197,9 @@ notes_models:
   - model: "gemini/gemini-3.5-flash"          # primary; key from GEMINI_API_KEY
     input_token_limit: 1000000
   - model: "openrouter/openai/gpt-5-mini"     # fallback; key from OPENROUTER_API_KEY
-  - model: "openai/gpt-5-mini"                # any OpenAI-compatible gateway, e.g. OmniRoute
-    api_base: "http://localhost:20128/v1"
-    api_key_env: "OMNIROUTE_API_KEY"
+  - model: "openai/gpt-5-mini"                # any OpenAI-compatible gateway, e.g. FreeLLMAPI
+    api_base: "http://localhost:3001/v1"
+    api_key_env: "FREELLMAPI_API_KEY"
 ```
 
 - `api_key_env` defaults to `<PROVIDER>_API_KEY` (`GEMINI_API_KEY`, `OPENROUTER_API_KEY`,

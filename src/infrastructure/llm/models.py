@@ -6,7 +6,7 @@ from the legacy single-provider settings (``notes_provider``, ``gemini_model`` .
 existing ``config.yaml`` keeps working.
 
 A model is named the way LiteLLM names it, ``<provider>/<model>``: ``gemini/gemini-3.5-flash``,
-``openrouter/openai/gpt-5-mini``, ``openai/gpt-5-mini``. Any OpenAI-compatible gateway (OmniRoute,
+``openrouter/openai/gpt-5-mini``, ``openai/gpt-5-mini``. Any OpenAI-compatible gateway (FreeLLMAPI,
 a local server) is ``openai/<model>`` plus an ``api_base``. Supporting a new provider is
 therefore a config entry, not code.
 """
@@ -35,7 +35,7 @@ DEFAULT_INPUT_TOKEN_LIMIT = 128_000
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
 DEFAULT_OPENROUTER_MODEL = "openai/gpt-5-mini"
 DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_OMNIROUTE_BASE_URL = "http://localhost:20128/v1"
+DEFAULT_FREELLMAPI_BASE_URL = "http://localhost:3001/v1"
 _DEFAULT_GEMINI_INPUT_TOKEN_LIMIT = 1_000_000
 
 #: The Gemini models offered in the UI dropdown (newest first).
@@ -59,7 +59,7 @@ class ModelSpec:
     #: Custom endpoint for OpenAI-compatible gateways; ``None`` for the provider's own.
     api_base: str | None = None
     input_token_limit: int = DEFAULT_INPUT_TOKEN_LIMIT
-    #: Identity to record when it differs from the LiteLLM prefix (OmniRoute is ``openai/...``).
+    #: Identity to record when it differs from the LiteLLM prefix (FreeLLMAPI is ``openai/...``).
     provider_name: str | None = None
 
     @property
@@ -79,7 +79,7 @@ class ModelSpec:
             "openrouter": "OpenRouter",
             "openai": "OpenAI",
             "gemini": "Gemini",
-            "omniroute": "OmniRoute",
+            "freellmapi": "FreeLLMAPI",
         }
         return names.get(self.provider, self.provider.capitalize())
 
@@ -152,30 +152,30 @@ def _legacy_spec(settings: SettingsLoader) -> ModelSpec:
                 or DEFAULT_INPUT_TOKEN_LIMIT
             ),
         )
-    if provider == "omniroute":
-        name = explicit or str(settings("omniroute_model", "") or "").strip()
+    if provider == "freellmapi":
+        name = explicit or str(settings("freellmapi_model", "") or "").strip()
         if not name:
             raise ValueError(
-                "No OmniRoute model is selected. Pick one in Settings > Notes generation "
-                "(or set omniroute_model)."
+                "No FreeLLMAPI model is selected. Pick one in Settings > Notes generation "
+                "(or set freellmapi_model)."
             )
-        base = str(settings("omniroute_base_url", "") or "").strip()
+        base = str(settings("freellmapi_base_url", "") or "").strip()
         return ModelSpec(
             litellm_model=f"openai/{name}",
-            api_key_env=str(settings("omniroute_api_key_env", "OMNIROUTE_API_KEY")),
-            api_base=base or DEFAULT_OMNIROUTE_BASE_URL,
+            api_key_env=str(settings("freellmapi_api_key_env", "FREELLMAPI_API_KEY")),
+            api_base=base or DEFAULT_FREELLMAPI_BASE_URL,
             input_token_limit=int(
                 cast(
                     int | str,
-                    settings("omniroute_input_token_limit", DEFAULT_INPUT_TOKEN_LIMIT),
+                    settings("freellmapi_input_token_limit", DEFAULT_INPUT_TOKEN_LIMIT),
                 )
                 or DEFAULT_INPUT_TOKEN_LIMIT
             ),
-            provider_name="omniroute",
+            provider_name="freellmapi",
         )
     raise ValueError(
         f"Unknown notes_provider {provider!r} (from settings 'notes_provider'); supported "
-        "providers are: gemini, openrouter, omniroute. Or list models in 'notes_models'."
+        "providers are: gemini, openrouter, freellmapi. Or list models in 'notes_models'."
     )
 
 
@@ -183,7 +183,7 @@ __all__ = [
     "DEFAULT_GEMINI_MODEL",
     "DEFAULT_INPUT_TOKEN_LIMIT",
     "DEFAULT_OPENROUTER_MODEL",
-    "DEFAULT_OMNIROUTE_BASE_URL",
+    "DEFAULT_FREELLMAPI_BASE_URL",
     "GEMINI_MODEL_CHOICES",
     "ModelSpec",
     "default_key_env",

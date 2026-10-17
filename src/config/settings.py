@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-NOTES_PROVIDERS = ("gemini", "openrouter", "omniroute")
+NOTES_PROVIDERS = ("gemini", "openrouter", "freellmapi")
 #: Keys an entry of ``notes_models`` may carry (see ``AtlasSettings.notes_models``).
 NOTES_MODEL_KEYS = ("model", "api_key_env", "api_base", "input_token_limit")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
@@ -91,7 +91,7 @@ class AtlasSettings:
     openrouter_api_key_env: str = "OPENROUTER_API_KEY"
     youtube_api_key_env: str = "YOUTUBE_API_KEY"
     gemini_api_key_env: str = "GEMINI_API_KEY"
-    omniroute_api_key_env: str = "OMNIROUTE_API_KEY"
+    freellmapi_api_key_env: str = "FREELLMAPI_API_KEY"
 
     # --- Google OAuth ----------------------------------------------------
     google_creds_path: str = "credentials.json"
@@ -115,7 +115,7 @@ class AtlasSettings:
     # --- Notes generation (playlist -> per-video Markdown notes) ----------
     #: Ordered LiteLLM models, tried first to last (the rest are fallbacks). Each entry is a
     #: mapping with ``model`` ("<litellm-provider>/<model>", e.g. "gemini/gemini-3.5-flash") and
-    #: optional ``api_key_env``, ``api_base`` (OpenAI-compatible gateways such as OmniRoute) and
+    #: optional ``api_key_env``, ``api_base`` (OpenAI-compatible gateways such as FreeLLMAPI) and
     #: ``input_token_limit``. Empty -> derived from the legacy ``notes_provider`` settings below.
     notes_models: list[dict[str, Any]] = field(default_factory=list)
     notes_provider: str = "gemini"  # legacy single-provider shorthand: gemini | openrouter
@@ -125,12 +125,12 @@ class AtlasSettings:
     openrouter_model: str = ""  # used when notes_model is empty
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_input_token_limit: int = 128000
-    #: OmniRoute: an OpenAI-compatible gateway. Notes go to ``omniroute_base_url``; the model
-    #: list for the UI is read from ``omniroute_models_url`` (empty -> the base URL).
-    omniroute_model: str = ""
-    omniroute_base_url: str = "http://localhost:20128/v1"
-    omniroute_models_url: str = ""
-    omniroute_input_token_limit: int = 128000
+    #: FreeLLMAPI: an OpenAI-compatible gateway. Notes go to ``freellmapi_base_url``; the model
+    #: list for the UI is read from ``freellmapi_models_url`` (empty -> the base URL).
+    freellmapi_model: str = ""
+    freellmapi_base_url: str = "http://localhost:3001/v1"
+    freellmapi_models_url: str = ""
+    freellmapi_input_token_limit: int = 128000
     notes_prompt_name: str = "notes_v1_2.yaml"  # the prompt file's own `version` is recorded
     notes_request_timeout_seconds: float = 300.0  # a hung LLM call must not hold a slot forever
 
@@ -232,7 +232,7 @@ class AtlasSettings:
             "database_path", "google_creds_path", "google_token_path", "transcript_output_folder",
             "prompts_base_dir", "notes_prompt_name", "log_file", "transcript_language",
             "gemini_api_key_env", "youtube_api_key_env", "openrouter_api_key_env",
-            "omniroute_api_key_env",
+            "freellmapi_api_key_env",
         ):  # fmt: skip
             need(bool(str(getattr(self, name)).strip()), name, "must not be empty")
         need(self.notes_provider in NOTES_PROVIDERS, "notes_provider",
@@ -262,7 +262,7 @@ class AtlasSettings:
              "must be greater than 0")  # fmt: skip
         for name in (
             "gemini_input_token_limit", "openrouter_input_token_limit",
-            "omniroute_input_token_limit",
+            "freellmapi_input_token_limit",
         ):  # fmt: skip
             need(getattr(self, name) >= 1, name, "must be at least 1")
         found.extend(self._notes_models_problems())
@@ -278,7 +278,7 @@ class AtlasSettings:
         for origin in self.cors_origin_list:
             if origin == "*" or not origin.startswith(("http://", "https://")):
                 found.append(
-                    f"cors_origins: {origin!r} is not an origin like http://localhost:5173 "
+                    f"cors_origins: {origin!r} is not an origin like http://localhost:5174 "
                     "(wildcards are not allowed)"
                 )
         return found
@@ -296,10 +296,10 @@ ENV_ALIASES: dict[str, str] = {
     "OPENROUTER_MODEL": "openrouter_model",
     "OPENROUTER_BASE_URL": "openrouter_base_url",
     "OPENROUTER_INPUT_TOKEN_LIMIT": "openrouter_input_token_limit",
-    "OMNIROUTE_MODEL": "omniroute_model",
-    "OMNIROUTE_BASE_URL": "omniroute_base_url",
-    "OMNIROUTE_MODELS_URL": "omniroute_models_url",
-    "OMNIROUTE_INPUT_TOKEN_LIMIT": "omniroute_input_token_limit",
+    "FREELLMAPI_MODEL": "freellmapi_model",
+    "FREELLMAPI_BASE_URL": "freellmapi_base_url",
+    "FREELLMAPI_MODELS_URL": "freellmapi_models_url",
+    "FREELLMAPI_INPUT_TOKEN_LIMIT": "freellmapi_input_token_limit",
 }
 
 # Older ``ATLAS_*`` names that predate the field names and must keep working
