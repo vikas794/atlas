@@ -545,6 +545,7 @@ recovered on the next start.
 | `GET /api/playlists`, `GET /api/playlists/{id}`, `GET /api/playlists/{id}/videos` | List, detail with `stage_counts`, paged videos (`stage`, `search`, `page`, `page_size`) |
 | `POST /api/playlists/{id}/process` | Wake the worker (202) |
 | `POST /api/playlists/{id}/reprocess` | Delete transcripts and summaries, re-queue every video (202) |
+| `POST /api/playlists/{id}/retry-failed` | Same as `POST /api/videos/retry-failed`, limited to one playlist (404 if unknown). Backs the detail page's "Retry all failed" button |
 | `POST /api/playlists/{id}/approve-all` | Approve every `pending_review` video |
 | `POST /api/playlists/{id}/publish` | Queue a publish (202) |
 | `DELETE /api/playlists/{id}`, `DELETE /api/playlists/{id}/transcripts` | Delete a playlist; clear its transcripts |

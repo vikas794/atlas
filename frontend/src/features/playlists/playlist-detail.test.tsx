@@ -298,6 +298,25 @@ describe('PlaylistDetail states', () => {
 })
 
 describe('PlaylistDetail actions', () => {
+  it('retries all failed videos of this playlist', async () => {
+    const api = setup({ counts: { failed: 2 } })
+    api.on('POST', '/api/playlists/1/retry-failed', { status: 'ok', message: 'ok', count: 2 })
+    const user = userEvent.setup()
+    renderRoute('/playlists/1')
+
+    await user.click(await screen.findByRole('button', { name: 'Retry all failed (2)' }))
+
+    await waitFor(() => expect(api.callsTo('POST', '/api/playlists/1/retry-failed')).toHaveLength(1))
+    expect(await screen.findByText('Queued 2 failed videos for retry.')).toBeInTheDocument()
+  })
+
+  it('disables Retry all failed when this playlist has no failed videos', async () => {
+    setup({ counts: { failed: 0 } })
+    renderRoute('/playlists/1')
+
+    expect(await screen.findByRole('button', { name: 'Retry all failed' })).toBeDisabled()
+  })
+
   it('explains why Approve all is disabled', async () => {
     setup({ counts: { pending_review: 0 } })
     renderRoute('/playlists/1')

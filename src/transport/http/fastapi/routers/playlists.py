@@ -11,6 +11,7 @@ from src.application.use_cases.playlist.actions import (
     CleanupTranscriptsUseCase,
     DeletePlaylistUseCase,
     ReprocessPlaylistUseCase,
+    RetryAllFailedUseCase,
 )
 from src.application.use_cases.playlist.ingest import IngestPlaylistUseCase
 from src.application.use_cases.playlist.publish import PublishPlaylistUseCase
@@ -26,6 +27,7 @@ from src.transport.http.fastapi.dependencies import (
     get_playlist_repo,
     get_publish_playlist_use_case,
     get_reprocess_playlist_use_case,
+    get_retry_all_failed_use_case,
     get_worker,
 )
 from src.transport.http.fastapi.schemas.playlists import (
@@ -46,6 +48,7 @@ IngestDep = Annotated[IngestPlaylistUseCase, Depends(get_ingest_playlist_use_cas
 ReprocessDep = Annotated[ReprocessPlaylistUseCase, Depends(get_reprocess_playlist_use_case)]
 DeleteDep = Annotated[DeletePlaylistUseCase, Depends(get_delete_playlist_use_case)]
 ApproveAllDep = Annotated[ApproveAllUseCase, Depends(get_approve_all_use_case)]
+RetryAllDep = Annotated[RetryAllFailedUseCase, Depends(get_retry_all_failed_use_case)]
 CleanupDep = Annotated[CleanupTranscriptsUseCase, Depends(get_cleanup_transcripts_use_case)]
 PublishDep = Annotated[PublishPlaylistUseCase, Depends(get_publish_playlist_use_case)]
 
@@ -207,6 +210,19 @@ async def delete_playlist(
     if not deleted:
         raise _not_found(playlist_id)
     return ActionResponse(status="ok", message="Playlist deleted successfully")
+
+
+@router.post("/{playlist_id}/retry-failed", response_model=ActionResponse)
+async def retry_failed_videos(
+    playlist_id: int,
+    use_case: RetryAllDep,
+    worker: WorkerDep,
+) -> ActionResponse:
+    """Re-queue every failed video of this playlist (skips removed-upstream ones)."""
+    count = await use_case.execute(playlist_id)
+    if count:
+        worker.wake()
+    return ActionResponse(status="ok", message=f"Queued {count} videos for retry", count=count)
 
 
 @router.post("/{playlist_id}/approve-all", response_model=ActionResponse)

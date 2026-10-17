@@ -139,13 +139,15 @@ class RetryVideoUseCase:
 
 
 class RetryAllFailedUseCase:
-    """Re-queue every failed video across all playlists (bulk manual retry)."""
+    """Re-queue every failed video, in one playlist or across all (bulk manual retry)."""
 
     def __init__(self, repo: PlaylistRepositoryPort) -> None:
         self.repo = repo
 
-    async def execute(self) -> int:
-        return await self.repo.requeue_all_failed()
+    async def execute(self, playlist_pk: int | None = None) -> int:
+        if playlist_pk is not None and await self.repo.get_playlist(playlist_pk) is None:
+            raise NotFoundError(f"Playlist {playlist_pk} not found")
+        return await self.repo.requeue_all_failed(playlist_pk)
 
 
 class RegenerateVideoUseCase:

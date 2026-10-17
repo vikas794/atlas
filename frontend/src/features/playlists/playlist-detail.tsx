@@ -23,6 +23,7 @@ import {
   ingestPlaylist,
   processPlaylist,
   reprocessPlaylist,
+  retryPlaylistFailedVideos,
 } from '../../lib/api'
 import { failureMessage, isNotFound } from '../../lib/errors'
 import { formatPosition, pluralize } from '../../lib/format'
@@ -161,6 +162,15 @@ export function PlaylistDetail() {
     onError: (err) => toast(failureMessage('Could not approve the videos', err), 'error'),
   })
 
+  const retryAllMut = useMutation({
+    mutationFn: () => retryPlaylistFailedVideos(playlistId),
+    onSuccess: (res) => {
+      toast(`Queued ${pluralize(res.count ?? 0, 'failed video')} for retry.`)
+      void refresh()
+    },
+    onError: (err) => toast(failureMessage('Could not retry the failed videos', err), 'error'),
+  })
+
   const resyncMut = useMutation({
     mutationFn: (target: Playlist) =>
       ingestPlaylist(target.source_url).then((updated) => ({ updated, target })),
@@ -273,6 +283,8 @@ export function PlaylistDetail() {
   const lastShown = Math.min(page * PAGE_SIZE, totalVideos)
 
   const processReason = queuedCount === 0 ? 'No videos are queued' : null
+  const failedCount = counts.failed ?? 0
+  const retryReason = failedCount === 0 ? 'No failed videos' : null
   const approveReason = pendingCount === 0 ? 'No videos are waiting for review' : null
   const publishReason = isPublishing
     ? 'Publishing is already running'
@@ -325,6 +337,17 @@ export function PlaylistDetail() {
             >
               <Play aria-hidden="true" className="size-icon" />
               Process
+            </Button>
+          </DisabledReason>
+
+          <DisabledReason reason={retryAllMut.isPending ? null : retryReason}>
+            <Button
+              variant="secondary"
+              onClick={() => retryAllMut.mutate()}
+              disabled={retryAllMut.isPending || retryReason !== null}
+            >
+              <RotateCw aria-hidden="true" className="size-icon" />
+              {failedCount > 0 ? `Retry all failed (${failedCount})` : 'Retry all failed'}
             </Button>
           </DisabledReason>
 

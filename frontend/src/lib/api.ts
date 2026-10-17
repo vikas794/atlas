@@ -117,6 +117,10 @@ export function retryAllFailedVideos() {
   return request<ActionResponse>('/api/videos/retry-failed', { method: 'POST' })
 }
 
+export function retryPlaylistFailedVideos(playlistId: number) {
+  return request<ActionResponse>(`/api/playlists/${playlistId}/retry-failed`, { method: 'POST' })
+}
+
 export function approveAllVideos(playlistId: number) {
   return request<ActionResponse>(`/api/playlists/${playlistId}/approve-all`, {
     method: 'POST',

@@ -266,6 +266,22 @@ def test_retry_all_failed_requeues_every_failed_video_and_wakes_the_worker(
     assert idle_worker._wake_event.is_set()
 
 
+def test_playlist_retry_failed_only_touches_that_playlist(client: TestClient) -> None:
+    first = ingest(client)
+    video_id = videos_of(client, first["id"])[0]["id"]
+    repo = deps.get_playlist_repo()
+    repo_call(repo.update_stage, video_id, Stage.FAILED, failure_type=FailureType.RATE_LIMITED,
+              failure_kind=FailureKind.TRANSIENT, failure_reason="429")
+
+    other = client.post(f"/api/playlists/{first['id'] + 1000}/retry-failed")
+    assert other.status_code == 404
+    assert client.get(f"/api/videos/{video_id}").json()["stage"] == "failed"
+
+    resp = client.post(f"/api/playlists/{first['id']}/retry-failed")
+    assert resp.status_code == 200 and resp.json()["count"] == 1
+    assert client.get(f"/api/videos/{video_id}").json()["stage"] == "queued"
+
+
 def test_retry_all_failed_with_nothing_failed_is_a_no_op(client: TestClient) -> None:
     ingest(client)
 
