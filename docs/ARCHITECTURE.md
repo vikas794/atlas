@@ -58,7 +58,10 @@ transaction each by `storage/db.py::initialize` when the repository is first bui
 startup), and recorded in `schema_migrations`. Migration `0003` drops the legacy search-run
 tables; `0004` rebuilds `videos` (with foreign keys off) to one row per playlist position.
 Before the first pending migration on a database that already has migrations applied, a copy
-is written to `<db>.pre-<version>.bak`.
+is written to `<db>.pre-<version>.bak`. Migration `0005` adds `app_settings(key, value_json,
+updated_at)`: one row per setting changed on the Settings page. `load_settings` reads it
+(tolerantly: no file or table means no overrides) between `config.yaml` and the environment;
+`SqlSettingsRepository` writes it. See `docs/CONFIG.md`.
 
 Final schema (verified by migrating an empty database):
 
@@ -497,6 +500,11 @@ recovered on the next start.
 
 ## 8. Concurrency model
 
+- **Live settings.** Saving settings calls `dependencies.apply_settings`, which updates the
+  running worker (`max_concurrent_videos`, poll and shutdown times), `ProcessVideoUseCase`
+  (retries, backoff), the transcript provider's pacing and the Drive publisher's retry limits in
+  place, and rebuilds the cached settings loader and notes generator. The worker is mutated, not
+  rebuilt: the lifespan holds that instance.
 - **One process, one event loop.** The worker runs inside the uvicorn process as asyncio tasks
   (`backend/main.py` lifespan). There is no separate worker process or queue service.
 - **Bounded video work.** At most `max_concurrent_videos` `ProcessVideoUseCase` tasks run at
@@ -531,6 +539,7 @@ recovered on the next start.
 | `POST /api/videos/{id}/approve`, `/retry`, `/regenerate` | User actions (regenerate is 202) |
 | `DELETE /api/videos/{id}/transcript` | Clear one transcript (text and subtitle file) |
 | `GET /api/drive/status`, `POST /api/drive/credentials`, `POST /api/drive/auth` | Drive state, upload the OAuth client JSON, run consent |
+| `GET/PUT/DELETE /api/settings` | Editable configuration: list with source and live/restart flags; validate and save; reset |
 | `GET /api/usage` | Usage ledger aggregates |
 | `GET /api/health`, `GET /api/diagnostics` | Liveness; readiness checks and the last 50 warnings/errors |
 | `DELETE /api/diagnostics/recent-errors` | Empty the in-memory warnings/errors buffer (204; `logs/atlas.log` is untouched) |

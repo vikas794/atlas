@@ -240,6 +240,24 @@ Doc is re-created on the next publish that includes it; a deleted or trashed ind
 re-created with every title. A publish only runs when something changed (a newly approved or
 edited video), so if nothing changed, nothing is re-created until then.
 
+## Settings page
+
+### A saved value does not change anything
+
+The field shows "Set by an environment variable": an `ATLAS_*` variable (or alias such as
+`GEMINI_MODEL`) in the shell or `.env` takes precedence over a saved value. Unset it and restart.
+Settings marked "Needs restart" (server, logging, paths) are saved but only used after a restart.
+
+### Settings were not saved (422)
+
+The message under the field is the rule that failed, for example `backoff_cap_seconds: must be at
+least backoff_base_seconds`. Nothing is saved until every value is valid.
+
+### Saved settings disappeared
+
+They live in the database (`app_settings`). Deleting or restoring an older `data/atlas.sqlite3`
+removes them; "Reset to defaults" removes them on purpose.
+
 ## Restarts and data
 
 ### Backend killed mid-run

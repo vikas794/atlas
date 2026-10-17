@@ -10,10 +10,20 @@ from backend.services.diagnostics import diagnostics_report
 from backend.spa import SpaFallback, default_dist_dir
 from src.config import load_settings
 from src.shared.logging_setup import RECENT_ERRORS, configure_logging
-from src.transport.http.fastapi.dependencies import get_usage_ledger, get_worker
+from src.transport.http.fastapi.dependencies import (
+    get_usage_ledger,
+    get_worker,
+    remember_boot_settings,
+)
 from src.transport.http.fastapi.errors import register_error_handlers
 from src.transport.http.fastapi.middleware import RequestLoggingMiddleware
-from src.transport.http.fastapi.routers import drive_auth, playlists, usage, videos
+from src.transport.http.fastapi.routers import (
+    drive_auth,
+    playlists,
+    settings,
+    usage,
+    videos,
+)
 from src.transport.http.fastapi.schemas.diagnostics import DiagnosticsResponse
 
 # Under uvicorn only uvicorn's own loggers are configured; without this, every src.* log line
@@ -22,6 +32,7 @@ from src.transport.http.fastapi.schemas.diagnostics import DiagnosticsResponse
 # problems) when it is invalid, so a bad config stops startup here.
 _settings = load_settings()
 configure_logging(_settings)
+remember_boot_settings(_settings)
 
 
 @asynccontextmanager
@@ -76,6 +87,7 @@ register_error_handlers(app)
 # Include routers
 app.include_router(usage.router)
 app.include_router(drive_auth.router)
+app.include_router(settings.router)
 app.include_router(playlists.router)
 app.include_router(videos.router)
 

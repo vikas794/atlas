@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { Summary, Video } from '../../lib/types'
 import {
@@ -458,5 +458,108 @@ describe('ReviewScreen actions', () => {
     expect(screen.getAllByRole('tooltip').map((node) => node.textContent)).toContain(
       'No other videos need review',
     )
+  })
+})
+
+describe('ReviewScreen focus mode', () => {
+  it('hides the breadcrumb and rail, shows a slim bar, and exits with Esc', async () => {
+    setup()
+    const user = userEvent.setup()
+    renderRoute('/playlists/1/review/1')
+
+    await screen.findByRole('heading', { level: 1, name: '#001 Video 1' })
+    await user.click(screen.getByRole('button', { name: 'Focus mode' }))
+
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: '#001 Video 1' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument()
+    expect(screen.queryByText(/^Model:/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Previous video' })).toBeDisabled()
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(await screen.findByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument()
+  })
+
+  it('toggles with F, ignores F while typing, and persists the choice', async () => {
+    setup()
+    const user = userEvent.setup()
+    const first = renderRoute('/playlists/1/review/1')
+
+    const textarea = await openEditor(user)
+    await user.type(textarea, 'f')
+    expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument()
+
+    textarea.blur()
+    fireEvent.keyDown(document.body, { key: 'f' })
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).not.toBeInTheDocument()
+    expect(window.localStorage.getItem('atlas.review.focus')).toBe('1')
+
+    first.unmount()
+    renderRoute('/playlists/1/review/1')
+    await screen.findByRole('heading', { level: 1, name: '#001 Video 1' })
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the unsaved draft when toggling focus mode', async () => {
+    setup()
+    const user = userEvent.setup()
+    renderRoute('/playlists/1/review/1')
+
+    await user.type(await openEditor(user), ' more')
+    await user.click(screen.getByRole('button', { name: 'Focus mode' }))
+
+    expect(screen.getByRole('textbox', { name: /edit notes/i })).toHaveValue('# Notes 1 more')
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+  })
+
+  it('moves between videos with the previous / next buttons', async () => {
+    setup()
+    const user = userEvent.setup()
+    const { router } = renderRoute('/playlists/1/review/1')
+
+    await screen.findByRole('heading', { level: 1, name: /#001/ })
+    await user.click(screen.getByRole('button', { name: 'Focus mode' }))
+    await user.click(screen.getByRole('button', { name: 'Next video' }))
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/playlists/1/review/2'))
+  })
+})
+
+describe('ReviewScreen reading width and fullscreen', () => {
+  it('uses the wide preview column with no toggle', async () => {
+    setup()
+    renderRoute('/playlists/1/review/1')
+
+    const column = (await screen.findByText('Notes 1')).closest('.mx-auto')
+    expect(column).toHaveClass('max-w-5xl')
+    expect(screen.queryByRole('button', { name: 'Wide column' })).not.toBeInTheDocument()
+  })
+
+  it('hides the fullscreen button when the browser cannot do it', async () => {
+    setup()
+    renderRoute('/playlists/1/review/1')
+
+    await screen.findByRole('heading', { level: 1, name: /#001/ })
+    expect(screen.queryByRole('button', { name: 'Browser fullscreen' })).not.toBeInTheDocument()
+  })
+
+  it('enters focus mode and requests browser fullscreen', async () => {
+    setup()
+    const request = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(document, 'fullscreenEnabled', { value: true, configurable: true })
+    document.documentElement.requestFullscreen = request
+    try {
+      const user = userEvent.setup()
+      renderRoute('/playlists/1/review/1')
+
+      await user.click(await screen.findByRole('button', { name: 'Browser fullscreen' }))
+
+      expect(request).toHaveBeenCalledTimes(1)
+      expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).not.toBeInTheDocument()
+    } finally {
+      Reflect.deleteProperty(document, 'fullscreenEnabled')
+      Reflect.deleteProperty(document.documentElement, 'requestFullscreen')
+    }
   })
 })

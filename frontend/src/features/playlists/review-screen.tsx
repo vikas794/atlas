@@ -6,13 +6,18 @@ import {
   ArrowLeft,
   Check,
   ChevronRight,
+  ChevronLeft,
   CloudUpload,
   Eraser,
+  Expand,
   ExternalLink,
   Loader,
+  Maximize2,
+  Minimize2,
   RotateCcw,
   RotateCw,
   Save,
+  Shrink,
 } from 'lucide-react'
 
 import {
@@ -33,6 +38,7 @@ import { isRetryScheduled, videoBadge, videoDetail } from '../../lib/stage-badge
 import { TONE_TEXT } from '../../lib/tone'
 import type { Video } from '../../lib/types'
 import { fetchAllPlaylistVideos } from '../../lib/video-queries'
+import { useStoredFlag } from '../../lib/use-stored-flag'
 import { cn } from '../../lib/utils'
 import { ActionMenu } from '../../components/shared/action-menu'
 import { ConfirmDialog } from '../../components/shared/confirm-dialog'
@@ -72,6 +78,9 @@ export function ReviewScreen() {
   const [confirmRegen, setConfirmRegen] = useState(false)
   const [clearTarget, setClearTarget] = useState<Video | null>(null)
   const [regenWatch, setRegenWatch] = useState<JobWatch | null>(null)
+  const [focus, setFocus] = useStoredFlag('atlas.review.focus')
+  const [isFullscreen, setIsFullscreen] = useState(() => Boolean(document.fullscreenElement))
+  const canFullscreen = document.fullscreenEnabled === true
 
   // 1. Playlist metadata (breadcrumb, publish counts).
   const { data: playlist } = useQuery({
@@ -230,24 +239,74 @@ export function ReviewScreen() {
     goToNextNeedingReview()
   }
 
+  // ---- Focus mode and browser fullscreen -----------------------------------------------------
+  const changeFocus = useCallback(
+    (next: boolean) => {
+      setFocus(next)
+      // Leaving focus mode also leaves browser fullscreen.
+      if (!next && document.fullscreenElement) void document.exitFullscreen().catch(() => {})
+    },
+    [setFocus],
+  )
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => {})
+      return
+    }
+    setFocus(true)
+    void document.documentElement.requestFullscreen().catch(() => {})
+  }
+
+  useEffect(() => {
+    const sync = () => setIsFullscreen(Boolean(document.fullscreenElement))
+    document.addEventListener('fullscreenchange', sync)
+    return () => {
+      document.removeEventListener('fullscreenchange', sync)
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
+    }
+  }, [])
+
   // Keyboard shortcuts read live state through a ref, so the listener is bound once.
-  const live = useRef({ canApprove: false, busy: false, isDirty: false, save, approveAndNext })
+  const live = useRef({
+    canApprove: false,
+    busy: false,
+    isDirty: false,
+    focus,
+    save,
+    approveAndNext,
+    changeFocus,
+  })
   useEffect(() => {
     live.current = {
       canApprove: currentVideo?.stage === 'pending_review' && Boolean(summary),
       busy: saveMut.isPending || approveMut.isPending,
       isDirty,
+      focus,
       save,
       approveAndNext,
+      changeFocus,
     }
   })
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.repeat || !(event.ctrlKey || event.metaKey)) return
+      if (event.repeat) return
       // A dialog (confirm, discard) owns the keyboard while it is open.
       if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return
-      const key = event.key.toLowerCase()
       const state = live.current
+      const key = event.key.toLowerCase()
+      if (!(event.ctrlKey || event.metaKey)) {
+        if (event.altKey || event.shiftKey) return
+        if (key === 'escape' && state.focus) {
+          state.changeFocus(false)
+        } else if (key === 'f') {
+          // Plain "F" toggles focus mode, except while typing in the editor or a field.
+          const target = event.target as HTMLElement | null
+          if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
+          state.changeFocus(!state.focus)
+        }
+        return
+      }
       if (key === 's') {
         event.preventDefault()
         if (state.isDirty && !state.busy) void state.save()
@@ -272,89 +331,137 @@ export function ReviewScreen() {
   const nextReason = nextId === null ? 'No other videos need review' : null
   const detail = currentVideo ? videoDetail(currentVideo) : null
 
+  // Plain previous / next by playlist order (focus mode has no rail).
+  const currentIndex = videos?.findIndex((video) => video.id === currentVideoPk) ?? -1
+  const prevVideoId = currentIndex > 0 ? (videos?.[currentIndex - 1]?.id ?? null) : null
+  const nextVideoId = currentIndex >= 0 ? (videos?.[currentIndex + 1]?.id ?? null) : null
+
+  const approveButton = currentVideo?.stage === 'pending_review' && (
+    <DisabledReason reason={!summary ? 'The notes have not loaded yet' : null}>
+      <Button
+        variant="primary"
+        onClick={() => void approveAndNext()}
+        disabled={isBusy || !summary}
+        title="Approve notes (Ctrl+Enter)"
+      >
+        <Check aria-hidden="true" className="size-icon" />
+        {isDirty ? 'Save and approve' : 'Approve'}
+      </Button>
+    </DisabledReason>
+  )
+
   return (
-    <div className="flex h-[calc(100vh-var(--topbar-height)-var(--space-5)*2)] min-h-96 flex-col gap-4">
+    <div
+      className={cn(
+        'flex flex-col gap-4',
+        focus
+          ? 'fixed inset-0 z-40 bg-bg p-4'
+          : 'h-[calc(100vh-var(--topbar-height)-var(--space-5)*2)] min-h-96',
+      )}
+    >
       {/* Breadcrumb */}
-      <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-label text-text-muted">
-        <Link to="/" className="hover:text-text hover:underline">
-          Playlists
-        </Link>
-        <span aria-hidden="true">/</span>
-        <Link to={`/playlists/${playlistId}`} className="hover:text-text hover:underline">
-          {playlist?.title || 'Playlist'}
-        </Link>
-        <span aria-hidden="true">/</span>
-        <span className="truncate text-text" aria-current="page">
-          {currentVideo ? `${positionLabel} ${currentVideo.title}` : 'Review'}
-        </span>
-      </nav>
+      {!focus && (
+        <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-label text-text-muted">
+          <Link to="/" className="hover:text-text hover:underline">
+            Playlists
+          </Link>
+          <span aria-hidden="true">/</span>
+          <Link to={`/playlists/${playlistId}`} className="hover:text-text hover:underline">
+            {playlist?.title || 'Playlist'}
+          </Link>
+          <span aria-hidden="true">/</span>
+          <span className="truncate text-text" aria-current="page">
+            {currentVideo ? `${positionLabel} ${currentVideo.title}` : 'Review'}
+          </span>
+        </nav>
+      )}
 
       <div className="flex min-h-0 flex-1 gap-4">
         {/* 6.3 Left rail */}
-        <aside
-          aria-label="Videos in this playlist"
-          className="hidden w-64 shrink-0 flex-col rounded border border-border bg-surface md:flex"
-        >
-          <div className="border-b border-border p-3">
-            <Link
-              to={`/playlists/${playlistId}`}
-              className="inline-flex items-center gap-2 text-label text-text-muted hover:text-text"
-            >
-              <ArrowLeft aria-hidden="true" className="size-icon" />
-              Back to playlist
-            </Link>
-            <h2 className="mt-2 text-label text-text-muted">
-              Videos{videos ? ` (${videos.length})` : ''}
-            </h2>
-          </div>
+        {!focus && (
+          <aside
+            aria-label="Videos in this playlist"
+            className="hidden w-64 shrink-0 flex-col rounded border border-border bg-surface md:flex"
+          >
+            <div className="border-b border-border p-3">
+              <Link
+                to={`/playlists/${playlistId}`}
+                className="inline-flex items-center gap-2 text-label text-text-muted hover:text-text"
+              >
+                <ArrowLeft aria-hidden="true" className="size-icon" />
+                Back to playlist
+              </Link>
+              <h2 className="mt-2 text-label text-text-muted">
+                Videos{videos ? ` (${videos.length})` : ''}
+              </h2>
+            </div>
 
-          <div className="flex-1 overflow-y-auto">
-            {!videos ? (
-              videosQuery.isError ? (
-                <ErrorState
-                  className="m-3"
-                  title="Could not load videos"
-                  onRetry={() => void videosQuery.refetch()}
-                />
-              ) : (
-                <SkeletonListRows />
-              )
-            ) : (
-              videos.map((video) => {
-                const isActive = video.id === currentVideoPk
-                const badge = videoBadge(video)
-                return (
-                  <Link
-                    key={video.id}
-                    ref={isActive ? activeRowRef : undefined}
-                    to={`/playlists/${playlistId}/review/${video.id}`}
-                    aria-current={isActive ? 'page' : undefined}
-                    className={cn(
-                      'flex h-row items-center gap-2 border-b border-l-2 border-border px-3 text-label transition',
-                      video.stage === 'pending_review'
-                        ? 'border-l-st-review-fg'
-                        : 'border-l-transparent',
-                      isActive ? 'bg-accent-soft text-text' : 'text-text hover:bg-surface-muted',
-                    )}
-                  >
-                    <StageDot spec={badge} />
-                    <span className="shrink-0 tabular-nums text-text-muted">
-                      {formatPosition(video.position)}
-                    </span>
-                    <span className="truncate">{video.title}</span>
-                  </Link>
+            <div className="flex-1 overflow-y-auto">
+              {!videos ? (
+                videosQuery.isError ? (
+                  <ErrorState
+                    className="m-3"
+                    title="Could not load videos"
+                    onRetry={() => void videosQuery.refetch()}
+                  />
+                ) : (
+                  <SkeletonListRows />
                 )
-              })
-            )}
-          </div>
-        </aside>
+              ) : (
+                videos.map((video) => {
+                  const isActive = video.id === currentVideoPk
+                  const badge = videoBadge(video)
+                  return (
+                    <Link
+                      key={video.id}
+                      ref={isActive ? activeRowRef : undefined}
+                      to={`/playlists/${playlistId}/review/${video.id}`}
+                      aria-current={isActive ? 'page' : undefined}
+                      className={cn(
+                        'flex h-row items-center gap-2 border-b border-l-2 border-border px-3 text-label transition',
+                        video.stage === 'pending_review'
+                          ? 'border-l-st-review-fg'
+                          : 'border-l-transparent',
+                        isActive ? 'bg-accent-soft text-text' : 'text-text hover:bg-surface-muted',
+                      )}
+                    >
+                      <StageDot spec={badge} />
+                      <span className="shrink-0 tabular-nums text-text-muted">
+                        {formatPosition(video.position)}
+                      </span>
+                      <span className="truncate">{video.title}</span>
+                    </Link>
+                  )
+                })
+              )}
+            </div>
+          </aside>
+        )}
 
         {/* 6.3 Right notes pane */}
         <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded border border-border bg-surface">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-3">
-                <h1 className="text-section text-text">
+          {focus ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  aria-label="Previous video"
+                  disabled={prevVideoId === null}
+                  onClick={() => navigate(`/playlists/${playlistId}/review/${prevVideoId}`)}
+                >
+                  <ChevronLeft aria-hidden="true" className="size-icon" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  aria-label="Next video"
+                  disabled={nextVideoId === null}
+                  onClick={() => navigate(`/playlists/${playlistId}/review/${nextVideoId}`)}
+                >
+                  <ChevronRight aria-hidden="true" className="size-icon" />
+                </Button>
+                <h1 className="truncate text-label font-medium text-text">
                   {currentVideo ? `${positionLabel} ${currentVideo.title}` : 'Review'}
                 </h1>
                 {currentVideo && (
@@ -366,82 +473,89 @@ export function ReviewScreen() {
                   />
                 )}
               </div>
-
-              <div className="mt-1 flex flex-wrap items-center gap-3 text-label text-text-muted">
-                {summary?.model && <span>Model: {summary.model}</span>}
-                {summary?.prompt_version && <span>Prompt: {summary.prompt_version}</span>}
-                {summary?.generated_at && (
-                  <RelativeTime iso={summary.generated_at} prefix="Generated" />
-                )}
-                {currentVideo && (
-                  <a
-                    href={`https://www.youtube.com/watch?v=${currentVideo.youtube_video_id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-accent hover:underline"
-                  >
-                    Open video
-                    <ExternalLink aria-hidden="true" className="size-icon" />
-                  </a>
-                )}
-              </div>
+              {approveButton}
             </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-3">
+                  <h1 className="text-section text-text">
+                    {currentVideo ? `${positionLabel} ${currentVideo.title}` : 'Review'}
+                  </h1>
+                  {currentVideo && (
+                    <StatusBadge
+                      stage={currentVideo.stage}
+                      failureKind={currentVideo.failure_kind}
+                      retryScheduled={isRetryScheduled(currentVideo)}
+                      removedUpstream={currentVideo.removed_upstream}
+                    />
+                  )}
+                </div>
 
-            <div className="flex items-center gap-2">
-              {currentVideo?.stage === 'pending_review' && (
-                <DisabledReason reason={!summary ? 'The notes have not loaded yet' : null}>
-                  <Button
-                    variant="primary"
-                    onClick={() => void approveAndNext()}
-                    disabled={isBusy || !summary}
-                    title="Approve notes (Ctrl+Enter)"
-                  >
-                    <Check aria-hidden="true" className="size-icon" />
-                    {isDirty ? 'Save and approve' : 'Approve'}
-                  </Button>
-                </DisabledReason>
-              )}
+                <div className="mt-1 flex flex-wrap items-center gap-3 text-label text-text-muted">
+                  {summary?.model && <span>Model: {summary.model}</span>}
+                  {summary?.prompt_version && <span>Prompt: {summary.prompt_version}</span>}
+                  {summary?.generated_at && (
+                    <RelativeTime iso={summary.generated_at} prefix="Generated" />
+                  )}
+                  {currentVideo && (
+                    <a
+                      href={`https://www.youtube.com/watch?v=${currentVideo.youtube_video_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-accent hover:underline"
+                    >
+                      Open video
+                      <ExternalLink aria-hidden="true" className="size-icon" />
+                    </a>
+                  )}
+                </div>
+              </div>
 
-              <Button
-                variant="secondary"
-                onClick={() => setConfirmRegen(true)}
-                disabled={isRegenerating || !currentVideo}
-                title="Regenerate notes from the stored transcript"
-              >
-                {isRegenerating ? (
-                  <Loader aria-hidden="true" className="size-icon atlas-spin" />
-                ) : (
-                  <RotateCcw aria-hidden="true" className="size-icon" />
-                )}
-                {isRegenerating ? 'Regenerating…' : 'Regenerate'}
-              </Button>
+              <div className="flex items-center gap-2">
+                {approveButton}
 
-              <DisabledReason reason={nextReason}>
                 <Button
                   variant="secondary"
-                  onClick={goToNextNeedingReview}
-                  disabled={nextId === null}
+                  onClick={() => setConfirmRegen(true)}
+                  disabled={isRegenerating || !currentVideo}
+                  title="Regenerate notes from the stored transcript"
                 >
-                  Next needing review
-                  <ChevronRight aria-hidden="true" className="size-icon" />
+                  {isRegenerating ? (
+                    <Loader aria-hidden="true" className="size-icon atlas-spin" />
+                  ) : (
+                    <RotateCcw aria-hidden="true" className="size-icon" />
+                  )}
+                  {isRegenerating ? 'Regenerating…' : 'Regenerate'}
                 </Button>
-              </DisabledReason>
 
-              <ActionMenu
-                label="More actions"
-                actions={[
-                  {
-                    key: 'clear-transcript',
-                    label: 'Clear transcript',
-                    icon: Eraser,
-                    danger: true,
-                    disabled: !currentVideo,
-                    onSelect: () => currentVideo && setClearTarget(currentVideo),
-                  },
-                ]}
-              />
+                <DisabledReason reason={nextReason}>
+                  <Button
+                    variant="secondary"
+                    onClick={goToNextNeedingReview}
+                    disabled={nextId === null}
+                  >
+                    Next needing review
+                    <ChevronRight aria-hidden="true" className="size-icon" />
+                  </Button>
+                </DisabledReason>
+
+                <ActionMenu
+                  label="More actions"
+                  actions={[
+                    {
+                      key: 'clear-transcript',
+                      label: 'Clear transcript',
+                      icon: Eraser,
+                      danger: true,
+                      disabled: !currentVideo,
+                      onSelect: () => currentVideo && setClearTarget(currentVideo),
+                    },
+                  ]}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Failure reason for a failed video */}
           {detail?.reason && currentVideo?.stage === 'failed' && (
@@ -528,6 +642,42 @@ export function ReviewScreen() {
             </div>
 
             <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  aria-pressed={focus}
+                  aria-label="Focus mode"
+                  title={focus ? 'Exit focus mode (Esc or F)' : 'Focus mode (F)'}
+                  onClick={() => changeFocus(!focus)}
+                >
+                  {focus ? (
+                    <Minimize2 aria-hidden="true" className="size-icon" />
+                  ) : (
+                    <Maximize2 aria-hidden="true" className="size-icon" />
+                  )}
+                </Button>
+                {canFullscreen && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    aria-pressed={isFullscreen}
+                    aria-label="Browser fullscreen"
+                    title={
+                      isFullscreen
+                        ? 'Exit browser fullscreen (Esc)'
+                        : 'Browser fullscreen (hides tabs and bookmarks too)'
+                    }
+                    onClick={toggleFullscreen}
+                  >
+                    {isFullscreen ? (
+                      <Shrink aria-hidden="true" className="size-icon" />
+                    ) : (
+                      <Expand aria-hidden="true" className="size-icon" />
+                    )}
+                  </Button>
+                )}
+              </div>
               {isDirty && <span className="text-label text-st-review-fg">Unsaved changes</span>}
               <DisabledReason reason={!isDirty ? 'No unsaved changes' : null}>
                 <Button
@@ -586,7 +736,7 @@ export function ReviewScreen() {
                 onRetry={() => void summaryQuery.refetch()}
               />
             ) : mode === 'preview' ? (
-              <div className="mx-auto max-w-3xl">
+              <div className="mx-auto max-w-5xl">
                 <MarkdownBody markdown={editedContent} />
               </div>
             ) : (

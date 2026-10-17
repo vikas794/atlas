@@ -26,7 +26,7 @@ from src.application.use_cases.playlist.ingest import IngestPlaylistUseCase
 from src.application.use_cases.playlist.process_video import ProcessVideoUseCase
 from src.application.use_cases.playlist.publish import PublishPlaylistUseCase
 from src.application.worker import PlaylistWorker
-from src.config import load_settings
+from src.config import AtlasSettings, load_settings
 from src.config.settings import SettingsLoader, repo_root
 from src.domain.exceptions import ConfigurationError
 from src.domain.interfaces.drive_publisher import DrivePublisherPort
@@ -40,6 +40,7 @@ from src.infrastructure.google.drive import GoogleDriveExporter
 from src.infrastructure.google.publisher import GoogleDrivePublisher
 from src.infrastructure.llm.factory import build_notes_generator
 from src.infrastructure.storage.playlist_repo import PlaylistRepository
+from src.infrastructure.storage.settings_repo import SqlSettingsRepository
 from src.infrastructure.storage.sql import SqlUsageLedger
 from src.shared.api_keys import reset_pools
 from src.shared.files import delete_files
@@ -248,10 +249,79 @@ def get_worker() -> PlaylistWorker:
     return _worker
 
 
+@lru_cache(maxsize=1)
+def get_settings_repo() -> SqlSettingsRepository:
+    """The store of UI-edited setting overrides (runs migrations on first use)."""
+    return SqlSettingsRepository(get_storage_settings()["database_path"])
+
+
+_boot_settings: AtlasSettings | None = None
+
+
+def remember_boot_settings(settings: AtlasSettings) -> None:
+    """Record what the process started with, to tell which saved changes still need a restart."""
+    global _boot_settings
+    _boot_settings = settings
+
+
+def get_boot_settings() -> AtlasSettings:
+    global _boot_settings
+    if _boot_settings is None:
+        _boot_settings = load_settings()
+    return _boot_settings
+
+
+def apply_settings(settings: AtlasSettings) -> None:
+    """Push saved settings into the running app (everything flagged ``live``).
+
+    Plain attributes on the live worker, use case, transcript provider and Drive publisher are
+    updated in place; running jobs finish with the values they started with. The cached loader
+    and notes generator are rebuilt so the model and request timeout follow. Restart-only
+    settings (server, logging, paths) are untouched.
+    """
+    from src.transport.http.fastapi.schemas.playlists import _max_auto_retries
+
+    _max_auto_retries.cache_clear()
+    for factory in (get_settings_loader, get_notes_generator):
+        # Tests replace factories with plain functions that have no cache.
+        getattr(factory, "cache_clear", lambda: None)()
+
+    worker = _worker
+    if worker is None:
+        return
+    worker.max_concurrent_videos = max(1, settings.max_concurrent_videos)
+    worker.poll_interval_seconds = settings.worker_poll_interval_seconds
+    worker.shutdown_timeout_seconds = settings.worker_shutdown_timeout_seconds
+
+    use_case = worker.process_video
+    use_case.max_auto_retries = settings.max_auto_retries
+    use_case.backoff_base_seconds = settings.backoff_base_seconds
+    use_case.backoff_cap_seconds = settings.backoff_cap_seconds
+    use_case.rate_limit_max_auto_retries = settings.rate_limit_max_auto_retries
+    use_case.rate_limit_backoff_base_seconds = settings.rate_limit_backoff_base_seconds
+    use_case.rate_limit_backoff_cap_seconds = settings.rate_limit_backoff_cap_seconds
+    try:
+        use_case.notes_generator = get_notes_generator()
+    except ConfigurationError:
+        pass  # keys missing: keep the generator that works; the next run reports it
+    provider = use_case.transcript_provider
+    if hasattr(provider, "_min_interval"):
+        provider._min_interval = max(0.0, settings.transcript_min_interval_seconds)
+        provider._settings = get_settings_loader()
+
+    publisher = getattr(worker.publish, "publisher", None)
+    if publisher is not None and hasattr(publisher, "max_retries"):
+        publisher.max_retries = settings.drive_max_retries
+        publisher.backoff_base = settings.drive_backoff_base_seconds
+        publisher.backoff_cap = settings.drive_backoff_cap_seconds
+    worker.wake()
+
+
 #: The cached factories, captured at import so a test that monkeypatches a module attribute
 #: cannot make the reset miss (or choke on) the original.
 _CACHED_FACTORIES = (
     get_settings_loader,
+    get_settings_repo,
     get_playlist_repo,
     get_transcript_provider,
     get_notes_generator,
@@ -262,9 +332,10 @@ _CACHED_FACTORIES = (
 
 def reset_dependency_caches() -> None:
     """Forget every cached singleton (tests, and re-reading settings after an env change)."""
-    global _worker, _youtube_provider
+    global _worker, _youtube_provider, _boot_settings
     _worker = None
     _youtube_provider = None
+    _boot_settings = None
     reset_pools()
     for cached in _CACHED_FACTORIES:
         cached.cache_clear()

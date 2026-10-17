@@ -3,9 +3,12 @@ import type {
   DiagnosticsResponse,
   DriveActionResponse,
   DriveStatusResponse,
+  ModelListResponse,
   Playlist,
   PlaylistListResponse,
   PublishResponse,
+  SettingsResponse,
+  SettingValue,
   Stage,
   Summary,
   UsageAggregateResponse,
@@ -188,6 +191,30 @@ export function authenticateDrive() {
   return request<DriveActionResponse>('/api/drive/auth', {
     method: 'POST',
   })
+}
+
+/* ---------------------------------------------------------------- Settings */
+
+export function getSettings() {
+  return request<SettingsResponse>('/api/settings')
+}
+
+/** Saves the given settings; a 422 names each bad one in `ApiError.details.fields`. */
+export function updateSettings(values: Record<string, SettingValue>) {
+  return request<SettingsResponse>('/api/settings', {
+    method: 'PUT',
+    body: JSON.stringify({ values }),
+  })
+}
+
+/** Forgets every saved change: values fall back to config.yaml and the defaults. */
+export function resetSettings() {
+  return request<SettingsResponse>('/api/settings', { method: 'DELETE' })
+}
+
+/** Models selectable for the notes provider (Gemini: fixed list; OmniRoute: fetched live). */
+export function getModels(provider: string) {
+  return request<ModelListResponse>(`/api/settings/models?provider=${encodeURIComponent(provider)}`)
 }
 
 /* ------------------------------------------------------------- Diagnostics */

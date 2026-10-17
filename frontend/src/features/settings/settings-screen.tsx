@@ -1,3 +1,4 @@
+import { AppConfigPanel } from './app-config-panel'
 import { GoogleAuthPanel } from './google-auth-panel'
 import { UsageDashboard } from '../usage/usage-dashboard'
 
@@ -6,6 +7,7 @@ export function SettingsScreen() {
     <div className="space-y-5">
       <h1 className="text-page text-text">Settings</h1>
       <GoogleAuthPanel />
+      <AppConfigPanel />
       <UsageDashboard />
     </div>
   )

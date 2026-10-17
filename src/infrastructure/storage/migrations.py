@@ -359,6 +359,20 @@ MIGRATIONS: list[tuple[str, list[str]]] = [
             "CREATE INDEX idx_videos_duplicate_of ON videos(duplicate_of_video_id)",
         ],
     ),
+    (
+        "0005_app_settings",
+        [
+            # UI-edited setting overrides (one row per changed setting). No row means the
+            # value comes from config.yaml / the default; env vars still win over a row.
+            """
+            CREATE TABLE app_settings (
+                key TEXT PRIMARY KEY,
+                value_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """,
+        ],
+    ),
 ]
 
 #: Migrations that must run with ``PRAGMA foreign_keys = OFF`` (the pragma is a

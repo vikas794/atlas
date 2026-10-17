@@ -35,7 +35,17 @@ DEFAULT_INPUT_TOKEN_LIMIT = 128_000
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
 DEFAULT_OPENROUTER_MODEL = "openai/gpt-5-mini"
 DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_OMNIROUTE_BASE_URL = "http://localhost:20128/v1"
 _DEFAULT_GEMINI_INPUT_TOKEN_LIMIT = 1_000_000
+
+#: The Gemini models offered in the UI dropdown (newest first).
+GEMINI_MODEL_CHOICES = (
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
+    "gemini-3-flash-preview",
+    "gemini-flash-latest",
+    "gemini-3.1-pro-preview",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,11 +59,13 @@ class ModelSpec:
     #: Custom endpoint for OpenAI-compatible gateways; ``None`` for the provider's own.
     api_base: str | None = None
     input_token_limit: int = DEFAULT_INPUT_TOKEN_LIMIT
+    #: Identity to record when it differs from the LiteLLM prefix (OmniRoute is ``openai/...``).
+    provider_name: str | None = None
 
     @property
     def provider(self) -> str:
         """Provider identity stored on ``Summary.provider`` and the usage ledger."""
-        return self.litellm_model.split("/", 1)[0].strip().lower()
+        return self.provider_name or self.litellm_model.split("/", 1)[0].strip().lower()
 
     @property
     def model(self) -> str:
@@ -63,7 +75,12 @@ class ModelSpec:
     @property
     def label(self) -> str:
         """Human label for messages and logs, e.g. ``Gemini`` or ``OpenRouter``."""
-        names = {"openrouter": "OpenRouter", "openai": "OpenAI", "gemini": "Gemini"}
+        names = {
+            "openrouter": "OpenRouter",
+            "openai": "OpenAI",
+            "gemini": "Gemini",
+            "omniroute": "OmniRoute",
+        }
         return names.get(self.provider, self.provider.capitalize())
 
 
@@ -135,9 +152,30 @@ def _legacy_spec(settings: SettingsLoader) -> ModelSpec:
                 or DEFAULT_INPUT_TOKEN_LIMIT
             ),
         )
+    if provider == "omniroute":
+        name = explicit or str(settings("omniroute_model", "") or "").strip()
+        if not name:
+            raise ValueError(
+                "No OmniRoute model is selected. Pick one in Settings > Notes generation "
+                "(or set omniroute_model)."
+            )
+        base = str(settings("omniroute_base_url", "") or "").strip()
+        return ModelSpec(
+            litellm_model=f"openai/{name}",
+            api_key_env=str(settings("omniroute_api_key_env", "OMNIROUTE_API_KEY")),
+            api_base=base or DEFAULT_OMNIROUTE_BASE_URL,
+            input_token_limit=int(
+                cast(
+                    int | str,
+                    settings("omniroute_input_token_limit", DEFAULT_INPUT_TOKEN_LIMIT),
+                )
+                or DEFAULT_INPUT_TOKEN_LIMIT
+            ),
+            provider_name="omniroute",
+        )
     raise ValueError(
         f"Unknown notes_provider {provider!r} (from settings 'notes_provider'); supported "
-        "providers are: gemini, openrouter. Or list models in 'notes_models'."
+        "providers are: gemini, openrouter, omniroute. Or list models in 'notes_models'."
     )
 
 
@@ -145,6 +183,8 @@ __all__ = [
     "DEFAULT_GEMINI_MODEL",
     "DEFAULT_INPUT_TOKEN_LIMIT",
     "DEFAULT_OPENROUTER_MODEL",
+    "DEFAULT_OMNIROUTE_BASE_URL",
+    "GEMINI_MODEL_CHOICES",
     "ModelSpec",
     "default_key_env",
     "resolve_model_specs",

@@ -11,6 +11,8 @@ export const queryKeys = {
   videosAll: (id: number) => ['playlist-videos', id, 'all'] as const,
   summary: (videoId: number) => ['video-summary', videoId] as const,
   diagnostics: ['diagnostics'] as const,
+  settings: ['settings'] as const,
+  models: (provider: string) => ['settings', 'models', provider] as const,
 }
 
 /** After anything that changes a playlist or its videos (process, reprocess, publish, resync...). */

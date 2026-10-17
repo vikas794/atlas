@@ -223,6 +223,49 @@ export interface UsageAggregateResponse {
   time_range: UsageTimeRange | null
 }
 
+/* ---------------------------------------------------------------- Settings */
+
+export type SettingKind = 'int' | 'float' | 'bool' | 'list' | 'text'
+export type SettingSource = 'default' | 'yaml' | 'db' | 'env'
+export type SettingValue = string | number | boolean
+
+export interface SettingGroup {
+  id: string
+  label: string
+}
+
+export interface SettingField {
+  key: string
+  group: string
+  label: string
+  help: string
+  kind: SettingKind
+  unit: string
+  choices: string[]
+  minimum: number | null
+  /** `live` takes effect on save; `restart` needs a restart. */
+  apply: 'live' | 'restart'
+  /** False when only config.yaml or the environment can change it. */
+  editable: boolean
+  value: SettingValue
+  /** The value with no saved change (config.yaml, else the built-in default). */
+  default: SettingValue
+  source: SettingSource
+  /** An environment variable decides the value, so a saved change would be ignored. */
+  locked: boolean
+}
+
+export interface SettingsResponse {
+  groups: SettingGroup[]
+  fields: SettingField[]
+  restart_required: boolean
+}
+
+export interface ModelListResponse {
+  provider: string
+  models: string[]
+}
+
 /* ------------------------------------------------------------- Diagnostics */
 
 export type DiagnosticStatus = 'ok' | 'warning' | 'error'

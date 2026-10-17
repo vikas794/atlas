@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sqlite3
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, Protocol
@@ -12,7 +13,7 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-NOTES_PROVIDERS = ("gemini", "openrouter")
+NOTES_PROVIDERS = ("gemini", "openrouter", "omniroute")
 #: Keys an entry of ``notes_models`` may carry (see ``AtlasSettings.notes_models``).
 NOTES_MODEL_KEYS = ("model", "api_key_env", "api_base", "input_token_limit")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
@@ -90,6 +91,7 @@ class AtlasSettings:
     openrouter_api_key_env: str = "OPENROUTER_API_KEY"
     youtube_api_key_env: str = "YOUTUBE_API_KEY"
     gemini_api_key_env: str = "GEMINI_API_KEY"
+    omniroute_api_key_env: str = "OMNIROUTE_API_KEY"
 
     # --- Google OAuth ----------------------------------------------------
     google_creds_path: str = "credentials.json"
@@ -123,6 +125,12 @@ class AtlasSettings:
     openrouter_model: str = ""  # used when notes_model is empty
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_input_token_limit: int = 128000
+    #: OmniRoute: an OpenAI-compatible gateway. Notes go to ``omniroute_base_url``; the model
+    #: list for the UI is read from ``omniroute_models_url`` (empty -> the base URL).
+    omniroute_model: str = ""
+    omniroute_base_url: str = "http://localhost:20128/v1"
+    omniroute_models_url: str = ""
+    omniroute_input_token_limit: int = 128000
     notes_prompt_name: str = "notes_v1_1.yaml"  # the prompt file's own `version` is recorded
     notes_request_timeout_seconds: float = 300.0  # a hung LLM call must not hold a slot forever
 
@@ -224,6 +232,7 @@ class AtlasSettings:
             "database_path", "google_creds_path", "google_token_path", "transcript_output_folder",
             "prompts_base_dir", "notes_prompt_name", "log_file", "transcript_language",
             "gemini_api_key_env", "youtube_api_key_env", "openrouter_api_key_env",
+            "omniroute_api_key_env",
         ):  # fmt: skip
             need(bool(str(getattr(self, name)).strip()), name, "must not be empty")
         need(self.notes_provider in NOTES_PROVIDERS, "notes_provider",
@@ -251,7 +260,10 @@ class AtlasSettings:
              "must be greater than 0")  # fmt: skip
         need(self.worker_poll_interval_seconds > 0, "worker_poll_interval_seconds",
              "must be greater than 0")  # fmt: skip
-        for name in ("gemini_input_token_limit", "openrouter_input_token_limit"):
+        for name in (
+            "gemini_input_token_limit", "openrouter_input_token_limit",
+            "omniroute_input_token_limit",
+        ):  # fmt: skip
             need(getattr(self, name) >= 1, name, "must be at least 1")
         found.extend(self._notes_models_problems())
         prompts_dir = Path(self.prompts_base_dir)
@@ -284,6 +296,10 @@ ENV_ALIASES: dict[str, str] = {
     "OPENROUTER_MODEL": "openrouter_model",
     "OPENROUTER_BASE_URL": "openrouter_base_url",
     "OPENROUTER_INPUT_TOKEN_LIMIT": "openrouter_input_token_limit",
+    "OMNIROUTE_MODEL": "omniroute_model",
+    "OMNIROUTE_BASE_URL": "omniroute_base_url",
+    "OMNIROUTE_MODELS_URL": "omniroute_models_url",
+    "OMNIROUTE_INPUT_TOKEN_LIMIT": "omniroute_input_token_limit",
 }
 
 # Older ``ATLAS_*`` names that predate the field names and must keep working
@@ -374,6 +390,20 @@ def _check_yaml_value(name: str, value: Any) -> str | None:
     return None if ok else f"{name}: expected {expected} (got {value!r})"
 
 
+#: Public views of the field typing for the settings editor.
+FIELD_TYPES = _FIELD_TYPES
+check_value = _check_yaml_value
+
+
+def field_kind(name: str) -> str:
+    """``int`` | ``float`` | ``bool`` | ``list`` | ``text`` for a settings field."""
+    declared = _FIELD_TYPES[name]
+    for kind in ("bool", "list", "int", "float"):
+        if declared.startswith(kind):
+            return kind
+    return "text"
+
+
 def _read_yaml(config_path: Path, problems: list[str]) -> dict[str, Any]:
     """The valid entries of the YAML file; every unreadable/unknown/mistyped one is a problem."""
     try:
@@ -452,15 +482,66 @@ class _AtlasSettingsLoader:
         return default
 
 
-def load_settings(config_path: str | Path | None = None) -> AtlasSettings:
-    """Load settings from config.yaml with environment variable overrides.
+@dataclass(frozen=True)
+class SettingsLayers:
+    """The configuration layers, lowest to highest precedence: yaml < db < env."""
 
-    ``.env`` is loaded first (without overriding real environment variables) so
-    that secrets and overrides defined there are visible to the env scan below.
-    When ``config_path`` is None the YAML is read from
-    ``<repo_root>/src/configs/config.yaml``, resolved from this module's location
-    so the result does not depend on the current working directory.
+    config_name: str
+    yaml: dict[str, Any]
+    db: dict[str, Any]
+    env: dict[str, Any]
+    problems: list[str]
+
+    def merged(self, db: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Effective values; ``db`` substitutes the stored overrides (for what-if validation)."""
+        return {**self.yaml, **(self.db if db is None else db), **self.env}
+
+
+def _resolve_db_path(raw: str) -> Path:
+    path = Path(raw)
+    return path if path.is_absolute() else repo_root() / path
+
+
+def _read_db_overrides(db_path: Path, problems: list[str]) -> dict[str, Any]:
+    """UI-edited overrides from the ``app_settings`` table.
+
+    Tolerant by design: no database file or no table yet (a fresh install, or a database that
+    predates migration 0005) simply means no overrides. Settings must stay loadable even when
+    the store is not, so this reads with plain ``sqlite3`` and never creates anything.
     """
+    if not db_path.is_file():
+        return {}
+    try:
+        conn = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True, timeout=5.0)
+    except sqlite3.Error:
+        logger.warning("Could not open %s to read saved settings", db_path, exc_info=True)
+        return {}
+    try:
+        rows = conn.execute("SELECT key, value_json FROM app_settings").fetchall()
+    except sqlite3.Error:
+        return {}  # table not created yet
+    finally:
+        conn.close()
+    valid: dict[str, Any] = {}
+    for key, raw in rows:
+        if key not in _FIELD_TYPES:
+            logger.warning("Ignoring unknown saved setting %r (removed in this version?)", key)
+            continue
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            problems.append(f"saved setting {key}: stored value is not valid JSON ({raw!r})")
+            continue
+        problem = _check_yaml_value(key, value)
+        if problem:
+            problems.append(f"saved setting {problem}")
+        else:
+            valid[key] = float(value) if _FIELD_TYPES[key].startswith("float") else value
+    return valid
+
+
+def read_layers(config_path: str | Path | None = None) -> SettingsLayers:
+    """Read every layer without merging or validating the result."""
     load_dotenv(repo_root() / ".env", override=False)
 
     if config_path is None:
@@ -468,26 +549,46 @@ def load_settings(config_path: str | Path | None = None) -> AtlasSettings:
     config_path = Path(config_path)
 
     problems: list[str] = []
-    values: dict[str, Any] = {}
+    yaml_values: dict[str, Any] = {}
     if config_path.exists():
-        values = _read_yaml(config_path, problems)
+        yaml_values = _read_yaml(config_path, problems)
         logger.debug("Loaded settings from %s", config_path)
     else:
         logger.warning("Config file %s not found; using built-in defaults", config_path)
 
-    env_overrides: dict[str, Any] = {}
+    env_values: dict[str, Any] = {}
     for field_name in _FIELD_TYPES:
         value = _env_override(field_name, problems)
         if value is not _MISSING:
-            env_overrides[field_name] = value
-    values.update(env_overrides)
-    if env_overrides:
-        logger.debug("Applied env overrides: %s", ", ".join(sorted(env_overrides)))
+            env_values[field_name] = value
+    if env_values:
+        logger.debug("Applied env overrides: %s", ", ".join(sorted(env_values)))
 
-    settings = AtlasSettings(**values)
+    # database_path decides where the saved settings live, so it can only come from env/yaml.
+    db_path = _resolve_db_path(
+        str({**yaml_values, **env_values}.get("database_path", AtlasSettings.database_path))
+    )
+    db_values = _read_db_overrides(db_path, problems)
+    return SettingsLayers(config_path.name, yaml_values, db_values, env_values, problems)
+
+
+def load_settings(config_path: str | Path | None = None) -> AtlasSettings:
+    """Load settings: environment > saved (UI) settings > config.yaml > defaults.
+
+    ``.env`` is loaded first (without overriding real environment variables) so
+    that secrets and overrides defined there are visible to the env scan below.
+    When ``config_path`` is None the YAML is read from
+    ``<repo_root>/src/configs/config.yaml``, resolved from this module's location
+    so the result does not depend on the current working directory.
+    """
+    layers = read_layers(config_path)
+    problems = list(layers.problems)
+    # ``database_path`` is restart-only and never read from the store it locates.
+    saved = {k: v for k, v in layers.db.items() if k != "database_path"}
+    settings = AtlasSettings(**layers.merged(saved))
     problems += settings.problems()
     if problems:
-        raise SettingsError(problems, f"{config_path.name}, environment/.env")
+        raise SettingsError(problems, f"{layers.config_name}, saved settings, environment/.env")
     return settings
 
 
