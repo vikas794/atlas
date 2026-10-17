@@ -244,6 +244,36 @@ def test_retry_wakes_the_worker_and_requeues(
     assert idle_worker._wake_event.is_set()
 
 
+def test_retry_all_failed_requeues_every_failed_video_and_wakes_the_worker(
+    client: TestClient, idle_worker: PlaylistWorker
+) -> None:
+    playlist = ingest(client)
+    videos = videos_of(client, playlist["id"])
+    repo = deps.get_playlist_repo()
+    failed_ids = [v["id"] for v in videos[:2]]
+    for video_id in failed_ids:
+        repo_call(repo.update_stage, video_id, Stage.FAILED, failure_type=FailureType.RATE_LIMITED,
+                  failure_kind=FailureKind.TRANSIENT, failure_reason="429")
+    idle_worker._wake_event.clear()
+
+    resp = client.post("/api/videos/retry-failed")
+
+    assert resp.status_code == 200
+    assert resp.json()["count"] == len(failed_ids)
+    for video_id in failed_ids:
+        video = client.get(f"/api/videos/{video_id}").json()
+        assert video["stage"] == "queued" and video["failure_type"] is None
+    assert idle_worker._wake_event.is_set()
+
+
+def test_retry_all_failed_with_nothing_failed_is_a_no_op(client: TestClient) -> None:
+    ingest(client)
+
+    resp = client.post("/api/videos/retry-failed")
+
+    assert resp.status_code == 200 and resp.json()["count"] == 0
+
+
 # ----------------------------------------------------- review flow end to end
 
 

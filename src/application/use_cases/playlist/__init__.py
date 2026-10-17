@@ -7,6 +7,7 @@ from .actions import (
     DeletePlaylistUseCase,
     RegenerateVideoUseCase,
     ReprocessPlaylistUseCase,
+    RetryAllFailedUseCase,
     RetryVideoUseCase,
     SaveSummaryEditUseCase,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "ProcessVideoUseCase",
     "RegenerateVideoUseCase",
     "ReprocessPlaylistUseCase",
+    "RetryAllFailedUseCase",
     "RetryVideoUseCase",
     "SaveSummaryEditUseCase",
 ]

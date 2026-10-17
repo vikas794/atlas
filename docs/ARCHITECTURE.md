@@ -550,6 +550,7 @@ recovered on the next start.
 | `DELETE /api/playlists/{id}`, `DELETE /api/playlists/{id}/transcripts` | Delete a playlist; clear its transcripts |
 | `GET /api/videos/{id}`, `GET/PUT /api/videos/{id}/summary` | Video state; read or edit notes |
 | `POST /api/videos/{id}/approve`, `/retry`, `/regenerate` | User actions (regenerate is 202; optional body `{prompt}` = one-off prompt) |
+| `POST /api/videos/retry-failed` | Re-queue every `failed` video across all playlists (skips ones removed upstream); returns `{count}` and wakes the worker. Backs the home page's "Retry all failed" button |
 | `DELETE /api/videos/{id}/transcript` | Clear one transcript (text and subtitle file) |
 | `GET /api/drive/status`, `POST /api/drive/credentials`, `POST /api/drive/auth` | Drive state, upload the OAuth client JSON, run consent |
 | `GET /api/settings/notes-prompt` | The prompt template the generator uses now (for the temporary regenerate prompt) |

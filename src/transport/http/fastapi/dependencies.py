@@ -19,6 +19,7 @@ from src.application.use_cases.playlist.actions import (
     DeletePlaylistUseCase,
     RegenerateVideoUseCase,
     ReprocessPlaylistUseCase,
+    RetryAllFailedUseCase,
     RetryVideoUseCase,
     SaveSummaryEditUseCase,
 )
@@ -176,6 +177,10 @@ def get_save_summary_edit_use_case() -> SaveSummaryEditUseCase:
 
 def get_retry_video_use_case() -> RetryVideoUseCase:
     return RetryVideoUseCase(repo=get_playlist_repo())
+
+
+def get_retry_all_failed_use_case() -> RetryAllFailedUseCase:
+    return RetryAllFailedUseCase(repo=get_playlist_repo())
 
 
 def get_regenerate_video_use_case() -> RegenerateVideoUseCase:

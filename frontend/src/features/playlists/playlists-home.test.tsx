@@ -164,4 +164,31 @@ describe('PlaylistsHome', () => {
     expect(within(dialog).getByRole('heading', { name: 'Reprocess playlist' })).toBeInTheDocument()
     expect(dialog).toHaveTextContent('All 12 videos go back to the queue')
   })
+
+  it('retries every failed video across playlists from the list header', async () => {
+    const api = mockApi()
+      .on('GET', '/api/playlists', {
+        playlists: [
+          makePlaylist({ id: 1, stage_counts: { failed: 2 } as never }),
+          makePlaylist({ id: 2, title: 'Other', stage_counts: { failed: 1 } as never }),
+        ],
+        total: 2,
+      })
+      .on('POST', '/api/videos/retry-failed', { status: 'ok', message: 'ok', count: 3 })
+    const user = userEvent.setup()
+    renderRoute('/')
+
+    await user.click(await screen.findByRole('button', { name: 'Retry all failed (3)' }))
+
+    expect(await screen.findByText('Queued 3 failed videos for retry.')).toBeInTheDocument()
+    expect(api.callsTo('POST', '/api/videos/retry-failed')).toHaveLength(1)
+  })
+
+  it('disables Retry all failed when nothing has failed', async () => {
+    mockApi().on('GET', '/api/playlists', { playlists: [makePlaylist()], total: 1 })
+    renderRoute('/')
+
+    expect(await screen.findByRole('button', { name: 'Retry all failed (0)' })).toBeDisabled()
+    expect(screen.getByRole('tooltip')).toHaveTextContent('No failed videos')
+  })
 })

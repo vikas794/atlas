@@ -10,6 +10,7 @@ from src.application.use_cases.playlist.actions import (
     ApproveVideoUseCase,
     CleanupTranscriptsUseCase,
     RegenerateVideoUseCase,
+    RetryAllFailedUseCase,
     RetryVideoUseCase,
     SaveSummaryEditUseCase,
 )
@@ -21,6 +22,7 @@ from src.transport.http.fastapi.dependencies import (
     get_cleanup_transcripts_use_case,
     get_playlist_repo,
     get_regenerate_video_use_case,
+    get_retry_all_failed_use_case,
     get_retry_video_use_case,
     get_save_summary_edit_use_case,
     get_worker,
@@ -39,9 +41,19 @@ RepoDep = Annotated[PlaylistRepositoryPort, Depends(get_playlist_repo)]
 WorkerDep = Annotated[PlaylistWorker, Depends(get_worker)]
 ApproveDep = Annotated[ApproveVideoUseCase, Depends(get_approve_video_use_case)]
 RetryDep = Annotated[RetryVideoUseCase, Depends(get_retry_video_use_case)]
+RetryAllDep = Annotated[RetryAllFailedUseCase, Depends(get_retry_all_failed_use_case)]
 RegenDep = Annotated[RegenerateVideoUseCase, Depends(get_regenerate_video_use_case)]
 SaveEditDep = Annotated[SaveSummaryEditUseCase, Depends(get_save_summary_edit_use_case)]
 CleanupDep = Annotated[CleanupTranscriptsUseCase, Depends(get_cleanup_transcripts_use_case)]
+
+
+@router.post("/retry-failed", response_model=ActionResponse)
+async def retry_all_failed(use_case: RetryAllDep, worker: WorkerDep) -> ActionResponse:
+    """Re-queue every failed video across all playlists (skips removed-upstream ones)."""
+    count = await use_case.execute()
+    if count:
+        worker.wake()
+    return ActionResponse(status="ok", message=f"Queued {count} videos for retry", count=count)
 
 
 @router.get("/{video_id}", response_model=VideoResponse)

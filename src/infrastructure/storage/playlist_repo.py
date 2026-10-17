@@ -1245,6 +1245,26 @@ class PlaylistRepository:
                 )
         return changed
 
+    async def requeue_all_failed(self) -> int:
+        """Re-queue every failed video across all playlists; returns how many.
+
+        Same effect as a manual retry per video (failure columns cleared, retry budget
+        reset, ``run_token`` bumped), in one transaction. Videos removed upstream are
+        skipped, as the single-video retry refuses them.
+        """
+        return await asyncio.to_thread(self._requeue_all_failed)
+
+    def _requeue_all_failed(self) -> int:
+        with self._tx() as conn:
+            cursor = conn.execute(
+                "UPDATE videos SET stage = ?, failure_type = NULL, failure_kind = NULL,"
+                " failure_reason = NULL, retry_count = 0, next_retry_at = NULL,"
+                " run_token = run_token + 1, updated_at = ?"
+                " WHERE stage = ? AND removed_upstream = 0",
+                (Stage.QUEUED.value, now_iso(), Stage.FAILED.value),
+            )
+            return cursor.rowcount
+
     async def mark_published(
         self, video_pk: int, digest: str | None = None, *, published_at: str | None = None
     ) -> bool:

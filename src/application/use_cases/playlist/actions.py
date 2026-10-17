@@ -138,6 +138,16 @@ class RetryVideoUseCase:
         return updated or video
 
 
+class RetryAllFailedUseCase:
+    """Re-queue every failed video across all playlists (bulk manual retry)."""
+
+    def __init__(self, repo: PlaylistRepositoryPort) -> None:
+        self.repo = repo
+
+    async def execute(self) -> int:
+        return await self.repo.requeue_all_failed()
+
+
 class RegenerateVideoUseCase:
     """Queue a regeneration of a video's notes (PRD section 15, 16).
 

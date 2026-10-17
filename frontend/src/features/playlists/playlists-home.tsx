@@ -1,9 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ExternalLink, Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
+import { ExternalLink, Plus, RefreshCw, RotateCcw, RotateCw, Trash2 } from 'lucide-react'
 
-import { deletePlaylist, getPlaylists, ingestPlaylist, reprocessPlaylist } from '../../lib/api'
+import {
+  deletePlaylist,
+  getPlaylists,
+  ingestPlaylist,
+  reprocessPlaylist,
+  retryAllFailedVideos,
+} from '../../lib/api'
 import { errorMessage, failureMessage } from '../../lib/errors'
 import { pluralize } from '../../lib/format'
 import { playlistIsBusy, pollInterval } from '../../lib/polling'
@@ -13,6 +19,7 @@ import { onRowKeyDown } from '../../lib/row-keys'
 import type { Playlist } from '../../lib/types'
 import { ActionMenu } from '../../components/shared/action-menu'
 import { ConfirmDialog } from '../../components/shared/confirm-dialog'
+import { DisabledReason } from '../../components/shared/disabled-reason'
 import { RelativeTime } from '../../components/shared/relative-time'
 import { SegmentedProgressBar } from '../../components/shared/segmented-progress-bar'
 import { EmptyState, ErrorState, SkeletonTableRows } from '../../components/shared/state-panels'
@@ -113,7 +120,29 @@ export function PlaylistsHome() {
     onError: (err) => toast(failureMessage('Could not reprocess the playlist', err), 'error'),
   })
 
-  const handleAddSubmit = (event: FormEvent) => {
+  // The failed videos can sit in any playlist, so detail caches are invalidated by prefix.
+  const retryAllMutation = useMutation({
+    mutationFn: retryAllFailedVideos,
+    onSuccess: (result) => {
+      const count = result.count ?? 0
+      toast(
+        count > 0
+          ? `Queued ${pluralize(count, 'failed video')} for retry.`
+          : 'No failed videos to retry.',
+      )
+      void queryClient.invalidateQueries({ queryKey: ['playlist'] })
+      void queryClient.invalidateQueries({ queryKey: ['playlist-videos'] })
+      void invalidateLists()
+    },
+    onError: (err) => toast(failureMessage('Could not retry the failed videos', err), 'error'),
+  })
+
+  const failedTotal = (playlists ?? []).reduce(
+    (sum, playlist) => sum + (playlist.stage_counts?.failed ?? 0),
+    0,
+  )
+
+  const handleAddSubmit =(event: FormEvent) => {
     event.preventDefault()
     const message = validatePlaylistUrl(url)
     if (message) {
@@ -177,9 +206,22 @@ export function PlaylistsHome() {
         <div className="flex items-center justify-between">
           <h2 className="text-section text-text">Tracked playlists</h2>
           {playlists ? (
-            <span className="text-label tabular-nums text-text-muted">
-              {pluralize(playlists.length, 'playlist')}
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-label tabular-nums text-text-muted">
+                {pluralize(playlists.length, 'playlist')}
+              </span>
+              <DisabledReason reason={failedTotal === 0 ? 'No failed videos' : null}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={failedTotal === 0 || retryAllMutation.isPending}
+                  onClick={() => retryAllMutation.mutate()}
+                >
+                  <RotateCw aria-hidden="true" className="size-icon" />
+                  {retryAllMutation.isPending ? 'Retrying…' : `Retry all failed (${failedTotal})`}
+                </Button>
+              </DisabledReason>
+            </div>
           ) : null}
         </div>
 
