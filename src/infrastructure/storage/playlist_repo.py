@@ -121,6 +121,7 @@ def _video_from_row(row: sqlite3.Row) -> Video:
         duplicate_of=row["duplicate_of_video_id"],
         run_token=int(row["run_token"] or 0),
         regen_requested=_to_bool(row["regen_requested"]),
+        regen_prompt=_opt_str(row["regen_prompt"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -749,22 +750,25 @@ class PlaylistRepository:
                 changed += cursor.rowcount
         return changed
 
-    async def request_regenerate(self, video_pk: int) -> bool:
+    async def request_regenerate(self, video_pk: int, prompt: str | None = None) -> bool:
         """Queue a "regenerate notes" run: re-queue the video with the regenerate flag.
 
         The stored summary and transcript are kept until the new notes arrive; the
-        worker reuses the transcript or re-fetches it if it was cleaned up.
+        worker reuses the transcript or re-fetches it if it was cleaned up. ``prompt`` is
+        a one-off prompt template for this run only: it is kept on the video until the new
+        notes are stored (so automatic retries reuse it) and then cleared.
         """
-        return await asyncio.to_thread(self._request_regenerate, video_pk)
+        return await asyncio.to_thread(self._request_regenerate, video_pk, prompt)
 
-    def _request_regenerate(self, video_pk: int) -> bool:
+    def _request_regenerate(self, video_pk: int, prompt: str | None) -> bool:
         with self._tx() as conn:
             cursor = conn.execute(
-                "UPDATE videos SET stage = ?, regen_requested = 1, failure_type = NULL,"
+                "UPDATE videos SET stage = ?, regen_requested = 1, regen_prompt = ?,"
+                " failure_type = NULL,"
                 " failure_kind = NULL, failure_reason = NULL, retry_count = 0,"
                 " next_retry_at = NULL, run_token = run_token + 1, updated_at = ?"
                 " WHERE id = ?",
-                (Stage.QUEUED.value, now_iso(), video_pk),
+                (Stage.QUEUED.value, prompt, now_iso(), video_pk),
             )
             return cursor.rowcount > 0
 
@@ -811,7 +815,8 @@ class PlaylistRepository:
             conn.execute(
                 "UPDATE videos SET stage = ?, failure_type = NULL, failure_kind = NULL,"
                 " failure_reason = NULL, retry_count = 0, next_retry_at = NULL,"
-                " regen_requested = 0, run_token = run_token + 1, removed_upstream = 0,"
+                " regen_requested = 0, regen_prompt = NULL, run_token = run_token + 1,"
+                " removed_upstream = 0,"
                 " updated_at = ? WHERE playlist_id = ?",
                 (Stage.QUEUED.value, now_iso(), playlist_pk),
             )
@@ -1322,7 +1327,7 @@ class PlaylistRepository:
             conn.execute(
                 "UPDATE videos SET stage = ?, failure_type = NULL, failure_kind = NULL,"
                 " failure_reason = NULL, next_retry_at = NULL, regen_requested = 0,"
-                " updated_at = ? WHERE id = ?",
+                " regen_prompt = NULL, updated_at = ? WHERE id = ?",
                 (Stage.PENDING_REVIEW.value, now_iso(), video_pk),
             )
             row = conn.execute("SELECT * FROM summaries WHERE video_id = ?", (video_pk,)).fetchone()

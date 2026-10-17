@@ -57,10 +57,12 @@ against mocked externals; **Partial**; **Open** = a decision is needed (section 
 | §15 skip completed work, no recompute | `process_video._run` | V | Usage ledger across crash + resync: Gemini 4 calls for 4 completed videos |
 | §15 idempotent publish; edit-after-publish updates in place | `publish.py`, `_PersistingProgress`, `_create_once` | V-mock | `test_second_publish_creates_zero_duplicates...`, `test_failure_on_doc_3_of_5_then_resume...`, `test_edit_after_publish_republishes_into_the_same_doc_in_place` |
 | §15 regenerate reuses transcript | `actions.py` regenerate | V-mock | pipeline tests; `test_mark_published_ignores_a_video_regenerated_mid_publish` |
+| §15 regenerate with a one-off prompt (not saved; `prompt_version=custom`) | `actions.py` `_checked_prompt`, `videos.regen_prompt`, `LiteLLMNotesGenerator.generate_notes(prompt_template=)` | V-mock | `test_regenerate_with_a_temporary_prompt_uses_it_once_and_forgets_it`, `test_the_temporary_prompt_survives_an_automatic_retry`, API + review-screen tests |
 | §16 API contract, `{code, message, details}` envelope | `routers/*`, `errors.py`, `backend/spa.py` | V | `test_error_envelope.py` (22), real curl of 400/404/409/422 above |
 | §17 config in one place, `.env.example`, startup validation | `config/settings.py`, `src/configs/config.yaml` | V | `test_config_validation.py`; bad value → plain problem list, exit 2 |
 | §17 secrets never logged / returned | `shared/redaction.py`, `errors.py` | V | `test_redaction.py`, `test_http_errors_never_leak_the_api_key`, `test_a_server_error_message_carries_no_request_url` |
-| §18 prompt file versioned; model + prompt version recorded | `src/prompts/notes_v1_1.yaml`, `NotesPromptSource` | V | Real summary recorded `prompt=notes_v1.1 model=gemini-3.5-flash` |
+| §18 prompt file versioned; model + prompt version recorded | `src/prompts/notes_v1_2.yaml` (adds the `Summary` section; `notes_v1_1` kept), `NotesPromptSource` | V | Real summary recorded `prompt=notes_v1.1 model=gemini-3.5-flash` (before v1.2); v1.2 covered by `test_config_env.py` |
+| §19 index Doc: title linked to its Doc + short description | `notes_summary.extract_short_summary`, `render_index_doc(details=)`, `publisher.py` (index written after the video Docs) | V-mock | `test_notes_summary.py`, `test_markdown_to_docs.py`, `test_drive_publish.py` |
 | §18 output validation, truncation, too-large input | `notes_base.validate_notes`, `check_finish_reason`, `check_input_size` | V | `test_gemini_output_cut_off_at_max_tokens_is_rejected`, `TestCheckInputSize` |
 | §20 duplicate video in a playlist | `process_video._reuse_first_occurrence` | V | `test_duplicate_reuses_the_first_summary_without_an_llm_call`, `test_duplicate_of_a_permanently_failed_video_is_not_left_queued_forever` |
 | §20 private/deleted videos inside a playlist | `fetch_playlist_videos` (skipped) | **Open** (Q1) | `test_private_and_deleted_videos_are_skipped_and_numbering_stays_dense` |
@@ -155,7 +157,7 @@ unused frontend dependencies and `lib/digest.ts`, stale `docs/IMPLEMENTATION_PLA
 **Questions for you (safest interpretation kept, nothing changed):**
 1. **Private/deleted videos inside a playlist** are skipped at ingest, so they never appear as failed
    videos, and numbering follows the visible videos. PRD §8 lists them as permanent failures. Show them as failed rows instead?
-2. **Index Doc contents:** it lists every video's title, including unapproved and failed ones.
+2. **Index Doc contents:** it lists every video's title, including unapproved and failed ones; only approved/published videos get a link and a short description.
    §10/§19 suggest only published titles. Which do you want?
 3. **Padding growth (99 → 100 videos):** existing Docs are renamed `01 →` `001` (number unchanged).
    §19 needs this for sorting; §9 says existing Docs are "not renamed". Alternative: a fixed minimum width of 3.

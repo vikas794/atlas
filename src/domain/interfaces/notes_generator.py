@@ -12,6 +12,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+#: ``Summary.prompt_version`` of notes made with a one-off prompt (temporary regenerate).
+CUSTOM_PROMPT_VERSION = "custom"
+
+#: The placeholders every prompt template must contain.
+PROMPT_PLACEHOLDERS = ("{{Title}}", "{{Transcript}}")
+
+#: Longest one-off prompt accepted from a regenerate request.
+MAX_CUSTOM_PROMPT_CHARS = 20_000
+
+
+def missing_placeholders(template: str) -> list[str]:
+    """Placeholders absent from ``template`` (empty when it is usable)."""
+    return [p for p in PROMPT_PLACEHOLDERS if p not in template]
+
 
 @dataclass(frozen=True, slots=True)
 class GeneratedNotes:
@@ -30,13 +44,18 @@ class GeneratedNotes:
 class NotesGeneratorPort(Protocol):
     """Generates Markdown notes for one video."""
 
-    async def generate_notes(self, *, title: str, transcript: str) -> GeneratedNotes:
+    async def generate_notes(
+        self, *, title: str, transcript: str, prompt_template: str | None = None
+    ) -> GeneratedNotes:
         """Generate notes for ``transcript``.
 
         Args:
             title: The video title, substituted into the prompt template.
             transcript: The raw transcript text. Never logged, never persisted
                 by the adapter itself.
+            prompt_template: A one-off prompt (with ``{{Title}}`` and
+                ``{{Transcript}}``) used instead of the prompt file; the result is
+                then recorded with ``prompt_version="custom"``. ``None`` uses the file.
 
         Returns:
             Validated notes content plus the provider/model/prompt that made it.
@@ -53,6 +72,10 @@ class NotesGeneratorPort(Protocol):
 
 
 __all__ = [
+    "CUSTOM_PROMPT_VERSION",
+    "MAX_CUSTOM_PROMPT_CHARS",
+    "PROMPT_PLACEHOLDERS",
     "GeneratedNotes",
+    "missing_placeholders",
     "NotesGeneratorPort",
 ]

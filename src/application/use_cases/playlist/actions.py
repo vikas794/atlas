@@ -20,6 +20,11 @@ import logging
 from collections.abc import Callable, Iterable
 
 from src.domain.exceptions import ConflictError, NotFoundError
+from src.domain.interfaces.notes_generator import (
+    MAX_CUSTOM_PROMPT_CHARS,
+    PROMPT_PLACEHOLDERS,
+    missing_placeholders,
+)
 from src.domain.interfaces.playlist_repository import PlaylistRepositoryPort
 from src.domain.models.playlist import Stage, Summary, Video
 from src.domain.services.stage_machine import assert_transition, can_regenerate
@@ -48,6 +53,24 @@ def _refuse_if_removed_upstream(video: Video, action: str) -> None:
             f"Video {video.id} is no longer in the YouTube playlist, so it cannot be {action}. "
             "It is kept as is; it is processed again only if it reappears upstream."
         )
+
+
+def _checked_prompt(prompt: str | None) -> str | None:
+    """A usable one-off prompt, or ``None`` for "use the prompt file".
+
+    Rejected up front (409) so a bad prompt never reaches the worker, where it would
+    become a permanent configuration failure of the video.
+    """
+    if prompt is None or not prompt.strip():
+        return None
+    if len(prompt) > MAX_CUSTOM_PROMPT_CHARS:
+        raise ConflictError(f"The prompt is too long (limit {MAX_CUSTOM_PROMPT_CHARS:,} characters).")
+    missing = missing_placeholders(prompt)
+    if missing:
+        raise ConflictError(
+            "The prompt must contain " + " and ".join(PROMPT_PLACEHOLDERS) + f"; missing {', '.join(missing)}."
+        )
+    return prompt
 
 
 class ApproveVideoUseCase:
@@ -127,14 +150,16 @@ class RegenerateVideoUseCase:
     def __init__(self, repo: PlaylistRepositoryPort) -> None:
         self.repo = repo
 
-    async def execute(self, video_pk: int) -> Video:
+    async def execute(self, video_pk: int, prompt: str | None = None) -> Video:
+        """Queue the regenerate; ``prompt`` is a one-off template for this run only."""
         video = await _require_video(self.repo, video_pk)
         if not can_regenerate(video.stage):
             raise ConflictError(
                 f"Video {video_pk} cannot be regenerated while in stage '{video.stage.value}'."
             )
         _refuse_if_removed_upstream(video, "regenerated")
-        await self.repo.request_regenerate(video_pk)
+        prompt = _checked_prompt(prompt)
+        await self.repo.request_regenerate(video_pk, prompt)
         logger.info(
             "Regenerate queued",
             extra={"playlist_id": video.playlist_id, "video_id": video_pk},

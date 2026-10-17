@@ -12,6 +12,7 @@ export const queryKeys = {
   summary: (videoId: number) => ['video-summary', videoId] as const,
   diagnostics: ['diagnostics'] as const,
   settings: ['settings'] as const,
+  notesPrompt: ['settings', 'notes-prompt'] as const,
   models: (provider: string) => ['settings', 'models', provider] as const,
 }
 

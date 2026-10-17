@@ -302,16 +302,16 @@ def test_there_is_no_separate_prompt_version_setting_to_drift_from_the_file(
 ) -> None:
     monkeypatch.setenv("ATLAS_NOTES_PROMPT_VERSION", "something_else")
 
-    assert NotesPromptSource(load_settings().to_loader()).version() == "notes_v1.1"
+    assert NotesPromptSource(load_settings().to_loader()).version() == "notes_v1.2"
 
 
 def test_the_shipped_prompt_requires_tagged_code_blocks_and_no_title_line() -> None:
     source = NotesPromptSource(load_settings().to_loader())
     template = source.template()
 
-    assert source.path.name == "notes_v1_1.yaml"
+    assert source.path.name == "notes_v1_2.yaml"
     assert "{{Title}}" in template and "{{Transcript}}" in template
     assert "language" in template and "fenced code block" in template.lower()
     assert "title" in template.lower() and "Do not repeat the video title" in template
-    for section in ("Notes", "Key Points", "Important Details", "Takeaways"):
+    for section in ("Summary", "Notes", "Key Points", "Important Details", "Takeaways"):
         assert section in template

@@ -254,9 +254,15 @@ class ProcessVideoUseCase:
         await self.repo.update_stage(video_pk, Stage.GENERATING_NOTES, token=token)
         logger.info("Generating notes", extra={**ctx, "regenerate": regenerate})
 
+        # A one-off prompt only applies to a regenerate; it is passed only when set so a
+        # generator without that keyword keeps working for normal runs.
+        extra: dict[str, Any] = {}
+        if regenerate and video.regen_prompt:
+            extra["prompt_template"] = video.regen_prompt
         notes = await self.notes_generator.generate_notes(
             title=video.title,
             transcript=transcript_text,
+            **extra,
         )
         if regenerate:
             # Clears approval/publish state and the regenerate flag; keeps drive_doc_id.

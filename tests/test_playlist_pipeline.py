@@ -32,6 +32,7 @@ from src.domain.interfaces.transcript_provider import TranscriptResult
 from src.domain.models.playlist import (
     FailureKind,
     FailureType,
+    NotesGenerationError,
     PipelineError,
     Stage,
 )
@@ -95,18 +96,22 @@ class FakeTranscriptProvider:
 class FakeNotesGenerator:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.templates: list[str | None] = []  # prompt_template of every call
         self.fail_with: Exception | None = None
         self.fail_times: int | None = None  # None = fail forever when fail_with is set
 
-    async def generate_notes(self, *, title: str, transcript: str) -> GeneratedNotes:
+    async def generate_notes(
+        self, *, title: str, transcript: str, prompt_template: str | None = None
+    ) -> GeneratedNotes:
         self.calls.append(title)
+        self.templates.append(prompt_template)
         if self.fail_with and (self.fail_times is None or len(self.calls) <= self.fail_times):
             raise self.fail_with
         return GeneratedNotes(
             content=f"## Notes\n\nNotes for {title}\n\n## Key Points\n\nKey takeaways.",
             provider="fake_provider",
             model="fake_model",
-            prompt_version="v1",
+            prompt_version="custom" if prompt_template else "v1",
         )
 
 
@@ -636,6 +641,91 @@ async def test_regenerate_after_transcript_cleanup_refetches_the_transcript(
     assert transcripts.calls == ["v1"]  # re-entered fetching_transcript
     assert (await repo.get_video(video.id)).stage == Stage.PENDING_REVIEW
     assert (await repo.get_transcript(video.id)).content.startswith("Cleaned transcript")
+
+
+CUSTOM_PROMPT = "Short notes please.\nTitle: {{Title}}\nTranscript: {{Transcript}}"
+
+
+async def reviewed_video(repo: PlaylistRepository):
+    _, video = await new_video(repo)
+    await repo.upsert_transcript(video.id, "Existing transcript")
+    await repo.upsert_summary(video.id, "Old summary")
+    await repo.update_stage(video.id, Stage.PENDING_REVIEW)
+    return video
+
+
+async def test_regenerate_with_a_temporary_prompt_uses_it_once_and_forgets_it(
+    repo: PlaylistRepository,
+) -> None:
+    video = await reviewed_video(repo)
+    notes = FakeNotesGenerator()
+
+    queued = await RegenerateVideoUseCase(repo).execute(video.id, CUSTOM_PROMPT)
+    assert queued.regen_prompt == CUSTOM_PROMPT  # kept on the video until the run finishes
+    await ProcessVideoUseCase(repo, FakeTranscriptProvider(), notes).execute(video.id)
+
+    assert notes.templates == [CUSTOM_PROMPT]
+    assert (await repo.get_summary(video.id)).prompt_version == "custom"
+    assert (await repo.get_video(video.id)).regen_prompt is None  # one-off: cleared
+
+    await RegenerateVideoUseCase(repo).execute(video.id)  # a plain regenerate afterwards
+    await ProcessVideoUseCase(repo, FakeTranscriptProvider(), notes).execute(video.id)
+
+    assert notes.templates == [CUSTOM_PROMPT, None]
+    assert (await repo.get_summary(video.id)).prompt_version == "v1"
+
+
+async def test_a_plain_regenerate_clears_a_prompt_left_by_an_earlier_request(
+    repo: PlaylistRepository,
+) -> None:
+    video = await reviewed_video(repo)
+    await RegenerateVideoUseCase(repo).execute(video.id, CUSTOM_PROMPT)
+    await repo.update_stage(video.id, Stage.PENDING_REVIEW)  # e.g. the worker has not run yet
+
+    again = await RegenerateVideoUseCase(repo).execute(video.id)
+
+    assert again.regen_prompt is None
+
+
+async def test_the_temporary_prompt_survives_an_automatic_retry(repo: PlaylistRepository) -> None:
+    video = await reviewed_video(repo)
+    notes = FakeNotesGenerator()
+    notes.fail_with = NotesGenerationError(FailureType.NETWORK_ERROR, "network down")
+    notes.fail_times = 1
+    process = ProcessVideoUseCase(repo, FakeTranscriptProvider(), notes, backoff_base_seconds=0)
+
+    await RegenerateVideoUseCase(repo).execute(video.id, CUSTOM_PROMPT)
+    await process.execute(video.id)
+    failed = await repo.get_video(video.id)
+    assert failed.stage == Stage.FAILED and failed.regen_prompt == CUSTOM_PROMPT
+
+    await process.execute(video.id)  # the worker's automatic retry
+
+    assert notes.templates == [CUSTOM_PROMPT, CUSTOM_PROMPT]
+    assert (await repo.get_video(video.id)).stage == Stage.PENDING_REVIEW
+
+
+@pytest.mark.parametrize(
+    "prompt", ["Notes about {{Title}} only", "{{Transcript}} only", "x" * 20_001]
+)
+async def test_an_unusable_temporary_prompt_is_refused_before_anything_is_queued(
+    repo: PlaylistRepository, prompt: str
+) -> None:
+    video = await reviewed_video(repo)
+
+    with pytest.raises(ConflictError):
+        await RegenerateVideoUseCase(repo).execute(video.id, prompt)
+
+    after = await repo.get_video(video.id)
+    assert after.stage == Stage.PENDING_REVIEW and after.regen_requested is False
+
+
+async def test_a_blank_temporary_prompt_means_the_default_prompt(repo: PlaylistRepository) -> None:
+    video = await reviewed_video(repo)
+
+    queued = await RegenerateVideoUseCase(repo).execute(video.id, "   ")
+
+    assert queued.regen_requested is True and queued.regen_prompt is None
 
 
 async def test_regenerate_is_refused_while_the_video_is_in_flight(

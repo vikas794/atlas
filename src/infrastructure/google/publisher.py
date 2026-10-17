@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import httplib2
@@ -32,6 +32,7 @@ from src.domain.interfaces.drive_publisher import (
     DriveAuthorizationRequired,
     DriveFolderMissing,
     DrivePublisherPort,
+    IndexDetail,
     PublishEntry,
     PublishProgress,
     PublishResult,
@@ -240,8 +241,9 @@ class GoogleDrivePublisher(DrivePublisherPort):
         existing_folder_id: str | None = None,
         existing_index_doc_id: str | None = None,
         progress: PublishProgress | None = None,
+        index_details: Mapping[int, IndexDetail] | None = None,
     ) -> PublishResult:
-        """Create or update folder, index Doc, and per-video Docs (in that order)."""
+        """Create or update folder, index Doc, per-video Docs, then the index content."""
         sink: PublishProgress = progress or _NoProgress()
         ctx = {"playlist_id": playlist_pk}
 
@@ -293,16 +295,8 @@ class GoogleDrivePublisher(DrivePublisherPort):
             await sink.index_doc_created(index_doc_id)
             update_index = True
             logger.info("Created Drive index Doc (id=%s)", index_doc_id, extra=ctx)
-        if update_index and index_titles:
-            titles = list(index_titles)
-            await self._retry_call(
-                self.exporter.replace_doc_body,
-                index_doc_id,
-                lambda start, titles=titles: render_index_doc(titles, start_index=start),
-                title=idx_name,
-            )
-            await sink.index_written()
-            logger.info("Wrote index Doc %s (%d titles)", index_doc_id, len(titles), extra=ctx)
+        # The index content is written after the video Docs (step 4): a title can only
+        # link to a Doc that exists, and a brand-new video Doc has no id until step 3.
 
         # 3. Video Docs in playlist order.
         created_count = 0
@@ -379,6 +373,34 @@ class GoogleDrivePublisher(DrivePublisherPort):
 
             doc_ids[entry.video_pk] = doc_id
             await sink.doc_published(entry.video_pk, doc_id, created=created)
+
+        # 4. Index Doc content: numbered titles, each linked to its Doc and followed by its
+        # short description. Docs created or updated above win over the stored ids.
+        # A Doc that got a new id (re-created after being deleted in Drive) also changes
+        # the link the index must carry, even if the titles and descriptions did not move.
+        relinked = any(
+            entry.existing_doc_id != doc_ids.get(entry.video_pk, entry.existing_doc_id)
+            for entry in entries
+        )
+        if (update_index or relinked) and index_titles:
+            titles = list(index_titles)
+            positions = {entry.video_pk: entry.position for entry in entries}
+            details = dict(index_details or {})
+            for video_pk, doc_id in doc_ids.items():
+                position = positions.get(video_pk)
+                if position is not None:
+                    current = details.get(position, IndexDetail())
+                    details[position] = IndexDetail(current.description, doc_id)
+            await self._retry_call(
+                self.exporter.replace_doc_body,
+                index_doc_id,
+                lambda start, titles=titles, details=details: render_index_doc(
+                    titles, start_index=start, details=details
+                ),
+                title=idx_name,
+            )
+            await sink.index_written()
+            logger.info("Wrote index Doc %s (%d titles)", index_doc_id, len(titles), extra=ctx)
 
         return PublishResult(
             folder_id=folder_id,

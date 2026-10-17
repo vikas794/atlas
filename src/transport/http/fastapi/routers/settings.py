@@ -18,15 +18,19 @@ from src.config.editable import (
     is_editable,
 )
 from src.config.settings import SettingsLayers, check_value, field_kind, read_layers
+from src.domain.exceptions import NotesGeneratorConfigError
 from src.infrastructure.llm.models import GEMINI_MODEL_CHOICES
+from src.infrastructure.llm.notes_base import NotesPromptSource
 from src.infrastructure.storage.settings_repo import SqlSettingsRepository
 from src.shared.api_keys import read_api_keys
 from src.transport.http.fastapi.dependencies import (
     apply_settings,
     get_boot_settings,
+    get_settings_loader,
     get_settings_repo,
 )
 from src.transport.http.fastapi.errors import HTTPError
+from src.transport.http.fastapi.schemas.playlists import NotesPromptResponse
 from src.transport.http.fastapi.schemas.settings import (
     ModelListResponse,
     SettingField,
@@ -211,6 +215,25 @@ async def list_models(provider: str) -> ModelListResponse:
         detail=f"No model list for provider {provider!r}.",
         error_code="NOT_FOUND",
     )
+
+
+def _read_notes_prompt() -> NotesPromptResponse:
+    source = NotesPromptSource(get_settings_loader())
+    try:
+        return NotesPromptResponse(prompt=source.template(), version=source.version())
+    except NotesGeneratorConfigError as exc:
+        raise HTTPError(
+            status_code=500, detail=str(exc), error_code="PROMPT_UNAVAILABLE"
+        ) from exc
+
+
+@router.get("/notes-prompt", response_model=NotesPromptResponse)
+async def get_notes_prompt() -> NotesPromptResponse:
+    """The prompt template the notes generator uses now (read fresh from the prompt file).
+
+    The review screen shows it as the starting point of a temporary regenerate prompt.
+    """
+    return await asyncio.to_thread(_read_notes_prompt)
 
 
 @router.put("", response_model=SettingsResponse)

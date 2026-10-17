@@ -291,3 +291,9 @@ export interface DiagnosticsResponse {
   checks: DiagnosticCheck[]
   recent_errors: DiagnosticLogEntry[]
 }
+
+/** The notes prompt currently in use (`GET /api/settings/notes-prompt`). */
+export interface NotesPrompt {
+  prompt: string
+  version: string
+}

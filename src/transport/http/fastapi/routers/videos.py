@@ -27,6 +27,7 @@ from src.transport.http.fastapi.dependencies import (
 )
 from src.transport.http.fastapi.schemas.playlists import (
     ActionResponse,
+    RegenerateRequest,
     SaveSummaryRequest,
     SummaryResponse,
     VideoResponse,
@@ -106,15 +107,18 @@ async def regenerate_video(
     video_id: int,
     use_case: RegenDep,
     worker: WorkerDep,
+    request: RegenerateRequest | None = None,
 ) -> VideoResponse:
     """Queue a regeneration of the notes and return immediately (PRD section 16).
 
     The video goes back to ``queued`` with ``regenerating = true``; the worker reuses the
     stored transcript (or re-fetches it if it was cleaned up), generates new notes and
     returns the video to ``pending_review``. Poll ``GET /api/videos/{id}``, then fetch
-    ``/summary``.
+    ``/summary``. An optional ``prompt`` in the body replaces the prompt file for this
+    regenerate only (409 if it lacks ``{{Title}}`` / ``{{Transcript}}``); the new summary
+    is recorded with ``prompt_version = "custom"``.
     """
-    video = await use_case.execute(video_id)
+    video = await use_case.execute(video_id, request.prompt if request else None)
     worker.wake()
     return VideoResponse.from_domain(video)
 

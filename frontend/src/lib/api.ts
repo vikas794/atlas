@@ -4,6 +4,7 @@ import type {
   DriveActionResponse,
   DriveStatusResponse,
   ModelListResponse,
+  NotesPrompt,
   Playlist,
   PlaylistListResponse,
   PublishResponse,
@@ -158,10 +159,13 @@ export function retryVideo(videoId: number) {
 /**
  * Queue a regeneration (HTTP 202). The video goes back to `queued` with
  * `regenerating: true`; poll the video until it settles, then refetch notes.
+ * `prompt` is a one-off prompt for this regenerate only (it must contain
+ * `{{Title}}` and `{{Transcript}}`); leave it out to use the configured prompt file.
  */
-export function regenerateVideo(videoId: number) {
+export function regenerateVideo(videoId: number, prompt?: string) {
   return request<Video>(`/api/videos/${videoId}/regenerate`, {
     method: 'POST',
+    ...(prompt ? { body: JSON.stringify({ prompt }) } : {}),
   })
 }
 
@@ -197,6 +201,11 @@ export function authenticateDrive() {
 
 export function getSettings() {
   return request<SettingsResponse>('/api/settings')
+}
+
+/** The prompt the notes generator uses now (start of a temporary regenerate prompt). */
+export function getNotesPrompt() {
+  return request<NotesPrompt>('/api/settings/notes-prompt')
 }
 
 /** Saves the given settings; a 422 names each bad one in `ApiError.details.fields`. */

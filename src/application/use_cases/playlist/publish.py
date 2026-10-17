@@ -21,7 +21,9 @@ position and never shrinks (``playlists.pad_width``). When it grows (99 -> 100 v
 already-published Docs are renamed (number unchanged, padding only) so Drive's sort stays
 correct; nothing is renamed while the width is unchanged.
 
-Index Doc: a numbered list of the playlist's video titles in position order. It is rewritten
+Index Doc: a numbered list of the playlist's video titles in position order; each published
+video's title links to its Doc and is followed by a short description taken from the notes'
+Summary section (``extract_short_summary``). It is written after the video Docs, and rewritten
 in place whenever its content changes (tracked by ``playlists.index_digest``); rewriting
 instead of blindly appending keeps the order correct even when videos are approved out of
 order, and makes a failed index update self-healing on the next publish.
@@ -35,12 +37,14 @@ from src.domain.exceptions import ConflictError, NotFoundError
 from src.domain.interfaces.drive_publisher import (
     DriveFolderMissing,
     DrivePublisherPort,
+    IndexDetail,
     PublishEntry,
     PublishResult,
 )
 from src.domain.interfaces.playlist_repository import PlaylistRepositoryPort
 from src.domain.models.playlist import Playlist, Stage, Summary, Video
 from src.domain.services.doc_naming import pad_width as compute_pad_width
+from src.domain.services.notes_summary import extract_short_summary
 from src.shared.redaction import redact_text
 from src.shared.text import sha256_text
 
@@ -175,15 +179,28 @@ class PublishPlaylistUseCase:
         qualifying: dict[int, Summary] = {}
         published_videos: list[Video] = []
 
+        #: position -> short description, only for videos that have (or are getting) a Doc.
+        descriptions: dict[int, str] = {}
+        #: Positions whose index title links to a Doc once this publish is done.
+        linked_positions: set[int] = set()
+
         for video in videos:
             if video.stage == Stage.APPROVED:
                 summary = await self.repo.get_summary(video.id)
                 if summary:
                     entries.append(self._entry(video, summary))
                     qualifying[video.id] = summary
+                    linked_positions.add(video.position)
+                    description = extract_short_summary(summary.content)
+                    if description:
+                        descriptions[video.position] = description
             elif video.stage == Stage.PUBLISHED:
                 published_videos.append(video)
                 summary = await self.repo.get_summary(video.id)
+                linked_positions.add(video.position)
+                description = extract_short_summary(summary.content) if summary else None
+                if description:
+                    descriptions[video.position] = description
                 edited_since_publish = bool(
                     summary
                     and summary.edited
@@ -214,8 +231,22 @@ class PublishPlaylistUseCase:
             entries.sort(key=lambda e: e.position)
 
         index_titles = [(v.position, v.title) for v in videos]
+        index_details = {
+            v.position: IndexDetail(
+                description=descriptions.get(v.position),
+                doc_id=v.drive_doc_id if v.position in linked_positions else None,
+            )
+            for v in videos
+            if v.position in descriptions or v.position in linked_positions
+        }
+        # Whether a title is linked (not the Doc id itself) is hashed: ids of Docs created by
+        # this publish are not known yet, and the digest must match on the next run.
         index_digest = sha256_text(
-            "\n".join(f"{position}\t{title}" for position, title in index_titles)
+            "\n".join(
+                f"{position}\t{title}\t{descriptions.get(position, '')}"
+                f"\t{int(position in linked_positions)}"
+                for position, title in index_titles
+            )
         )
         has_docs = bool(published_videos) or bool(entries)
         index_stale = has_docs and (
@@ -246,6 +277,7 @@ class PublishPlaylistUseCase:
             existing_folder_id=playlist.drive_folder_id,
             existing_index_doc_id=playlist.drive_index_doc_id,
             progress=progress,
+            index_details=index_details,
         )
 
         # Safety net for publishers that do not report progress: persist what they returned.

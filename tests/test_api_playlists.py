@@ -317,6 +317,45 @@ def test_regenerate_returns_202_immediately_and_the_worker_finishes_it(
     assert sorted(api_env.transcripts.calls) == ["vid_1", "vid_2"]  # transcript reused, not re-fetched
 
 
+def test_regenerate_with_a_temporary_prompt_uses_it_for_that_run_only(
+    client: TestClient, idle_worker: PlaylistWorker, api_env: ApiEnv
+) -> None:
+    playlist = ingest(client)
+    run_pipeline(idle_worker)
+    video_id = videos_of(client, playlist["id"])[0]["id"]
+    prompt = "Keep it short. {{Title}} {{Transcript}}"
+
+    resp = client.post(f"/api/videos/{video_id}/regenerate", json={"prompt": prompt})
+    assert resp.status_code == 202
+    run_pipeline(idle_worker)
+
+    assert api_env.notes.templates[-1] == prompt
+    summary = client.get(f"/api/videos/{video_id}/summary").json()
+    assert summary["prompt_version"] == "custom"
+
+    assert client.post(f"/api/videos/{video_id}/regenerate").status_code == 202  # no body
+    run_pipeline(idle_worker)
+    assert api_env.notes.templates[-1] is None
+    assert client.get(f"/api/videos/{video_id}/summary").json()["prompt_version"] == "notes_test"
+
+
+def test_regenerate_rejects_a_prompt_without_the_placeholders(
+    client: TestClient, idle_worker: PlaylistWorker, api_env: ApiEnv
+) -> None:
+    playlist = ingest(client)
+    run_pipeline(idle_worker)
+    video_id = videos_of(client, playlist["id"])[0]["id"]
+    calls_before = len(api_env.notes.calls)
+
+    resp = client.post(f"/api/videos/{video_id}/regenerate", json={"prompt": "no placeholders"})
+
+    assert resp.status_code == 409
+    assert "{{Transcript}}" in resp.json()["message"]
+    run_pipeline(idle_worker)
+    assert len(api_env.notes.calls) == calls_before  # nothing was queued
+    assert client.get(f"/api/videos/{video_id}").json()["stage"] == "pending_review"
+
+
 def test_regenerate_after_transcript_cleanup_refetches(
     client: TestClient, idle_worker: PlaylistWorker, api_env: ApiEnv
 ) -> None:

@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from src.domain.interfaces.notes_generator import GeneratedNotes
+from src.domain.interfaces.notes_generator import CUSTOM_PROMPT_VERSION, GeneratedNotes
 from src.domain.interfaces.usage_ledger import UsageRecord
 from src.domain.models.playlist import FailureType, NotesGenerationError
 from src.infrastructure.llm.base import SettingsLoader
@@ -105,9 +105,17 @@ class LiteLLMNotesGenerator:
 
     # --- generation ------------------------------------------------------
 
-    async def generate_notes(self, *, title: str, transcript: str) -> GeneratedNotes:
-        """Render the prompt, call the first model that accepts it, and validate the response."""
-        prompt_text = render_prompt(self._prompt.template(), title=title, transcript=transcript)
+    async def generate_notes(
+        self, *, title: str, transcript: str, prompt_template: str | None = None
+    ) -> GeneratedNotes:
+        """Render the prompt, call the first model that accepts it, and validate the response.
+
+        ``prompt_template`` replaces the prompt file for this call only (one-off regenerate);
+        the summary is then tagged ``custom`` instead of the file's version.
+        """
+        custom = bool(prompt_template and prompt_template.strip())
+        template = prompt_template if custom and prompt_template else self._prompt.template()
+        prompt_text = render_prompt(template, title=title, transcript=transcript)
 
         errors: list[Exception] = []
         for position, spec in enumerate(self._specs):
@@ -141,7 +149,7 @@ class LiteLLMNotesGenerator:
                 content=content,
                 provider=spec.provider,
                 model=spec.model,
-                prompt_version=self.prompt_version,
+                prompt_version=CUSTOM_PROMPT_VERSION if custom else self.prompt_version,
             )
 
         raise _most_useful(errors)

@@ -373,6 +373,14 @@ MIGRATIONS: list[tuple[str, list[str]]] = [
             """,
         ],
     ),
+    (
+        "0006_regen_prompt",
+        [
+            # One-off prompt template for a pending "regenerate notes" run (set by the
+            # regenerate request, cleared when the new notes are stored).
+            "ALTER TABLE videos ADD COLUMN regen_prompt TEXT",
+        ],
+    ),
 ]
 
 #: Migrations that must run with ``PRAGMA foreign_keys = OFF`` (the pragma is a

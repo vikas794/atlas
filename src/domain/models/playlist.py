@@ -185,6 +185,8 @@ class Video:
     run_token: int = 0
     #: Set by "regenerate": the next run regenerates notes even if a summary exists.
     regen_requested: bool = False
+    #: One-off prompt template for the pending regenerate; cleared once it completes.
+    regen_prompt: str | None = None
     created_at: str = ""
     updated_at: str = ""
 

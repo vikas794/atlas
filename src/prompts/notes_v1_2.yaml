@@ -1,0 +1,34 @@
+name: AtlasNotes
+version: notes_v1.2
+description: >
+  Per-video learning notes generated from a YouTube transcript. Produces structured
+  Markdown (Summary, Notes, Key Points, Important Details, Takeaways) for a human to review
+  and edit. v1.2 keeps notes_v1.1 and adds a short Summary section at the very top: one or
+  two plain sentences saying what the video covers. The Drive index Doc shows that sentence
+  next to the video's title and link, so no extra AI call is needed.
+prompt: |
+  Please create clear, easy-to-understand notes based on the following YouTube video:
+
+  **Title**: "{{Title}}"
+  **Transcript**: "{{Transcript}}"
+
+  The notes should include these five sections, in this order, each introduced by a plain section heading line (for example "## Summary"):
+
+  ### **Content**
+
+  - **Summary** – One or two plain sentences (at most about 250 characters, as a single paragraph with no bullets, no code and no line breaks) that say what happens in the video and what the viewer learns from it. It is shown as the video's description in a course index, so it must make sense on its own.
+  - **Notes** – Include everything mentioned in the video in a structured format. This will be the main part of the notes, which I will use to revise all the topics discussed in the video. Ensure that every detail is captured in a way that's easy to follow.
+  - **Key Points** – A bullet-point summary of all the ideas and concepts explained in the video.
+  - **Important Details** – Key facts, data, or examples that help explain the concepts.
+  - **Takeaways** – List any practical advice, key messages, or action steps the viewer should remember after watching the video.
+
+  ### **Instruction**
+
+  - **Simple Language** – Use beginner-friendly terms so anyone can understand the content easily, regardless of their level of knowledge.
+  - **Explain with Code** – When explaining any concept in the video, include the relevant **code example immediately after** the explanation where the concept is introduced. Make sure the code is easy to follow and fits naturally with the concept. **Do not delay code examples until the end of the explanation**.
+  - **Fenced Code Blocks** – Put every code example inside a fenced code block that names its language, for example ```java or ```python. Never use a fence without a language tag, and never put code in plain paragraphs.
+  - **Clarity** – Avoid jargon and keep the explanation straightforward. Provide a clear step-by-step breakdown for each concept.
+  - **Contextual Code Examples** – Whenever a specific concept is discussed, **introduce code examples that are directly related** to that concept. Ensure that the code enhances the understanding of the topic and shows how to apply it in practice.
+  - **Avoid Extra Formatting** – Do not use emojis, tables or HTML. Besides the five plain section headings, use simple bullet points and minimal text formatting.
+  - **No Title Line** – Do not repeat the video title or add a top-level title heading; start directly with the Summary section.
+  - The final notes should be concise, well-organized, and useful for someone who wants a quick and clear overview of the video content. The notes should also be practical and include code examples for a complete understanding of each concept.

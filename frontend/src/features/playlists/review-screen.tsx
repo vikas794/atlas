@@ -22,6 +22,7 @@ import {
 
 import {
   approveVideo,
+  getNotesPrompt,
   getPlaylist,
   getVideoSummary,
   regenerateVideo,
@@ -76,6 +77,10 @@ export function ReviewScreen() {
   const [mode, setMode] = useState<Mode>('preview')
   const [draft, setDraft] = useState<Draft | null>(null)
   const [confirmRegen, setConfirmRegen] = useState(false)
+  // Temporary prompt for the next regenerate only. `promptDraft` null = untouched, i.e. the
+  // textarea shows the current default prompt.
+  const [useCustomPrompt, setUseCustomPrompt] = useState(false)
+  const [promptDraft, setPromptDraft] = useState<string | null>(null)
   const [clearTarget, setClearTarget] = useState<Video | null>(null)
   const [regenWatch, setRegenWatch] = useState<JobWatch | null>(null)
   const [focus, setFocus] = useStoredFlag('atlas.review.focus')
@@ -171,8 +176,27 @@ export function ReviewScreen() {
     onError: (err) => toast(failureMessage('Could not approve the video', err), 'error'),
   })
 
+  const notesPromptQuery = useQuery({
+    queryKey: queryKeys.notesPrompt,
+    queryFn: getNotesPrompt,
+    enabled: confirmRegen && useCustomPrompt,
+    staleTime: 0,
+  })
+  const defaultPrompt = notesPromptQuery.data?.prompt ?? ''
+  const promptValue = promptDraft ?? defaultPrompt
+
+  const changeRegenOpen = (open: boolean) => {
+    setConfirmRegen(open)
+    if (!open) {
+      // The temporary prompt is one-off: never carry it into the next regenerate.
+      setUseCustomPrompt(false)
+      setPromptDraft(null)
+    }
+  }
+
   const regenMut = useMutation({
-    mutationFn: (target: number) => regenerateVideo(target).then(() => ({ target })),
+    mutationFn: ({ target, prompt }: { target: number; prompt?: string }) =>
+      regenerateVideo(target, prompt).then(() => ({ target })),
     onSuccess: ({ target }) => {
       // Regeneration runs in the background (202): show "Regenerating..." and poll the video.
       setRegenWatch({ startedAt: Date.now() })
@@ -757,14 +781,53 @@ export function ReviewScreen() {
 
       <ConfirmDialog
         open={confirmRegen}
-        onOpenChange={setConfirmRegen}
+        onOpenChange={changeRegenOpen}
         title="Regenerate notes"
         description={`Regenerate the notes for ${positionLabel} "${currentVideo?.title ?? ''}" from the stored transcript? The current notes, including any edits you made, will be overwritten.`}
         confirmLabel="Regenerate notes"
         isDestructive
         isLoading={regenMut.isPending}
-        onConfirm={() => regenMut.mutateAsync(currentVideoPk)}
-      />
+        onConfirm={() => {
+          if (!useCustomPrompt) return regenMut.mutateAsync({ target: currentVideoPk })
+          if (!promptValue.includes('{{Title}}') || !promptValue.includes('{{Transcript}}')) {
+            throw new Error('The prompt must contain both {{Title}} and {{Transcript}}.')
+          }
+          // Unchanged text is the default prompt: send nothing so the summary keeps its version.
+          const prompt = promptValue === defaultPrompt ? undefined : promptValue
+          return regenMut.mutateAsync({ target: currentVideoPk, prompt })
+        }}
+      >
+        <label className="flex items-center gap-2 text-label text-text">
+          <input
+            type="checkbox"
+            checked={useCustomPrompt}
+            onChange={(event) => setUseCustomPrompt(event.target.checked)}
+          />
+          Use a temporary prompt for this regenerate
+        </label>
+        {useCustomPrompt ? (
+          <div className="mt-3">
+            <textarea
+              value={promptValue}
+              onChange={(event) => setPromptDraft(event.target.value)}
+              aria-label="Temporary prompt"
+              disabled={notesPromptQuery.isPending}
+              placeholder={notesPromptQuery.isPending ? 'Loading the current prompt…' : undefined}
+              className="h-56 w-full resize-y rounded border border-border bg-surface p-2 font-notes text-label text-text"
+              spellCheck={false}
+            />
+            <p className="mt-1 text-label text-text-muted">
+              Used for this regenerate only; the saved prompt file is not changed. Keep{' '}
+              {'{{Title}}'} and {'{{Transcript}}'} in the text.
+            </p>
+            {notesPromptQuery.isError ? (
+              <p role="alert" className="mt-1 text-label text-st-error-fg">
+                {errorMessage(notesPromptQuery.error)}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+      </ConfirmDialog>
 
       {/* Navigating away with unsaved edits */}
       <ConfirmDialog

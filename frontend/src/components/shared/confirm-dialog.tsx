@@ -16,6 +16,8 @@ interface ConfirmDialogProps {
   isDestructive?: boolean
   isLoading?: boolean
   onConfirm: () => void | Promise<unknown>
+  /** Extra content between the description and the buttons (e.g. an option or field). */
+  children?: ReactNode
 }
 
 /**
@@ -35,6 +37,7 @@ export function ConfirmDialog({
   isDestructive = true,
   isLoading = false,
   onConfirm,
+  children,
 }: ConfirmDialogProps) {
   const [isRunning, setIsRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -98,6 +101,8 @@ export function ConfirmDialog({
               </button>
             </Dialog.Close>
           </div>
+
+          {children ? <div className="mt-4">{children}</div> : null}
 
           {error ? (
             <p role="alert" className="mt-3 text-label text-st-error-fg">

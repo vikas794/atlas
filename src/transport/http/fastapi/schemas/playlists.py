@@ -166,6 +166,25 @@ class SaveSummaryRequest(BaseModel):
     content: str = Field(..., description="Markdown content for the summary")
 
 
+class RegenerateRequest(BaseModel):
+    """Optional body of a regenerate request."""
+
+    prompt: str | None = Field(
+        default=None,
+        description=(
+            "One-off prompt template (must contain {{Title}} and {{Transcript}}) used for "
+            "this regenerate only. Omit to use the configured prompt file."
+        ),
+    )
+
+
+class NotesPromptResponse(BaseModel):
+    """The prompt template the notes generator currently uses."""
+
+    prompt: str
+    version: str
+
+
 class ActionResponse(BaseModel):
     """Generic response for pipeline commands."""
 

@@ -12,7 +12,7 @@ were persisted are reused (updated in place) and nothing is created twice.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -34,6 +34,16 @@ class PublishEntry:
     #: ``markdown`` is still the published notes, so a Doc that has disappeared from
     #: Drive can be re-created instead of failing the publish.
     rename_only: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class IndexDetail:
+    """Extra index Doc content for one video, keyed by its playlist position."""
+
+    #: Short description shown after the title (None/blank: title only).
+    description: str | None = None
+    #: Drive Doc id the title links to (None until the video has been published).
+    doc_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,11 +136,13 @@ class DrivePublisherPort(Protocol):
         existing_folder_id: str | None = None,
         existing_index_doc_id: str | None = None,
         progress: PublishProgress | None = None,
+        index_details: Mapping[int, IndexDetail] | None = None,
     ) -> PublishResult:
         """Create or update the folder, index Doc and per-video Docs.
 
-        Order (PRD section 19): folder, then index Doc, then video Docs in
-        playlist order.
+        Order (PRD section 19): folder, then the (empty) index Doc, then video Docs in
+        playlist order, then the index content -- written last so every title can link
+        to a Doc that exists.
 
         Args:
             playlist_pk: Internal playlist id.
@@ -140,6 +152,9 @@ class DrivePublisherPort(Protocol):
             entries: PublishEntry instances, already approved and in order.
             index_titles: ``(position, title)`` of every video, for the index Doc.
             update_index: Whether the index Doc content must be (re)written.
+            index_details: Optional ``position -> IndexDetail`` (description and the
+                Doc id to link). A Doc created or updated by this call overrides the
+                detail's ``doc_id``.
             existing_folder_id: Reuse this folder instead of creating one. Raises
                 :class:`DriveFolderMissing` if it was deleted or trashed in Drive.
             existing_index_doc_id: Reuse this index Doc instead of creating one.

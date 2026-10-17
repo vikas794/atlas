@@ -406,6 +406,32 @@ class TestSingleModel:
         assert "for x in y: pass" in sent["messages"][0]["content"]
         assert "api_base" not in sent
 
+    async def test_a_one_off_prompt_replaces_the_prompt_file_and_is_tagged_custom(
+        self, gemini_settings: FakeLoader
+    ) -> None:
+        completion = FakeCompletion()
+        generator = generator_for(gemini_settings, completion)
+
+        custom = await generator.generate_notes(
+            title="Loops",
+            transcript="for x in y: pass",
+            prompt_template="Be brief. {{Title}} / {{Transcript}}",
+        )
+        default = await generator.generate_notes(title="Loops", transcript="for x in y: pass")
+
+        assert completion.calls[0]["messages"][0]["content"] == "Be brief. Loops / for x in y: pass"
+        assert custom.prompt_version == "custom"
+        assert default.prompt_version == "notes_v1"  # the next call is back on the prompt file
+        assert "Be brief." not in completion.calls[1]["messages"][0]["content"]
+
+    async def test_a_one_off_prompt_without_placeholders_is_a_config_error(
+        self, gemini_settings: FakeLoader
+    ) -> None:
+        with pytest.raises(NotesGeneratorConfigError):
+            await generator_for(gemini_settings, FakeCompletion()).generate_notes(
+                title="t", transcript="x", prompt_template="no placeholders here"
+            )
+
     async def test_notes_model_overrides_gemini_model(self, gemini_settings: FakeLoader) -> None:
         settings = gemini_settings.override(notes_model="gemini-2.5-pro")
         completion = FakeCompletion()

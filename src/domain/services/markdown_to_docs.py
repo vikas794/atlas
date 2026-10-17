@@ -66,9 +66,10 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
+from src.domain.interfaces.drive_publisher import IndexDetail
 from src.domain.services.doc_naming import sanitize_drive_filename, sanitize_title
 
 logger = logging.getLogger(__name__)
@@ -841,15 +842,35 @@ def markdown_to_docs(markdown: str, *, start_index: int = DEFAULT_START_INDEX) -
     return requests
 
 
-def render_index_doc(
-    titles: Sequence[tuple[int, str]], *, start_index: int = DEFAULT_START_INDEX
-) -> list[dict]:
-    """Render the playlist index Doc: a numbered list of video titles only.
+#: Separates a video's title from its short description inside one index entry.
+INDEX_DESCRIPTION_SEPARATOR = " – "
 
-    PRD section 19 -- titles only, no links, no durations. The text of each
-    entry is just the title; Google Docs numbers the list ``1..N`` itself, which
-    matches the Doc numbering because the caller lists the playlist's videos in
-    order without gaps (positions are dense and 1-based).
+
+def _flatten(text: object) -> str:
+    """One line: no newlines, whitespace normalised."""
+    return _normalise(str(text or "").replace("\r", " ").replace("\n", " ")).strip()
+
+
+def doc_url(doc_id: str) -> str:
+    """Browser URL of a Google Doc."""
+    return f"https://docs.google.com/document/d/{doc_id}/edit"
+
+
+def render_index_doc(
+    titles: Sequence[tuple[int, str]],
+    *,
+    start_index: int = DEFAULT_START_INDEX,
+    details: Mapping[int, IndexDetail] | None = None,
+) -> list[dict]:
+    """Render the playlist index Doc: a numbered list, one entry per video.
+
+    Google Docs numbers the list ``1..N`` itself, which matches the Doc numbering
+    because the caller lists the playlist's videos in order without gaps (positions
+    are dense and 1-based).
+
+    Without ``details`` an entry is just the title. With a :class:`IndexDetail` for
+    its position, the entry is ``Title - description`` on one line (so the numbering
+    stays intact) and the title is bold and, when the video has a Doc, a link to it.
 
     Entries are emitted in ascending ``position`` order (stable for ties), and
     blank titles are skipped after whitespace flattening so one bad row cannot
@@ -859,7 +880,7 @@ def render_index_doc(
     for position, title in titles:
         # Newlines in a title would split one index entry into two paragraphs,
         # so flatten before anything else.
-        flat = _normalise(str(title or "").replace("\r", " ").replace("\n", " ")).strip()
+        flat = _flatten(title)
         if not flat:
             logger.debug("index: skipped blank title at position %r", position)
             continue
@@ -869,10 +890,40 @@ def render_index_doc(
         return []
 
     entries.sort(key=lambda item: item[0])
-    text = "".join(f"{title}\n" for _position, title in entries)
+    details = details or {}
+
+    text = ""
+    styles: list[dict] = []
+    for position, title in entries:
+        detail = details.get(position)
+        description = _flatten(detail.description) if detail else ""
+        link = doc_url(detail.doc_id) if detail and detail.doc_id else None
+        line = f"{title}{INDEX_DESCRIPTION_SEPARATOR}{description}" if description else title
+        if description or link:
+            begin = start_index + utf16_len(text)
+            style: dict[str, object] = {"bold": True}
+            fields = "bold"
+            if link:
+                style["link"] = {"url": link}
+                fields = "bold,link"
+            styles.append(
+                {
+                    "updateTextStyle": {
+                        "range": {
+                            "startIndex": begin,
+                            "endIndex": begin + utf16_len(title),
+                        },
+                        "textStyle": style,
+                        "fields": fields,
+                    }
+                }
+            )
+        text += f"{line}\n"
 
     return [
         {"insertText": {"location": {"index": start_index}, "text": text}},
+        # Styling never changes a length, so it goes before the bullets (which come last).
+        *styles,
         {
             "createParagraphBullets": {
                 "range": {
@@ -894,6 +945,8 @@ __all__ = [
     "NEUTRAL_CODE_LABEL",
     "Block",
     "InlineSpan",
+    "INDEX_DESCRIPTION_SEPARATOR",
+    "doc_url",
     "extract_blocks",
     "markdown_to_docs",
     "render_index_doc",

@@ -28,7 +28,7 @@ Learning a technical subject via YouTube playlists is time-expensive — a "Comp
 - Generate AI notes per video using the existing custom prompt (provider: Gemini, swappable via config)
 - Persist all playlist/video/transcript/summary state in a local database so no step is recomputed unnecessarily
 - Frontend review UI: view, edit, and approve generated notes per video, plus a bulk "approve all" action
-- On approval, create a Google Drive folder per playlist containing one Google Doc per video (numbered by playlist order) plus one index Doc listing video titles in order
+- On approval, create a Google Drive folder per playlist containing one Google Doc per video (numbered by playlist order) plus one index Doc listing video titles in order, each linked to its Doc and followed by a short description of the video
 - Status/progress dashboard: overall playlist progress, per-video pipeline stage, and failure reasons
 - Automatic exponential-backoff retry for transient failures (e.g. rate limiting); manual retry button for all failures; permanent failures (e.g. no transcript available) fail fast with a visible reason, no auto-retry
 - Incremental re-run of an already-processed playlist: detect and process only newly added videos, appended after existing ones (no renumbering of existing docs)
@@ -75,7 +75,7 @@ Every stage writes its result to the database before moving on, so any step can 
 
 **Stage 3 — Review & approval (frontend).** Vikas views each video's generated notes in the frontend, can edit the content inline, and approves it individually or in bulk ("approve all"). Only approved content proceeds.
 
-**Stage 4 — Google Drive publish.** For a newly started playlist, create a new Drive folder named after the playlist. Create one Google Doc per approved video (filename starts with its playlist order number, followed by the video title) plus one index Doc (numbered list of video titles, created first/kept at the top) linking the course together.
+**Stage 4 — Google Drive publish.** For a newly started playlist, create a new Drive folder named after the playlist. Create one Google Doc per approved video (filename starts with its playlist order number, followed by the video title) plus one index Doc (numbered list of video titles, each linking to its Doc and followed by a short description of the video; created first/kept at the top) linking the course together.
 
 ## 6. Functional Requirements
 
@@ -89,7 +89,7 @@ Every stage writes its result to the database before moving on, so any step can 
 
 **FR5 — Review UI.** Frontend lists all videos in a playlist with their current stage/status. For videos with generated notes, user can view, inline-edit, and individually approve, or use "approve all" to bulk-approve everything generated so far.
 
-**FR6 — Google Drive publish.** On approval, for a playlist being published for the first time, create a Drive folder named after the playlist. Create an index Google Doc (numbered list of video titles only) as the first/primary doc. For each approved video, create a Google Doc named `<order-number> <video title>`, containing the notes with a heading (video title + sequence number).
+**FR6 — Google Drive publish.** On approval, for a playlist being published for the first time, create a Drive folder named after the playlist. Create an index Google Doc (numbered list of video titles, each linking to that video's Doc and followed by a short description of what the video covers) as the first/primary doc. The description is the notes' own `Summary` section (the notes prompt asks for it at the top of the notes, so no extra AI call is made); notes without one fall back to the first sentences of the Notes section. For each approved video, create a Google Doc named `<order-number> <video title>`, containing the notes with a heading (video title + sequence number).
 
 **FR7 — Status dashboard.** Real-time (or near-real-time) view of overall playlist progress and per-video pipeline stage (queued, fetching transcript, generating notes, pending review, approved, published, failed) with a visible, specific failure reason where applicable.
 
@@ -144,7 +144,7 @@ When Vikas re-runs a playlist that's already been processed:
 3. Existing videos (already fetched/summarized/published) are left untouched — no recomputation, no re-fetching, no wasted AI or transcript API calls.
 4. New video IDs are inserted as new Video records, numbered continuing on from the highest existing order number (appended, not interleaved to match YouTube's current order).
 5. Only the new videos go through the full pipeline (transcript → notes → review → approval → publish).
-6. On publish, new videos' Docs are added to the existing Drive folder, and the index Doc is updated to append their titles — existing numbered Docs and index entries are not renamed or reordered.
+6. On publish, new videos' Docs are added to the existing Drive folder, and the index Doc is updated to include their titles, links and descriptions — existing numbered Docs and index entries are not renamed or reordered.
 
 This keeps re-runs cheap: cost scales with the number of *new* videos only, not the size of the whole playlist. Trade-off: if YouTube's own playlist order is later changed (videos reordered), Atlas does not reflect that — numbering reflects discovery order across runs, not live playlist order. This was a deliberate simplicity choice given reordering is rare on actively-maintained learning playlists.
 
@@ -218,7 +218,7 @@ Each video moves through the stages in Section 7. These rules make the pipeline 
 - **Crash recovery:** on backend startup, any video left in fetching_transcript or generating_notes is reset to the last stable stage and re-queued.
 - **Idempotent publishing:** the Drive doc ID is saved immediately after a Doc is created. A retried publish updates the existing Doc rather than creating a duplicate.
 - **Edits after approval:** editing a published summary marks the video as changed and offers a "re-publish" action that updates the existing Doc in place.
-- **Regenerate:** a manual "regenerate notes" action reuses the stored transcript, asks for confirmation, and overwrites the previous summary.
+- **Regenerate:** a manual "regenerate notes" action reuses the stored transcript, asks for confirmation, and overwrites the previous summary. The user may supply a temporary prompt for that one regenerate (it must contain `{{Title}}` and `{{Transcript}}`); it is never saved, the prompt file is unchanged, and the resulting summary records prompt version `custom`.
 
 ## 16. Backend API Contract (outline)
 
@@ -231,7 +231,7 @@ A JSON REST API between frontend and backend. Exact paths can adapt to the exist
 - **POST /playlists/{id}/reprocess** and **DELETE /playlists/{id}** — full reprocess from scratch; delete with all stored data (confirmation required in the UI).
 - **GET /videos/{id}/summary** and **PUT /videos/{id}/summary** — read and save inline edits.
 - **POST /videos/{id}/approve** and **POST /playlists/{id}/approve-all** — approve one or all videos that are pending review.
-- **POST /videos/{id}/retry** and **POST /videos/{id}/regenerate** — manual retry; regenerate notes.
+- **POST /videos/{id}/retry** and **POST /videos/{id}/regenerate** — manual retry; regenerate notes (optional body `{prompt}` is a one-off prompt for this regenerate only). **GET /settings/notes-prompt** returns the prompt currently in use, as the starting point for that temporary prompt.
 - **POST /playlists/{id}/publish** — publish approved videos to Drive.
 - **DELETE /videos/{id}/transcript** and **DELETE /playlists/{id}/transcripts** — manual transcript cleanup.
 - **Conventions:** consistent error body (code, message, details), proper HTTP status codes, long-running work returns immediately and runs in a background worker, and the frontend polls status (no websockets in v1).
@@ -257,9 +257,9 @@ A JSON REST API between frontend and backend. Exact paths can adapt to the exist
 - **Structure:** one folder per playlist named after the playlist, holding the index Doc and one Doc per video. Folder and Doc IDs are stored in the database at creation time.
 - **Naming:** each Doc is named with its playlist order number, a separator and the video title. Titles are sanitized for characters Drive handles poorly. Order numbers are zero-padded to the width of the playlist size so Drive sorts them correctly (see Section 24).
 - **Doc content:** heading with the video title and sequence number, then the formatted notes. No video link or duration, per the requirements.
-- **Index Doc:** a numbered list of video titles only, first in the folder, updated by appending when new videos are published.
+- **Index Doc:** a numbered list, first in the folder. Each entry is the video title (bold, linking to that video's Doc once it exists) followed by a short description taken from the notes' Summary section. It is rewritten in place whenever a title, description or link changes, so new videos appear in order. Still no durations.
 - **Rate limits and failures:** Drive and Docs calls use the same exponential backoff as other transient failures. A publish that fails halfway is safe to re-run because already-created Docs are detected by stored IDs.
-- **Publish order:** folder, then index Doc, then video Docs in playlist order.
+- **Publish order:** folder, then the (empty) index Doc, then video Docs in playlist order, then the index content (written last so every title can link to an existing Doc).
 
 ## 20. Edge Cases & Boundary Behavior
 

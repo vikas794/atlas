@@ -112,8 +112,10 @@ class FakeDrivePublisher(DrivePublisherPort):
         existing_folder_id: str | None = None,
         existing_index_doc_id: str | None = None,
         progress: PublishProgress | None = None,
+        index_details: Any = None,
     ) -> PublishResult:
         assert progress is not None
+        self.index_details = dict(index_details or {})
         self.publish_calls += 1
         folder_id = existing_folder_id
         if not folder_id:
@@ -356,8 +358,52 @@ async def test_the_index_lists_all_titles_in_position_order_even_when_approved_o
 
     assert second.created == 1
     assert fake.index[first.index_doc_id] == [(1, "A"), (2, "B"), (3, "C")]  # order intact
-    assert fake.index_writes == 1  # content unchanged: not rewritten
+    # Titles are unchanged, but video 1 now has a Doc to link to, so the index is rewritten.
+    assert fake.index_writes == 2
+    assert fake.index_details[1].doc_id is None or fake.index_details[1].description
     assert len(fake.index) == 1  # still one index Doc
+
+
+async def test_an_unchanged_index_is_not_rewritten(
+    repo: PlaylistRepository, fake: FakeDrivePublisher, use_case: PublishPlaylistUseCase
+) -> None:
+    playlist, _ = await seed(repo, ["A", "B"])
+    await use_case.execute(playlist.id)
+    assert fake.index_writes == 1
+
+    await use_case.execute(playlist.id)
+
+    assert fake.index_writes == 1  # nothing changed (titles, descriptions, links)
+
+
+async def test_the_index_gets_each_published_videos_description_and_a_link_flag(
+    repo: PlaylistRepository, fake: FakeDrivePublisher, use_case: PublishPlaylistUseCase
+) -> None:
+    playlist, videos = await seed(repo, ["A", "B"], approve=[1])
+    await repo.upsert_summary(
+        videos[0].id, "## Summary\n\nA short tour of A.\n\n## Notes\n\nLong notes of A."
+    )
+
+    await use_case.execute(playlist.id)
+
+    assert fake.index_details[1].description == "A short tour of A."
+    assert 2 not in fake.index_details  # B is not approved: title only
+
+
+async def test_editing_the_summary_of_a_published_video_rewrites_the_index(
+    repo: PlaylistRepository, fake: FakeDrivePublisher, use_case: PublishPlaylistUseCase
+) -> None:
+    playlist, videos = await seed(repo, ["A"])
+    await repo.upsert_summary(videos[0].id, "## Summary\n\nOld.\n\n## Notes\n\nLong notes.")
+    await use_case.execute(playlist.id)
+    writes = fake.index_writes
+
+    await repo.upsert_summary(videos[0].id, "## Summary\n\nNew.\n\n## Notes\n\nLong notes.")
+    await repo.mark_edited(videos[0].id)
+    await use_case.execute(playlist.id)
+
+    assert fake.index_writes == writes + 1
+    assert fake.index_details[1].description == "New."
 
 
 async def test_new_videos_from_a_resync_are_added_to_the_index(
@@ -774,9 +820,23 @@ async def test_real_publisher_builds_folder_index_and_headed_docs(
     assert folder["name"] == playlist_folder_name("Course 101")
     index = stub.created[1]
     assert index["name"] == "00 - Index - Course 101" and index["parents"] == [result.folder_id]
-    # Index is the first Doc in the folder; its text is the 12 titles only, in order.
+    # Index is the first Doc in the folder; its text is the 12 titles in order, each published
+    # video's title followed by its short description (here the Notes fallback).
     index_text = stub.inserted_text(result.index_doc_id)
-    assert index_text == "".join(f"Topic {i}\n" for i in range(1, 13))
+    assert index_text == "".join(
+        f"Topic {i} – Notes of Topic {i}\n" if i in (1, 12) else f"Topic {i}\n"
+        for i in range(1, 13)
+    )
+    # The published videos' titles link to their Docs (written after the Docs exist).
+    published_ids = {c["id"] for c in stub.created[2:]}
+    links = {
+        r["updateTextStyle"]["textStyle"]["link"]["url"]
+        for doc, reqs in stub.batches
+        if doc == result.index_doc_id
+        for r in reqs
+        if "link" in r.get("updateTextStyle", {}).get("textStyle", {})
+    }
+    assert links == {f"https://docs.google.com/document/d/{doc_id}/edit" for doc_id in published_ids}
     # Doc names: 1-based, zero-padded to the width of the largest position (12 -> 2 digits).
     names = [c["name"] for c in stub.created[2:]]
     assert names == ["01 - Topic 1", "12 - Topic 12"]

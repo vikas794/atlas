@@ -131,7 +131,7 @@ class AtlasSettings:
     omniroute_base_url: str = "http://localhost:20128/v1"
     omniroute_models_url: str = ""
     omniroute_input_token_limit: int = 128000
-    notes_prompt_name: str = "notes_v1_1.yaml"  # the prompt file's own `version` is recorded
+    notes_prompt_name: str = "notes_v1_2.yaml"  # the prompt file's own `version` is recorded
     notes_request_timeout_seconds: float = 300.0  # a hung LLM call must not hold a slot forever
 
     # --- Pipeline concurrency & retries ----------------------------------

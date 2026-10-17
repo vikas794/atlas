@@ -143,9 +143,9 @@ These hold the **name** of the environment variable that contains the key.
 | `omniroute_base_url` | `"http://localhost:20128/v1"` | OpenAI-compatible endpoint notes are sent to. | none | `ATLAS_OMNIROUTE_BASE_URL`, `OMNIROUTE_BASE_URL` |
 | `omniroute_models_url` | `""` | Base URL the UI fetches `/models` from (for example a tunnel to the same gateway). Empty uses `omniroute_base_url`. | none | `ATLAS_OMNIROUTE_MODELS_URL`, `OMNIROUTE_MODELS_URL` |
 | `omniroute_input_token_limit` | `128000` | Pre-flight limit for OmniRoute models. | >= 1 | `ATLAS_OMNIROUTE_INPUT_TOKEN_LIMIT`, `OMNIROUTE_INPUT_TOKEN_LIMIT` |
-| `notes_prompt_name` | `"notes_v1_1.yaml"` | Prompt file inside `prompts_base_dir`. The file's own `version` key (e.g. `notes_v1.1`) is stored on each summary. The file must contain `{{Title}}` and `{{Transcript}}`. | not empty; file must exist | `ATLAS_NOTES_PROMPT_NAME`, `NOTES_PROMPT_NAME` |
+| `notes_prompt_name` | `"notes_v1_2.yaml"` | Prompt file inside `prompts_base_dir`. The file's own `version` key (e.g. `notes_v1.2`) is stored on each summary (`custom` for a one-off regenerate prompt typed in the review screen, which never changes this file). The file must contain `{{Title}}` and `{{Transcript}}`. `notes_v1_2` makes the model start the notes with a short `Summary` section, which the Drive index shows next to each video; older prompt files still work (the index then uses the first sentences of the Notes section). | not empty; file must exist | `ATLAS_NOTES_PROMPT_NAME`, `NOTES_PROMPT_NAME` |
 | `notes_request_timeout_seconds` | `300.0` | Timeout of one LLM call. A timeout is a transient `network_error`, retried with backoff. | > 0 | `ATLAS_NOTES_REQUEST_TIMEOUT_SECONDS` |
-| `prompts_base_dir` | `"src/prompts"` | Folder holding prompt files (`notes_v1.yaml`, `notes_v1_1.yaml`). | not empty | `ATLAS_PROMPTS_BASE_DIR` |
+| `prompts_base_dir` | `"src/prompts"` | Folder holding prompt files (`notes_v1.yaml`, `notes_v1_1.yaml`, `notes_v1_2.yaml`). | not empty | `ATLAS_PROMPTS_BASE_DIR` |
 
 ### Pipeline concurrency and retries
 

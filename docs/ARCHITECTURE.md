@@ -105,6 +105,7 @@ erDiagram
     INTEGER duplicate_of_video_id FK
     INTEGER run_token "stale-run guard"
     INTEGER regen_requested
+    TEXT regen_prompt "one-off prompt of a pending regenerate; cleared when it finishes"
     TEXT created_at
     TEXT updated_at
   }
@@ -286,6 +287,12 @@ Notes on the shortcuts:
   `regen_requested=1`; the worker reuses the stored transcript (or re-fetches it), generates new
   notes, then `repo.regenerate` overwrites the summary, clears approval and publish flags,
   keeps `drive_doc_id` and writes `pending_review`.
+  An optional body `{prompt}` is stored in `videos.regen_prompt` and passed to the generator as
+  `prompt_template` (it replaces the prompt file for that run only; the summary is recorded with
+  `prompt_version = "custom"`). It must contain `{{Title}}` and `{{Transcript}}` (otherwise 409
+  before anything is queued) and is cleared when the new notes are stored, so automatic retries of
+  that regenerate keep it and the next plain regenerate uses the prompt file. The review screen
+  pre-fills it from `GET /api/settings/notes-prompt`.
 - **Duplicates** are only picked up once their first occurrence is `pending_review`, `approved`,
   `published`, or `failed` with `next_retry_at IS NULL`. A duplicate marked failed gets the
   reason "Same video as #N, which failed: ..."; Retry on it re-checks.
@@ -419,11 +426,6 @@ sequenceDiagram
     P->>DB: Save drive_index_doc_id
   end
 
-  opt Index digest changed or index document is new
-    P->>G: Replace index document body
-    P->>DB: Save index_digest
-  end
-
   loop Entries in position order
     alt Stored document ID exists and file state is valid
       P->>G: Replace document body or rename only
@@ -434,6 +436,11 @@ sequenceDiagram
     end
     P->>DB: Save document ID and mark published
     Note right of DB: Store published_digest
+  end
+
+  opt Index digest changed, index document is new, or a document got a new id
+    P->>G: Replace index document body with titles, links and descriptions
+    P->>DB: Save index_digest
   end
 
   UC->>DB: finish_publish
@@ -460,6 +467,12 @@ Idempotency and resume:
 - **Deleted in Drive.** A stored folder that is missing or trashed makes the whole playlist
   publish again into a new folder (only approved/published videos qualify). A stored video Doc
   that is missing or trashed is re-created. The stored index Doc is not state-checked.
+- **Index Doc.** A numbered list; each entry is the video title (bold, linking to its Doc once it
+  has one) and a short description: `notes_summary.extract_short_summary` reads the notes'
+  `Summary` section (the `notes_v1_2` prompt asks for it, so no extra AI call), falling back to
+  the first sentences of `Notes`. The index body is written **after** the video Docs so every
+  title can link to a Doc that exists; `index_digest` hashes title, description and whether the
+  title is linked, so editing a Summary or publishing a video rewrites the index in place.
 - **Naming.** `doc_naming.doc_name`: the 1-based position zero-padded to the digit count of the
   largest position (`7 - Title` in a 9-video playlist, `07 - Title` with 12 videos,
   `007 - Title` with 120), and the same text as Heading 1 in the Doc.
@@ -536,9 +549,10 @@ recovered on the next start.
 | `POST /api/playlists/{id}/publish` | Queue a publish (202) |
 | `DELETE /api/playlists/{id}`, `DELETE /api/playlists/{id}/transcripts` | Delete a playlist; clear its transcripts |
 | `GET /api/videos/{id}`, `GET/PUT /api/videos/{id}/summary` | Video state; read or edit notes |
-| `POST /api/videos/{id}/approve`, `/retry`, `/regenerate` | User actions (regenerate is 202) |
+| `POST /api/videos/{id}/approve`, `/retry`, `/regenerate` | User actions (regenerate is 202; optional body `{prompt}` = one-off prompt) |
 | `DELETE /api/videos/{id}/transcript` | Clear one transcript (text and subtitle file) |
 | `GET /api/drive/status`, `POST /api/drive/credentials`, `POST /api/drive/auth` | Drive state, upload the OAuth client JSON, run consent |
+| `GET /api/settings/notes-prompt` | The prompt template the generator uses now (for the temporary regenerate prompt) |
 | `GET/PUT/DELETE /api/settings` | Editable configuration: list with source and live/restart flags; validate and save; reset |
 | `GET /api/usage` | Usage ledger aggregates |
 | `GET /api/health`, `GET /api/diagnostics` | Liveness; readiness checks and the last 50 warnings/errors |

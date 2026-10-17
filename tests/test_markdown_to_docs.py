@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from src.domain.interfaces.drive_publisher import IndexDetail
 from src.domain.services.markdown_to_docs import (
     CODE_BACKGROUND_HEX,
     CODE_BORDER_HEX,
@@ -838,3 +839,65 @@ def _rgb(hex_color: str) -> dict[str, float]:
         "green": round(int(value[2:4], 16) / 255.0, 4),
         "blue": round(int(value[4:6], 16) / 255.0, 4),
     }
+
+
+# ---------------------------------------------------------------------------
+# Index Doc with descriptions and links
+# ---------------------------------------------------------------------------
+
+
+def _details(**by_position: tuple[str | None, str | None]) -> dict[int, IndexDetail]:
+    return {int(k[1:]): IndexDetail(*v) for k, v in by_position.items()}
+
+
+def test_index_entry_with_a_description_is_one_numbered_line() -> None:
+    requests = render_index_doc(
+        [(1, "First"), (2, "Second")], details=_details(p1=("Covers basics.", None))
+    )
+
+    assert inserted_text(requests) == "First – Covers basics.\nSecond\n"
+    assert len(bullet_requests(requests)) == 1  # still one list: numbering stays intact
+
+
+def test_index_title_links_to_its_doc_and_is_bold() -> None:
+    requests = render_index_doc([(1, "First")], details=_details(p1=("Covers basics.", "doc123")))
+
+    styles = [r["updateTextStyle"] for r in requests if "updateTextStyle" in r]
+    assert len(styles) == 1
+    assert styles[0]["textStyle"]["link"]["url"] == "https://docs.google.com/document/d/doc123/edit"
+    assert styles[0]["fields"] == "bold,link"
+    # The style covers exactly the title, not the description.
+    assert styles[0]["range"] == {
+        "startIndex": DEFAULT_START_INDEX,
+        "endIndex": DEFAULT_START_INDEX + len("First"),
+    }
+
+
+def test_index_style_ranges_follow_earlier_entries_and_utf16() -> None:
+    requests = render_index_doc(
+        [(1, "A \U0001F600"), (2, "Beta")],
+        details=_details(p1=("d", "x"), p2=(None, "y")),
+    )
+
+    styles = [r["updateTextStyle"]["range"] for r in requests if "updateTextStyle" in r]
+    first_line = "A \U0001F600 – d\n"
+    first_title_len = len("A ") + 2  # the emoji is two UTF-16 code units
+    assert styles[0] == {
+        "startIndex": DEFAULT_START_INDEX,
+        "endIndex": DEFAULT_START_INDEX + first_title_len,
+    }
+    second_start = DEFAULT_START_INDEX + len("A ") + 2 + len(" – d\n")
+    assert styles[1] == {"startIndex": second_start, "endIndex": second_start + len("Beta")}
+    assert inserted_text(requests) == first_line + "Beta\n"
+
+
+def test_index_description_cannot_break_the_list() -> None:
+    requests = render_index_doc([(1, "T")], details=_details(p1=("two\nlines", None)))
+
+    assert inserted_text(requests) == "T – two lines\n"
+
+
+def test_index_without_details_has_no_style_requests() -> None:
+    requests = render_index_doc([(1, "First")], details={})
+
+    assert not [r for r in requests if "updateTextStyle" in r]

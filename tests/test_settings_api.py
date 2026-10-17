@@ -217,3 +217,10 @@ def test_omniroute_provider_builds_an_openai_compatible_spec() -> None:
     assert spec.api_key_env == "OMNIROUTE_API_KEY"
     assert spec.provider == "omniroute"
     assert spec.model == "gh/gemini-3.6-flash"
+
+
+def test_the_notes_prompt_endpoint_returns_the_current_prompt_file(client: TestClient) -> None:
+    body = client.get("/api/settings/notes-prompt").json()
+
+    assert "{{Title}}" in body["prompt"] and "{{Transcript}}" in body["prompt"]
+    assert body["version"] == "notes_v1.2"

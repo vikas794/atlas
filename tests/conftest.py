@@ -112,11 +112,16 @@ class FakeTranscripts:
 class FakeNotes:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.templates: list[str | None] = []
 
-    async def generate_notes(self, *, title: str, transcript: str) -> GeneratedNotes:
+    async def generate_notes(
+        self, *, title: str, transcript: str, prompt_template: str | None = None
+    ) -> GeneratedNotes:
         self.calls.append(title)
+        self.templates.append(prompt_template)
         body = f"## Notes\n\nNotes for {title}\n\n## Key Points\n\n- point"
-        return GeneratedNotes(body, "fake", "fake-model", "notes_test")
+        version = "custom" if prompt_template else "notes_test"
+        return GeneratedNotes(body, "fake", "fake-model", version)
 
 
 class FakePublisher:

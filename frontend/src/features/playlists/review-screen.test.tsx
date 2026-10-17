@@ -378,6 +378,93 @@ describe('ReviewScreen actions', () => {
     expect(screen.queryByText('Notes regenerated.')).not.toBeInTheDocument()
   })
 
+  it('Regenerate with a temporary prompt sends the edited prompt once', async () => {
+    const api = setup()
+    api.on('GET', '/api/playlists/1/videos', () =>
+      videoList([makeVideo(1, { stage: 'pending_review' }), makeVideo(2)]),
+    )
+    api.on('GET', '/api/settings/notes-prompt', {
+      prompt: 'Default {{Title}} {{Transcript}}',
+      version: 'notes_v1.2',
+    })
+    api.on('POST', '/api/videos/1/regenerate', () => ({
+      status: 202,
+      body: makeVideo(1, { stage: 'queued', regenerating: true }),
+    }))
+    const user = userEvent.setup()
+    renderRoute('/playlists/1/review/1')
+
+    await user.click(await screen.findByRole('button', { name: /^regenerate$/i }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).queryByLabelText('Temporary prompt')).not.toBeInTheDocument()
+    await user.click(within(dialog).getByLabelText(/use a temporary prompt/i))
+
+    const field = await within(dialog).findByLabelText('Temporary prompt')
+    await waitFor(() => expect(field).toHaveValue('Default {{Title}} {{Transcript}}'))
+    await user.clear(field)
+    await user.click(field)
+    await user.paste('Short. {{Title}} {{Transcript}}')
+    await user.click(within(dialog).getByRole('button', { name: 'Regenerate notes' }))
+
+    await waitFor(() => expect(api.callsTo('POST', '/api/videos/1/regenerate')).toHaveLength(1))
+    expect(api.callsTo('POST', '/api/videos/1/regenerate')[0].body).toEqual({
+      prompt: 'Short. {{Title}} {{Transcript}}',
+    })
+  })
+
+  it('Regenerate with the temporary prompt left unchanged sends no prompt', async () => {
+    const api = setup()
+    api.on('GET', '/api/playlists/1/videos', () =>
+      videoList([makeVideo(1, { stage: 'pending_review' }), makeVideo(2)]),
+    )
+    api.on('GET', '/api/settings/notes-prompt', {
+      prompt: 'Default {{Title}} {{Transcript}}',
+      version: 'notes_v1.2',
+    })
+    api.on('POST', '/api/videos/1/regenerate', () => ({
+      status: 202,
+      body: makeVideo(1, { stage: 'queued', regenerating: true }),
+    }))
+    const user = userEvent.setup()
+    renderRoute('/playlists/1/review/1')
+
+    await user.click(await screen.findByRole('button', { name: /^regenerate$/i }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByLabelText(/use a temporary prompt/i))
+    const field = await within(dialog).findByLabelText('Temporary prompt')
+    await waitFor(() => expect(field).toHaveValue('Default {{Title}} {{Transcript}}'))
+    await user.click(within(dialog).getByRole('button', { name: 'Regenerate notes' }))
+
+    await waitFor(() => expect(api.callsTo('POST', '/api/videos/1/regenerate')).toHaveLength(1))
+    expect(api.callsTo('POST', '/api/videos/1/regenerate')[0].body).toBeUndefined()
+  })
+
+  it('a temporary prompt without the placeholders is refused inside the dialog', async () => {
+    const api = setup()
+    api.on('GET', '/api/playlists/1/videos', () =>
+      videoList([makeVideo(1, { stage: 'pending_review' }), makeVideo(2)]),
+    )
+    api.on('GET', '/api/settings/notes-prompt', {
+      prompt: 'Default {{Title}} {{Transcript}}',
+      version: 'notes_v1.2',
+    })
+    const user = userEvent.setup()
+    renderRoute('/playlists/1/review/1')
+
+    await user.click(await screen.findByRole('button', { name: /^regenerate$/i }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByLabelText(/use a temporary prompt/i))
+    const field = await within(dialog).findByLabelText('Temporary prompt')
+    await waitFor(() => expect(field).toHaveValue('Default {{Title}} {{Transcript}}'))
+    await user.clear(field)
+    await user.click(field)
+    await user.paste('no placeholders')
+    await user.click(within(dialog).getByRole('button', { name: 'Regenerate notes' }))
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('{{Title}}')
+    expect(api.callsTo('POST', '/api/videos/1/regenerate')).toHaveLength(0)
+  })
+
   it('handles an async (202) regenerate: shows Regenerating, polls, then reports completion', async () => {
     let stage: Video['stage'] = 'pending_review'
     const api = setup()
