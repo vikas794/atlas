@@ -167,16 +167,14 @@ async def get_settings() -> SettingsResponse:
     return await asyncio.to_thread(_snapshot)
 
 
-def _fetch_freellmapi_models() -> list[str]:
-    """Model ids from FreeLLMAPI's ``GET <models_url>/models`` (sorted, de-duplicated)."""
-    settings = load_settings()
-    base = (settings.freellmapi_models_url or settings.freellmapi_base_url).strip().rstrip("/")
-    keys = read_api_keys(settings.freellmapi_api_key_env)
+def _fetch_openai_models(label: str, base: str, key_env: str) -> list[str]:
+    """Model ids from an OpenAI-compatible ``GET <base>/models`` (sorted, de-duplicated)."""
+    base = base.strip().rstrip("/")
+    keys = read_api_keys(key_env)
     if not keys:
         raise HTTPError(
             status_code=400,
-            detail=f"{settings.freellmapi_api_key_env} is not set. Add the FreeLLMAPI API key "
-            "to .env to list its models.",
+            detail=f"{key_env} is not set. Add the {label} API key to .env to list its models.",
             error_code="CONFIG_MISSING",
         )
     request = urllib.request.Request(  # noqa: S310 - URL comes from the operator's own settings
@@ -188,13 +186,13 @@ def _fetch_freellmapi_models() -> list[str]:
     except urllib.error.HTTPError as exc:
         raise HTTPError(
             status_code=502,
-            detail=f"FreeLLMAPI answered {exc.code} for {base}/models.",
+            detail=f"{label} answered {exc.code} for {base}/models.",
             error_code="PROVIDER_ERROR",
         ) from exc
     except (urllib.error.URLError, OSError, ValueError) as exc:
         raise HTTPError(
             status_code=502,
-            detail=f"Could not reach FreeLLMAPI at {base}: {getattr(exc, 'reason', exc)}",
+            detail=f"Could not reach {label} at {base}: {getattr(exc, 'reason', exc)}",
             error_code="PROVIDER_ERROR",
         ) from exc
     data = payload.get("data") if isinstance(payload, dict) else None
@@ -202,13 +200,30 @@ def _fetch_freellmapi_models() -> list[str]:
     return sorted(ids)
 
 
+def _fetch_freellmapi_models() -> list[str]:
+    settings = load_settings()
+    return _fetch_openai_models(
+        "FreeLLMAPI",
+        settings.freellmapi_models_url or settings.freellmapi_base_url,
+        settings.freellmapi_api_key_env,
+    )
+
+
+def _fetch_nvidia_models() -> list[str]:
+    settings = load_settings()
+    return _fetch_openai_models("NVIDIA", settings.nvidia_base_url, settings.nvidia_api_key_env)
+
+
 @router.get("/models", response_model=ModelListResponse)
 async def list_models(provider: str) -> ModelListResponse:
-    """The models selectable for ``provider``: a fixed Gemini list, or FreeLLMAPI's live list."""
+    """The models selectable for ``provider``: a fixed Gemini list, or the live list of FreeLLMAPI or NVIDIA."""
     if provider == "gemini":
         return ModelListResponse(provider=provider, models=list(GEMINI_MODEL_CHOICES))
     if provider == "freellmapi":
         models = await asyncio.to_thread(_fetch_freellmapi_models)
+        return ModelListResponse(provider=provider, models=models)
+    if provider == "nvidia":
+        models = await asyncio.to_thread(_fetch_nvidia_models)
         return ModelListResponse(provider=provider, models=models)
     raise HTTPError(
         status_code=404,

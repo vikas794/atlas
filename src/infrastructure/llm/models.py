@@ -26,6 +26,7 @@ _DEFAULT_KEY_ENVS = {
     "anthropic": "ANTHROPIC_API_KEY",
     "groq": "GROQ_API_KEY",
     "mistral": "MISTRAL_API_KEY",
+    "nvidia": "NVIDIA_API_KEY",
 }
 
 #: Pre-flight input limit (tokens) when an entry names none. Deliberately the smallest window in
@@ -36,6 +37,10 @@ DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
 DEFAULT_OPENROUTER_MODEL = "openai/gpt-5-mini"
 DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_FREELLMAPI_BASE_URL = "http://localhost:3001/v1"
+DEFAULT_NVIDIA_MODEL = "deepseek-ai/deepseek-v4.1-flash"
+DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+#: NVIDIA's hosted models answer slowly; the generic notes timeout would abort them.
+DEFAULT_NVIDIA_REQUEST_TIMEOUT_SECONDS = 1800.0
 _DEFAULT_GEMINI_INPUT_TOKEN_LIMIT = 1_000_000
 
 #: The Gemini models offered in the UI dropdown (newest first).
@@ -61,6 +66,8 @@ class ModelSpec:
     input_token_limit: int = DEFAULT_INPUT_TOKEN_LIMIT
     #: Identity to record when it differs from the LiteLLM prefix (FreeLLMAPI is ``openai/...``).
     provider_name: str | None = None
+    #: Per-call timeout (seconds) overriding ``notes_request_timeout_seconds`` for slow providers.
+    request_timeout_seconds: float | None = None
 
     @property
     def provider(self) -> str:
@@ -80,6 +87,7 @@ class ModelSpec:
             "openai": "OpenAI",
             "gemini": "Gemini",
             "freellmapi": "FreeLLMAPI",
+            "nvidia": "NVIDIA",
         }
         return names.get(self.provider, self.provider.capitalize())
 
@@ -173,9 +181,31 @@ def _legacy_spec(settings: SettingsLoader) -> ModelSpec:
             ),
             provider_name="freellmapi",
         )
+    if provider == "nvidia":
+        name = explicit or str(settings("nvidia_model", "") or "").strip() or DEFAULT_NVIDIA_MODEL
+        base = str(settings("nvidia_base_url", "") or "").strip()
+        return ModelSpec(
+            litellm_model=f"openai/{name}",
+            api_key_env=str(settings("nvidia_api_key_env", "NVIDIA_API_KEY")),
+            api_base=base or DEFAULT_NVIDIA_BASE_URL,
+            input_token_limit=int(
+                cast(int | str, settings("nvidia_input_token_limit", DEFAULT_INPUT_TOKEN_LIMIT))
+                or DEFAULT_INPUT_TOKEN_LIMIT
+            ),
+            provider_name="nvidia",
+            request_timeout_seconds=float(
+                cast(
+                    float | str,
+                    settings(
+                        "nvidia_request_timeout_seconds", DEFAULT_NVIDIA_REQUEST_TIMEOUT_SECONDS
+                    ),
+                )
+                or DEFAULT_NVIDIA_REQUEST_TIMEOUT_SECONDS
+            ),
+        )
     raise ValueError(
         f"Unknown notes_provider {provider!r} (from settings 'notes_provider'); supported "
-        "providers are: gemini, openrouter, freellmapi. Or list models in 'notes_models'."
+        "providers are: gemini, openrouter, freellmapi, nvidia. Or list models in 'notes_models'."
     )
 
 
@@ -184,6 +214,8 @@ __all__ = [
     "DEFAULT_INPUT_TOKEN_LIMIT",
     "DEFAULT_OPENROUTER_MODEL",
     "DEFAULT_FREELLMAPI_BASE_URL",
+    "DEFAULT_NVIDIA_BASE_URL",
+    "DEFAULT_NVIDIA_MODEL",
     "GEMINI_MODEL_CHOICES",
     "ModelSpec",
     "default_key_env",

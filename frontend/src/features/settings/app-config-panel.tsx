@@ -19,10 +19,11 @@ type Draft = Record<string, string | boolean>
 const RUN_MODE_KEY = 'max_concurrent_videos'
 
 /** Notes fields the model picker owns, so the generic list skips them. */
-const PICKER_KEYS = new Set(['notes_provider', 'gemini_model', 'freellmapi_model', 'openrouter_model'])
+const PICKER_KEYS = new Set(['notes_provider', 'gemini_model', 'freellmapi_model', 'nvidia_model', 'openrouter_model'])
 const MODEL_KEY_BY_PROVIDER: Record<string, string> = {
   gemini: 'gemini_model',
   freellmapi: 'freellmapi_model',
+  nvidia: 'nvidia_model',
   openrouter: 'openrouter_model',
 }
 
@@ -354,7 +355,8 @@ function ModelPicker({
   const providerField = fieldsByKey.get('notes_provider')
   const provider = providerField ? String(valueOf(providerField)) : ''
   const modelField = fieldsByKey.get(MODEL_KEY_BY_PROVIDER[provider] ?? '')
-  const hasList = provider === 'gemini' || provider === 'freellmapi'
+  const searchable = provider === 'freellmapi' || provider === 'nvidia'
+  const hasList = provider === 'gemini' || searchable
 
   const models = useQuery({
     queryKey: queryKeys.models(provider),
@@ -423,14 +425,14 @@ function ModelPicker({
                 id={modelId}
                 className="input max-w-md"
                 type="text"
-                list={provider === 'freellmapi' ? listId : undefined}
+                list={searchable ? listId : undefined}
                 value={current}
                 disabled={modelDisabled}
-                placeholder={provider === 'freellmapi' ? 'Search or type a model id' : undefined}
+                placeholder={searchable ? 'Search or type a model id' : undefined}
                 aria-invalid={errorOf(modelField.key) ? true : undefined}
                 onChange={(event) => onChange(modelField.key, event.target.value)}
               />
-              {provider === 'freellmapi' ? (
+              {searchable ? (
                 <>
                   <datalist id={listId}>
                     {options.map((name) => (
@@ -453,7 +455,7 @@ function ModelPicker({
             <p role="alert" className="text-label text-st-error-fg">
               Could not load the model list: {errorMessage(models.error)}
             </p>
-          ) : provider === 'freellmapi' && models.data ? (
+          ) : searchable && models.data ? (
             <p className="text-label text-text-muted">{options.length} models available.</p>
           ) : null}
           {errorOf(modelField.key) ? (

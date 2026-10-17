@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-NOTES_PROVIDERS = ("gemini", "openrouter", "freellmapi")
+NOTES_PROVIDERS = ("gemini", "openrouter", "freellmapi", "nvidia")
 #: Keys an entry of ``notes_models`` may carry (see ``AtlasSettings.notes_models``).
 NOTES_MODEL_KEYS = ("model", "api_key_env", "api_base", "input_token_limit")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
@@ -92,6 +92,7 @@ class AtlasSettings:
     youtube_api_key_env: str = "YOUTUBE_API_KEY"
     gemini_api_key_env: str = "GEMINI_API_KEY"
     freellmapi_api_key_env: str = "FREELLMAPI_API_KEY"
+    nvidia_api_key_env: str = "NVIDIA_API_KEY"
 
     # --- Google OAuth ----------------------------------------------------
     google_creds_path: str = "credentials.json"
@@ -131,6 +132,12 @@ class AtlasSettings:
     freellmapi_base_url: str = "http://localhost:3001/v1"
     freellmapi_models_url: str = ""
     freellmapi_input_token_limit: int = 128000
+    #: NVIDIA NIM (build.nvidia.com): an OpenAI-compatible endpoint. Its reasoning models are slow,
+    #: so it has its own, much longer per-request timeout than ``notes_request_timeout_seconds``.
+    nvidia_model: str = "deepseek-ai/deepseek-v4.1-flash"
+    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
+    nvidia_input_token_limit: int = 128000
+    nvidia_request_timeout_seconds: float = 1800.0
     notes_prompt_name: str = "notes_v1_2.yaml"  # the prompt file's own `version` is recorded
     notes_request_timeout_seconds: float = 300.0  # a hung LLM call must not hold a slot forever
 
@@ -232,7 +239,7 @@ class AtlasSettings:
             "database_path", "google_creds_path", "google_token_path", "transcript_output_folder",
             "prompts_base_dir", "notes_prompt_name", "log_file", "transcript_language",
             "gemini_api_key_env", "youtube_api_key_env", "openrouter_api_key_env",
-            "freellmapi_api_key_env",
+            "freellmapi_api_key_env", "nvidia_api_key_env",
         ):  # fmt: skip
             need(bool(str(getattr(self, name)).strip()), name, "must not be empty")
         need(self.notes_provider in NOTES_PROVIDERS, "notes_provider",
@@ -258,11 +265,13 @@ class AtlasSettings:
              "drive_backoff_cap_seconds", "must be at least drive_backoff_base_seconds")  # fmt: skip
         need(self.notes_request_timeout_seconds > 0, "notes_request_timeout_seconds",
              "must be greater than 0")  # fmt: skip
+        need(self.nvidia_request_timeout_seconds > 0, "nvidia_request_timeout_seconds",
+             "must be greater than 0")  # fmt: skip
         need(self.worker_poll_interval_seconds > 0, "worker_poll_interval_seconds",
              "must be greater than 0")  # fmt: skip
         for name in (
             "gemini_input_token_limit", "openrouter_input_token_limit",
-            "freellmapi_input_token_limit",
+            "freellmapi_input_token_limit", "nvidia_input_token_limit",
         ):  # fmt: skip
             need(getattr(self, name) >= 1, name, "must be at least 1")
         found.extend(self._notes_models_problems())
@@ -300,6 +309,10 @@ ENV_ALIASES: dict[str, str] = {
     "FREELLMAPI_BASE_URL": "freellmapi_base_url",
     "FREELLMAPI_MODELS_URL": "freellmapi_models_url",
     "FREELLMAPI_INPUT_TOKEN_LIMIT": "freellmapi_input_token_limit",
+    "NVIDIA_MODEL": "nvidia_model",
+    "NVIDIA_BASE_URL": "nvidia_base_url",
+    "NVIDIA_INPUT_TOKEN_LIMIT": "nvidia_input_token_limit",
+    "NVIDIA_REQUEST_TIMEOUT_SECONDS": "nvidia_request_timeout_seconds",
 }
 
 # Older ``ATLAS_*`` names that predate the field names and must keep working

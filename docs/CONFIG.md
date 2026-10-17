@@ -60,6 +60,7 @@ Drive panel owns those), `database_path` (it locates the saved settings, so set 
   Gemini offers a fixed list; FreeLLMAPI's list is fetched live (`GET
   /api/settings/models?provider=freellmapi`, authenticated with `FREELLMAPI_API_KEY`, from
   `freellmapi_models_url` or `freellmapi_base_url`) into a searchable field, with a Refresh button.
+  NVIDIA's list works the same way (`provider=nvidia`, `NVIDIA_API_KEY`, `nvidia_base_url`).
   Saving applies it to new work at once. `notes_models`, when set in `config.yaml`, still wins.
 - **Serial or parallel.** "Run mode" is `max_concurrent_videos`: Serial stores `1`, Parallel
   stores 2 or more. Transcript fetches are one at a time and paced either way.
@@ -132,7 +133,7 @@ These hold the **name** of the environment variable that contains the key.
 | Setting | Default | Effect | Validation | Env |
 |---|---|---|---|---|
 | `notes_models` | `[]` | Ordered list of LiteLLM models, tried first to last (later ones are fallbacks). Each entry: `model` (`<provider>/<model>`, required), `api_key_env`, `api_base`, `input_token_limit`. See [Choosing models](#choosing-models-litellm). Empty falls back to the single-model shorthand below. | each entry needs `model` like `gemini/gemini-3.5-flash`; no other keys | `ATLAS_NOTES_MODELS`, `NOTES_MODELS` (a JSON list) |
-| `notes_provider` | `"gemini"` | Legacy single-model shorthand, used only when `notes_models` is empty. | `gemini`, `openrouter` or `freellmapi` | `ATLAS_NOTES_PROVIDER`, `NOTES_PROVIDER` |
+| `notes_provider` | `"gemini"` | Legacy single-model shorthand, used only when `notes_models` is empty. | `gemini`, `openrouter`, `freellmapi` or `nvidia` | `ATLAS_NOTES_PROVIDER`, `NOTES_PROVIDER` |
 | `notes_model` | `""` | Legacy shorthand: model for the active `notes_provider`. Advanced override; leave empty to use the model picked in the UI (`gemini_model` / `freellmapi_model` / `openrouter_model`). | none | `ATLAS_NOTES_MODEL`, `NOTES_MODEL` |
 | `gemini_model` | `"gemini-3.5-flash"` | Gemini model when `notes_model` is empty. The UI dropdown offers `gemini-3.8-flash`, `gemini-3.6-flash`, `gemini-3-flash-preview`, `gemini-flash-latest`, `gemini-3.1-pro-preview`. | none | `ATLAS_GEMINI_MODEL`, `GEMINI_MODEL` |
 | `gemini_input_token_limit` | `1000000` | Pre-flight limit: a transcript estimated (characters / 4) above this fails as permanent `transcript_too_large` without calling Gemini. | >= 1 | `ATLAS_GEMINI_INPUT_TOKEN_LIMIT`, `GEMINI_INPUT_TOKEN_LIMIT` |
@@ -143,6 +144,10 @@ These hold the **name** of the environment variable that contains the key.
 | `freellmapi_base_url` | `"http://localhost:3001/v1"` | OpenAI-compatible endpoint notes are sent to. | none | `ATLAS_FREELLMAPI_BASE_URL`, `FREELLMAPI_BASE_URL` |
 | `freellmapi_models_url` | `""` | Base URL the UI fetches `/models` from (for example a tunnel to the same gateway). Empty uses `freellmapi_base_url`. | none | `ATLAS_FREELLMAPI_MODELS_URL`, `FREELLMAPI_MODELS_URL` |
 | `freellmapi_input_token_limit` | `128000` | Pre-flight limit for FreeLLMAPI models. | >= 1 | `ATLAS_FREELLMAPI_INPUT_TOKEN_LIMIT`, `FREELLMAPI_INPUT_TOKEN_LIMIT` |
+| `nvidia_model` | `"deepseek-ai/deepseek-v4.1-flash"` | NVIDIA model id (sent as `openai/<id>`) when `notes_provider` is `nvidia` and `notes_model` is empty. | none | `ATLAS_NVIDIA_MODEL`, `NVIDIA_MODEL` |
+| `nvidia_base_url` | `"https://integrate.api.nvidia.com/v1"` | OpenAI-compatible NVIDIA NIM endpoint notes are sent to; its `/models` feeds the UI list. | none | `ATLAS_NVIDIA_BASE_URL`, `NVIDIA_BASE_URL` |
+| `nvidia_input_token_limit` | `128000` | Pre-flight limit for NVIDIA models. | >= 1 | `ATLAS_NVIDIA_INPUT_TOKEN_LIMIT`, `NVIDIA_INPUT_TOKEN_LIMIT` |
+| `nvidia_request_timeout_seconds` | `1800.0` | Per-request timeout for the `nvidia` provider only. NVIDIA requests (large reasoning models) are slow, so this replaces `notes_request_timeout_seconds` for them. | > 0 | `ATLAS_NVIDIA_REQUEST_TIMEOUT_SECONDS`, `NVIDIA_REQUEST_TIMEOUT_SECONDS` |
 | `notes_prompt_name` | `"notes_v1_2.yaml"` | Prompt file inside `prompts_base_dir`. The file's own `version` key (e.g. `notes_v1.2`) is stored on each summary (`custom` for a one-off regenerate prompt typed in the review screen, which never changes this file). The file must contain `{{Title}}` and `{{Transcript}}`. `notes_v1_2` makes the model start the notes with a short `Summary` section, which the Drive index shows next to each video; older prompt files still work (the index then uses the first sentences of the Notes section). | not empty; file must exist | `ATLAS_NOTES_PROMPT_NAME`, `NOTES_PROMPT_NAME` |
 | `notes_request_timeout_seconds` | `300.0` | Timeout of one LLM call. A timeout is a transient `network_error`, retried with backoff. | > 0 | `ATLAS_NOTES_REQUEST_TIMEOUT_SECONDS` |
 | `prompts_base_dir` | `"src/prompts"` | Folder holding prompt files (`notes_v1.yaml`, `notes_v1_1.yaml`, `notes_v1_2.yaml`). | not empty | `ATLAS_PROMPTS_BASE_DIR` |
@@ -183,6 +188,7 @@ missing, and each feature fails with a message naming the variable.
 | `YOUTUBE_API_KEY` | Listing a playlist (YouTube Data API v3, enabled in Google Cloud) | `POST /api/playlists` answers 503 `CONFIG_MISSING` |
 | `GEMINI_API_KEY` | Notes with a `gemini/...` model (the default); a Google AI Studio key | That model is skipped; with no other model, each video fails with a permanent `config_error`, no retries |
 | `OPENROUTER_API_KEY` | Notes with an `openrouter/...` model | Same as above |
+| `NVIDIA_API_KEY` | Notes with the `nvidia` provider (NVIDIA NIM), and listing its models in Settings | `GET /api/settings/models?provider=nvidia` answers 400 `CONFIG_MISSING`; notes fail as above |
 | `FREELLMAPI_API_KEY` | Notes with the `freellmapi` provider, and listing its models in Settings | `GET /api/settings/models?provider=freellmapi` answers 400 `CONFIG_MISSING`; notes fail as above |
 | `<PROVIDER>_API_KEY` / the entry's `api_key_env` | Notes with any other `notes_models` entry | Same as above |
 

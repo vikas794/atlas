@@ -190,7 +190,7 @@ class LiteLLMNotesGenerator:
             "model": spec.litellm_model,
             "messages": [{"role": "user", "content": prompt_text}],
             "api_key": key,
-            "timeout": request_timeout_seconds(self._settings),
+            "timeout": spec.request_timeout_seconds or request_timeout_seconds(self._settings),
             # Atlas owns the retry policy; a second, invisible retry loop would double
             # every wait and hide real failure counts.
             "num_retries": 0,

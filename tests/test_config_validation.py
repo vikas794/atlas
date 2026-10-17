@@ -104,7 +104,7 @@ def test_env_example_holds_only_secrets_and_no_values() -> None:
     from src.config.settings import repo_root
 
     template = dotenv_values(repo_root() / ".env.example")
-    assert set(template) == {"YOUTUBE_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "FREELLMAPI_API_KEY"}
+    assert set(template) == {"YOUTUBE_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "FREELLMAPI_API_KEY", "NVIDIA_API_KEY"}
     assert all(not value for value in template.values())
 
 

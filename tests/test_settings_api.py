@@ -219,6 +219,18 @@ def test_freellmapi_provider_builds_an_openai_compatible_spec() -> None:
     assert spec.model == "gh/gemini-3.6-flash"
 
 
+def test_nvidia_provider_builds_a_spec_with_a_long_timeout() -> None:
+    from src.infrastructure.llm.models import resolve_model_specs
+
+    values = {"notes_provider": "nvidia"}
+    (spec,) = resolve_model_specs(lambda key, default=None: values.get(key, default))
+    assert spec.litellm_model == "openai/deepseek-ai/deepseek-v4.1-flash"
+    assert spec.api_base == "https://integrate.api.nvidia.com/v1"
+    assert spec.api_key_env == "NVIDIA_API_KEY"
+    assert spec.provider == "nvidia"
+    assert spec.request_timeout_seconds == 1800.0
+
+
 def test_the_notes_prompt_endpoint_returns_the_current_prompt_file(client: TestClient) -> None:
     body = client.get("/api/settings/notes-prompt").json()
 

@@ -243,7 +243,7 @@ def test_every_key_in_env_example_is_actually_read() -> None:
         {f"ATLAS_{name.upper()}" for name in field_names}
         | set(ENV_ALIASES)
         | {"ATLAS_DB_PATH"}  # legacy alias of ATLAS_DATABASE_PATH
-        | {"GEMINI_API_KEY", "OPENROUTER_API_KEY", "FREELLMAPI_API_KEY", "YOUTUBE_API_KEY"}  # secrets, read by name
+        | {"GEMINI_API_KEY", "OPENROUTER_API_KEY", "FREELLMAPI_API_KEY", "NVIDIA_API_KEY", "YOUTUBE_API_KEY"}  # secrets, read by name
     )
 
     unknown = [key for key in dotenv_values(repo_root() / ".env.example") if key not in recognised]

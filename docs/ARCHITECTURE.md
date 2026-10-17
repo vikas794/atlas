@@ -27,7 +27,7 @@ flowchart LR
   end
   I --> YT["YouTube Data API v3<br/>youtube/playlist.py"]
   I --> YD["yt-dlp subtitles<br/>transcript/ytdlp/provider.py"]
-  I --> LLM["LiteLLM<br/>Gemini / OpenRouter / OpenAI / FreeLLMAPI ...<br/>llm/litellm_notes"]
+  I --> LLM["LiteLLM<br/>Gemini / OpenRouter / OpenAI / FreeLLMAPI / NVIDIA ...<br/>llm/litellm_notes"]
   I --> DB[("SQLite (WAL)<br/>storage/")]
   I --> GD["Google Drive + Docs<br/>google/drive.py, publisher.py"]
 ```
