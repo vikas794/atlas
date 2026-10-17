@@ -537,7 +537,8 @@ async def test_crash_mid_run_resumes_without_redoing_completed_work(
     left = await repo.list_videos(playlist_pk)
     assert left[0].stage == Stage.PENDING_REVIEW
     assert left[1].stage == Stage.GENERATING_NOTES
-    assert left[2].stage == Stage.QUEUED
+    # v3's transcript was prefetched while v2's notes hung: it waits for an AI slot.
+    assert left[2].stage == Stage.TRANSCRIPT_READY
 
     notes.gate = None
     restarted, _ = worker_for(repo, transcripts, notes, max_concurrent_videos=1)
@@ -550,7 +551,7 @@ async def test_crash_mid_run_resumes_without_redoing_completed_work(
     assert [v.stage for v in await repo.list_videos(playlist_pk)] == [Stage.PENDING_REVIEW] * 3
     assert sorted(transcripts.calls) == ids  # no transcript was fetched twice
     # v1 was never regenerated; v2 needed one more call (its first never returned).
-    assert notes.calls == ["Video v1", "Video v2", "Video v2", "Video v3"]
+    assert sorted(notes.calls) == ["Video v1", "Video v2", "Video v2", "Video v3"]
 
 
 async def test_running_the_same_playlist_twice_creates_no_duplicates_or_extra_calls(

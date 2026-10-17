@@ -95,11 +95,15 @@ class ProcessVideoUseCase:
             else rate_limit_backoff_cap_seconds
         )
 
-    async def execute(self, video_pk: int) -> Video | None:
+    async def execute(self, video_pk: int, phase: str = "all") -> Video | None:
         """Run the video pipeline for a single video.
 
         Args:
             video_pk: Primary key ID of the video row.
+            phase: ``"all"`` runs transcript then notes; ``"fetch"`` stops once the
+                transcript is stored (``transcript_ready``); ``"notes"`` runs only the
+                notes step, so the worker can fetch transcripts and generate notes in
+                separate pools.
 
         Returns:
             The updated Video entity, or None if the video was not found.
@@ -131,7 +135,7 @@ class ProcessVideoUseCase:
             if video.duplicate_of is not None and not video.regen_requested:
                 return await self._reuse_first_occurrence(video, token)
 
-            await self._run(video, token)
+            await self._run(video, token, phase)
             return await self.repo.get_video(video_pk)
 
         except StaleRunError:
@@ -196,7 +200,7 @@ class ProcessVideoUseCase:
         logger.info("Reused summary of duplicate video", extra=_ctx(video))
         return await self.repo.get_video(video.id)
 
-    async def _run(self, video: Video, token: int) -> None:
+    async def _run(self, video: Video, token: int, phase: str = "all") -> None:
         """Transcript phase then notes phase, persisting each stage around its side effect."""
         ctx = _ctx(video)
         # Persisted videos must have a primary key.
@@ -221,6 +225,8 @@ class ProcessVideoUseCase:
                 # The transcript was cleaned up while the video waited: fetch it again.
                 await self.repo.update_stage(video_pk, Stage.QUEUED, token=token)
                 stage = Stage.QUEUED
+                if phase == "notes":
+                    return  # the fetch pool picks it up
             assert_transition(stage, Stage.FETCHING_TRANSCRIPT)
             await self.repo.update_stage(video_pk, Stage.FETCHING_TRANSCRIPT, token=token)
             logger.info("Fetching transcript", extra=ctx)
@@ -242,6 +248,9 @@ class ProcessVideoUseCase:
             )
             stage = Stage.TRANSCRIPT_READY
             transcript_text = result.cleaned_text
+
+        if phase == "fetch":
+            return  # the notes pool picks up transcript_ready videos
 
         # 2. Notes generation phase
         existing_summary = await self.repo.get_summary(video_pk)

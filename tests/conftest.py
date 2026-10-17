@@ -228,6 +228,10 @@ async def drain_pipeline(worker: PlaylistWorker, rounds: int = 20) -> None:
     """Run the worker's tick until nothing is runnable (deterministic, no sleeping loops)."""
     for _ in range(rounds):
         started = await worker._tick()
-        await asyncio.gather(*list(worker._active_tasks), *list(worker._publish_tasks))
+        await asyncio.gather(
+            *list(worker._fetch_tasks),
+            *list(worker._active_tasks),
+            *list(worker._publish_tasks),
+        )
         if not started:
             return

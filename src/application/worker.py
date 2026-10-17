@@ -22,6 +22,7 @@ import logging
 from src.application.use_cases.playlist.process_video import ProcessVideoUseCase
 from src.application.use_cases.playlist.publish import PublishPlaylistUseCase
 from src.domain.interfaces.playlist_repository import PlaylistRepositoryPort
+from src.domain.models.playlist import Stage
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +43,16 @@ class PlaylistWorker:
         self.process_video = process_video
         self.publish = publish
         self.max_concurrent_videos = max(1, max_concurrent_videos)
+        # Transcript fetches are serialized and paced by the provider anyway.
+        self.max_concurrent_fetches = 1
         self.poll_interval_seconds = poll_interval_seconds
         self.shutdown_timeout_seconds = shutdown_timeout_seconds
 
         self._wake_event = asyncio.Event()
         self._stopping = False
         self._loop_task: asyncio.Task | None = None
-        self._active_tasks: set[asyncio.Task] = set()
+        self._active_tasks: set[asyncio.Task] = set()  # notes pool
+        self._fetch_tasks: set[asyncio.Task] = set()  # transcript pool
         self._publish_tasks: set[asyncio.Task] = set()
         self._in_flight_video_ids: set[int] = set()
         self._publish_queue: list[int] = []
@@ -90,7 +94,11 @@ class PlaylistWorker:
                 pass
             self._loop_task = None
 
-        running = {t for t in (self._active_tasks | self._publish_tasks) if not t.done()}
+        running = {
+            t
+            for t in (self._active_tasks | self._fetch_tasks | self._publish_tasks)
+            if not t.done()
+        }
         if running:
             logger.info(
                 "Waiting up to %.1fs for %d active job(s)...",
@@ -144,32 +152,50 @@ class PlaylistWorker:
     async def _tick(self) -> bool:
         """Dispatch whatever is runnable. Returns True when something was started."""
         self._active_tasks = {t for t in self._active_tasks if not t.done()}
+        self._fetch_tasks = {t for t in self._fetch_tasks if not t.done()}
         self._publish_tasks = {t for t in self._publish_tasks if not t.done()}
         dispatched = self._dispatch_publishes()
 
-        available_slots = self.max_concurrent_videos - len(self._active_tasks)
-        if available_slots <= 0:
-            return dispatched > 0
+        # Notes pool first: transcript_ready videos wait here for an AI slot. The fetch
+        # pool below never waits on it, so transcripts keep downloading while notes run.
+        notes_slots = self.max_concurrent_videos - len(self._active_tasks)
+        if notes_slots > 0:
+            ready = await self.repo.list_queued_videos(
+                limit=notes_slots + len(self._in_flight_video_ids),
+                stages=(Stage.TRANSCRIPT_READY,),
+            )
+            dispatched += self._start(ready, "notes", self._active_tasks, notes_slots)
 
-        # Over-fetch by the number of in-flight videos: they can still appear in the
-        # queries (their stage is queued/transcript_ready/failed) and must not starve
-        # runnable videos behind them.
-        fetch_limit = available_slots + len(self._in_flight_video_ids)
-        due_videos = await self.repo.list_transient_due(limit=fetch_limit)
-        queued_videos = await self.repo.list_queued_videos(limit=fetch_limit)
+        # Fetch pool: queued videos and due retries (a retry re-queues, skips a stored
+        # transcript and hands over to the notes pool).
+        fetch_slots = self.max_concurrent_fetches - len(self._fetch_tasks)
+        if fetch_slots > 0:
+            # Over-fetch by the number in flight: they can still appear in the queries
+            # and must not starve runnable videos behind them.
+            fetch_limit = fetch_slots + len(self._in_flight_video_ids)
+            due_videos = await self.repo.list_transient_due(limit=fetch_limit)
+            queued = await self.repo.list_queued_videos(
+                limit=fetch_limit, stages=(Stage.QUEUED,)
+            )
+            dispatched += self._start(due_videos + queued, "fetch", self._fetch_tasks, fetch_slots)
 
-        for video in due_videos + queued_videos:
-            if len(self._active_tasks) >= self.max_concurrent_videos:
+        return dispatched > 0
+
+    def _start(self, videos: list, phase: str, tasks: set[asyncio.Task], slots: int) -> int:
+        started = 0
+        for video in videos:
+            if started >= slots:
                 break
             if video.id in self._in_flight_video_ids:
                 continue
-
             self._in_flight_video_ids.add(video.id)
-            task = asyncio.create_task(self._dispatch(video.id), name=f"process-video-{video.id}")
-            self._active_tasks.add(task)
-            dispatched += 1
-
-        return dispatched > 0
+            tasks.add(
+                asyncio.create_task(
+                    self._dispatch(video.id, phase), name=f"process-video-{phase}-{video.id}"
+                )
+            )
+            started += 1
+        return started
 
     def _dispatch_publishes(self) -> int:
         started = 0
@@ -188,9 +214,9 @@ class PlaylistWorker:
             started += 1
         return started
 
-    async def _dispatch(self, video_id: int) -> None:
+    async def _dispatch(self, video_id: int, phase: str = "all") -> None:
         try:
-            await self.process_video.execute(video_id)
+            await self.process_video.execute(video_id, phase)
         except Exception as exc:
             logger.exception(
                 "Unhandled error processing video %d in worker: %s", video_id, exc

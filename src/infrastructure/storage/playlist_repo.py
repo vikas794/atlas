@@ -827,28 +827,33 @@ class PlaylistRepository:
             )
 
     async def list_queued_videos(
-        self, playlist_pk: int | None = None, limit: int | None = None
+        self,
+        playlist_pk: int | None = None,
+        limit: int | None = None,
+        stages: tuple[Stage, ...] = (Stage.QUEUED, Stage.TRANSCRIPT_READY),
     ) -> list[Video]:
         """Videos the worker may run now, in playlist order.
 
-        Includes ``transcript_ready`` videos (a task that died after storing the
-        transcript; ``ProcessVideoUseCase`` continues at notes). A duplicate row
+        ``stages`` selects the pool: ``queued`` videos need a transcript fetch,
+        ``transcript_ready`` videos are waiting for notes generation. A duplicate row
         (PRD section 20) only becomes runnable once its first occurrence has a
         summary to reuse -- or has failed for good (no automatic retry pending), so
         the duplicate can record that failure instead of sitting queued forever.
         """
-        return await asyncio.to_thread(self._list_queued_videos, playlist_pk, limit)
+        return await asyncio.to_thread(self._list_queued_videos, playlist_pk, limit, stages)
 
-    def _list_queued_videos(self, playlist_pk: int | None, limit: int | None) -> list[Video]:
+    def _list_queued_videos(
+        self, playlist_pk: int | None, limit: int | None, stages: tuple[Stage, ...]
+    ) -> list[Video]:
+        marks = ", ".join("?" for _ in stages)
         sql = (
-            "SELECT v.* FROM videos v WHERE v.stage IN (?, ?) AND v.removed_upstream = 0"
+            f"SELECT v.* FROM videos v WHERE v.stage IN ({marks}) AND v.removed_upstream = 0"
             " AND (v.duplicate_of_video_id IS NULL OR EXISTS ("
             "   SELECT 1 FROM videos o WHERE o.id = v.duplicate_of_video_id"
             "   AND (o.stage IN (?, ?, ?) OR (o.stage = ? AND o.next_retry_at IS NULL))))"
         )
         params: list[object] = [
-            Stage.QUEUED.value,
-            Stage.TRANSCRIPT_READY.value,
+            *(s.value for s in stages),
             Stage.PENDING_REVIEW.value,
             Stage.APPROVED.value,
             Stage.PUBLISHED.value,

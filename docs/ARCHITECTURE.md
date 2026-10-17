@@ -520,10 +520,15 @@ recovered on the next start.
   rebuilt: the lifespan holds that instance.
 - **One process, one event loop.** The worker runs inside the uvicorn process as asyncio tasks
   (`backend/main.py` lifespan). There is no separate worker process or queue service.
-- **Bounded video work.** At most `max_concurrent_videos` `ProcessVideoUseCase` tasks run at
-  once. The loop wakes on `worker.wake()` (new playlist, retry, regenerate, a finished task) or
-  every `worker_poll_interval_seconds`. Due transient retries are dispatched before queued
-  videos. Publish jobs are separate tasks, not counted against `max_concurrent_videos`.
+- **Two video pools.** Transcript download and AI notes run in separate pools, so a slow LLM
+  call never delays the next transcript. The fetch pool runs one `ProcessVideoUseCase` task at a
+  time (`phase="fetch"`: `queued` -> `transcript_ready`, then it stops) and starts the next
+  video as soon as the previous transcript is stored. The notes pool runs at most
+  `max_concurrent_videos` tasks (`phase="notes"`) on `transcript_ready` videos. A failed video
+  retries via `queued`; the fetch step reuses a stored transcript and hands straight over. The
+  loop wakes on `worker.wake()` (new playlist, retry, regenerate, a finished task) or every
+  `worker_poll_interval_seconds`. Due transient retries are dispatched before queued videos.
+  Publish jobs are separate tasks, not counted against either pool.
 - **Blocking work in threads.** SQLite access, yt-dlp, the YouTube Data API client and every
   Drive/Docs call run in `asyncio.to_thread`. The LLM SDKs are called through their async
   clients. The interactive OAuth consent runs in a thread behind a lock (one consent at a time,

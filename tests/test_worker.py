@@ -259,26 +259,7 @@ async def test_concurrency_is_bounded_and_every_video_still_completes(
 ) -> None:
     _, videos = await add_videos(repo, count=6)
 
-    class PairedTranscripts(Transcripts):
-        """Hold each fetch until a second one is in flight (or 2s pass), so the
-        test proves the cap is reached without depending on scheduler timing."""
-
-        async def fetch_transcript(self, video_id: str, language: str = "en") -> TranscriptResult:
-            self.calls.append(video_id)
-            self.running += 1
-            self.max_running = max(self.max_running, self.running)
-            try:
-                loop = asyncio.get_running_loop()
-                deadline = loop.time() + 2.0
-                while self.max_running < 2 and loop.time() < deadline:
-                    await asyncio.sleep(0.01)
-                await asyncio.sleep(0.01)
-                text = f"transcript of {video_id}"
-                return TranscriptResult(video_id, language, "", text, "hash", "", len(text))
-            finally:
-                self.running -= 1
-
-    transcripts = PairedTranscripts()
+    transcripts = Transcripts()
     worker = make_worker(repo, transcripts, Notes(), max_concurrent_videos=2)
 
     await worker.start()
@@ -291,8 +272,40 @@ async def test_concurrency_is_bounded_and_every_video_still_completes(
     finally:
         await worker.stop()
 
-    assert transcripts.max_running == 2
     assert sorted(transcripts.calls) == [f"v{i}" for i in range(1, 7)]
+
+
+async def test_transcripts_keep_downloading_while_notes_are_pending(
+    repo: PlaylistRepository,
+) -> None:
+    _, videos = await add_videos(repo, count=4)
+    release = asyncio.Event()
+
+    class SlowNotes(Notes):
+        async def generate_notes(self, *, title: str, transcript: str) -> GeneratedNotes:
+            await release.wait()
+            return await super().generate_notes(title=title, transcript=transcript)
+
+    transcripts = Transcripts()
+    worker = make_worker(repo, transcripts, SlowNotes(), max_concurrent_videos=1)
+    await worker.start()
+    try:
+        async def all_transcripts_stored() -> bool:
+            return len(transcripts.calls) == len(videos)
+
+        # Video 1's AI step is blocked, yet every transcript still downloads.
+        await wait_until(all_transcripts_stored)
+        assert (await repo.get_video(videos[0].id)).stage == Stage.GENERATING_NOTES
+        release.set()
+
+        async def all_done() -> bool:
+            stages = [(await repo.get_video(v.id)).stage for v in videos]
+            return all(stage == Stage.PENDING_REVIEW for stage in stages)
+
+        await wait_until(all_done)
+    finally:
+        release.set()
+        await worker.stop()
 
 
 # ------------------------------------------------------------------------- stop

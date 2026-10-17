@@ -63,7 +63,7 @@ Drive panel owns those), `database_path` (it locates the saved settings, so set 
   NVIDIA's list works the same way (`provider=nvidia`, `NVIDIA_API_KEY`, `nvidia_base_url`).
   Saving applies it to new work at once. `notes_models`, when set in `config.yaml`, still wins.
 - **Serial or parallel.** "Run mode" is `max_concurrent_videos`: Serial stores `1`, Parallel
-  stores 2 or more. Transcript fetches are one at a time and paced either way.
+  stores 2 or more. Transcript fetches are one at a time and paced either way, and run ahead of the AI notes.
 - **Saving.** `PUT /api/settings` validates the whole set with `AtlasSettings.problems()` first;
   nothing is written unless every value is valid (422 `VALIDATION_ERROR`, `details.fields` names
   each bad setting). A value equal to `config.yaml`/the default removes its saved row. "Reset to
@@ -156,7 +156,7 @@ These hold the **name** of the environment variable that contains the key.
 
 | Setting | Default | Effect | Validation | Env |
 |---|---|---|---|---|
-| `max_concurrent_videos` | `2` | Videos processed at the same time by the worker. Lower it if YouTube rate-limits yt-dlp. | >= 1 | `ATLAS_MAX_CONCURRENT_VIDEOS` |
+| `max_concurrent_videos` | `2` | Videos whose AI notes are generated at the same time. Transcripts download separately, one at a time and paced, without waiting for notes. | >= 1 | `ATLAS_MAX_CONCURRENT_VIDEOS` |
 | `max_auto_retries` | `4` | Automatic retries of a transient failure per phase (transcript, then notes); each phase makes at most `1 + max_auto_retries` attempts, then waits for a manual Retry. | >= 0 | `ATLAS_MAX_AUTO_RETRIES` |
 | `backoff_base_seconds` | `5.0` | Base of the retry delay `min(cap, base * 2^(n-1))` plus up to 20% jitter, stored as `next_retry_at`. | >= 0 (0 = retry immediately) | `ATLAS_BACKOFF_BASE_SECONDS` |
 | `backoff_cap_seconds` | `300.0` | Cap of that delay. | >= `backoff_base_seconds` | `ATLAS_BACKOFF_CAP_SECONDS` |

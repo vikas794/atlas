@@ -134,7 +134,10 @@ class PlaylistRepositoryPort(Protocol):
 
     # --- worker queries --------------------------------------------------
     async def list_queued_videos(
-        self, playlist_pk: int | None = None, limit: int | None = None
+        self,
+        playlist_pk: int | None = None,
+        limit: int | None = None,
+        stages: tuple[Stage, ...] = (Stage.QUEUED, Stage.TRANSCRIPT_READY),
     ) -> list[Video]: ...
 
     async def list_transient_due(
