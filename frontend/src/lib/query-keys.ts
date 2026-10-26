@@ -13,7 +13,13 @@ export const queryKeys = {
   diagnostics: ['diagnostics'] as const,
   settings: ['settings'] as const,
   notesPrompt: ['settings', 'notes-prompt'] as const,
-  models: (provider: string) => ['settings', 'models', provider] as const,
+  llmProviders: ['llm', 'providers'] as const,
+  llmModels: ['llm', 'models'] as const,
+  llmFallback: ['llm', 'fallback'] as const,
+  llmRateUsage: ['llm', 'rate-limit-usage'] as const,
+  llmTokenUsage: ['llm', 'token-usage'] as const,
+  llmKeys: ['llm', 'keys'] as const,
+  llmAvailableModels: (provider: string) => ['llm', 'available-models', provider] as const,
 }
 
 /** After anything that changes a playlist or its videos (process, reprocess, publish, resync...). */

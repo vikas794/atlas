@@ -38,6 +38,18 @@ export const routes: RouteObject[] = [
             }),
           },
           {
+            path: '/models',
+            lazy: async () => ({
+              Component: (await import('./features/models/models-screen')).ModelsScreen,
+            }),
+          },
+          {
+            path: '/keys',
+            lazy: async () => ({
+              Component: (await import('./features/keys/keys-screen')).KeysScreen,
+            }),
+          },
+          {
             path: '/settings',
             lazy: async () => ({
               Component: (await import('./features/settings/settings-screen')).SettingsScreen,

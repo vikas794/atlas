@@ -11,6 +11,7 @@ from backend.spa import SpaFallback, default_dist_dir
 from src.config import load_settings
 from src.shared.logging_setup import RECENT_ERRORS, configure_logging
 from src.transport.http.fastapi.dependencies import (
+    get_model_registry,
     get_usage_ledger,
     get_worker,
     remember_boot_settings,
@@ -19,6 +20,7 @@ from src.transport.http.fastapi.errors import register_error_handlers
 from src.transport.http.fastapi.middleware import RequestLoggingMiddleware
 from src.transport.http.fastapi.routers import (
     drive_auth,
+    llm,
     playlists,
     settings,
     usage,
@@ -44,6 +46,7 @@ async def lifespan(app: FastAPI):
     """
     # Initialize usage ledger
     get_usage_ledger()
+    get_model_registry()  # migrate and seed the model registry now, not at the first note
     worker = get_worker()
     await worker.start()
     yield
@@ -71,7 +74,7 @@ def install_cors(target: FastAPI, origins: list[str]) -> None:
         CORSMiddleware,
         allow_origins=origins,
         allow_credentials=False,
-        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Content-Type", "X-Correlation-ID"],
     )
 
@@ -88,6 +91,7 @@ register_error_handlers(app)
 app.include_router(usage.router)
 app.include_router(drive_auth.router)
 app.include_router(settings.router)
+app.include_router(llm.router)
 app.include_router(playlists.router)
 app.include_router(videos.router)
 

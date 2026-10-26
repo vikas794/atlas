@@ -1,13 +1,16 @@
 # Atlas configuration
 
-Three places:
+Four places:
 
 - **`src/configs/config.yaml`**: every setting that is not a secret. A flat mapping whose keys are
   exactly the fields of `AtlasSettings` (`src/config/settings.py`).
 - **The Settings page** (`/settings`, "Application configuration"): edits are saved in the
   database (table `app_settings`, migration `0005`) and layered on top of `config.yaml`.
-- **`.env`** (repository root, created from `.env.example` by `scripts/setup`): the API keys,
-  plus optional one-off overrides.
+- **The Models and Keys pages**: the LLM providers, models, fallback order and API keys. They live
+  in the database (the model registry, migration `0007`), not in `config.yaml` or `.env`. See
+  [The LLM model registry](#the-llm-model-registry).
+- **`.env`** (repository root, created from `.env.example` by `scripts/setup`): the YouTube key,
+  optional one-off overrides, and LLM keys that are imported into the registry on first run.
 
 ## How values are resolved
 
@@ -15,9 +18,7 @@ Highest precedence first:
 
 1. `ATLAS_<FIELD_IN_UPPERCASE>` in the environment or `.env` (for example `ATLAS_PORT=8001`).
 2. The legacy name `ATLAS_DB_PATH` (for `database_path` only).
-3. The short aliases `NOTES_MODELS`, `NOTES_PROVIDER`, `NOTES_MODEL`, `NOTES_PROMPT_NAME`, `GEMINI_MODEL`,
-   `GEMINI_INPUT_TOKEN_LIMIT`, `OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`,
-   `OPENROUTER_INPUT_TOKEN_LIMIT` (`ENV_ALIASES`).
+3. The short alias `NOTES_PROMPT_NAME` (`ENV_ALIASES`).
 4. Settings saved from the Settings page (`app_settings` table).
 5. `src/configs/config.yaml`.
 6. The dataclass default.
@@ -44,24 +45,25 @@ working directory; the scripts always run from the repository root, so the resul
 
 Settings are read at startup; restart Atlas after changing `config.yaml` or an environment
 override. Changes saved from the Settings page are the exception, see below.
-API keys are read from the environment when first needed. Until the YouTube provider has been
-built, every ingest re-reads settings (and `.env`), so adding `YOUTUBE_API_KEY` works without a
-restart; for the other keys, restart to be sure.
+`YOUTUBE_API_KEY` is read from the environment when first needed. Until the YouTube provider has
+been built, every ingest re-reads settings (and `.env`), so adding it works without a restart.
+LLM keys are not read from the environment at run time: add and change them on the Keys page
+(effective at once, no restart).
 
 ## Editing settings in the UI
 
 The Settings page lists every non-secret setting in groups (pipeline, retries and backoff,
 timeouts and pacing, Google Drive, notes generation, transcripts, server and logging). Not
-editable there: the `*_api_key_env` names and `google_creds_path` / `google_token_path` (the
-Drive panel owns those), `database_path` (it locates the saved settings, so set it in
-`config.yaml` or the environment) and `notes_models` (edit it in `config.yaml`).
+editable there: `youtube_api_key_env`, `google_creds_path` / `google_token_path` (the
+Drive panel owns those) and `database_path` (it locates the saved settings, so set it in
+`config.yaml` or the environment).
 
-- **Choosing the AI model.** Under "Notes generation", pick the AI provider, then the model.
-  Gemini offers a fixed list; FreeLLMAPI's list is fetched live (`GET
-  /api/settings/models?provider=freellmapi`, authenticated with `FREELLMAPI_API_KEY`, from
-  `freellmapi_models_url` or `freellmapi_base_url`) into a searchable field, with a Refresh button.
-  NVIDIA's list works the same way (`provider=nvidia`, `NVIDIA_API_KEY`, `nvidia_base_url`).
-  Saving applies it to new work at once. `notes_models`, when set in `config.yaml`, still wins.
+- **Choosing the AI model.** Not a setting: open the **Models** page to add models, turn
+  them on or off and drag them into fallback order, and the **Keys** page to manage API keys.
+  Changes apply to new work at once. The Settings page links to both. The old provider and model
+  settings (`notes_provider`, `notes_model`, `gemini_*`, `openrouter_*`, `freellmapi_*`,
+  `nvidia_*`) no longer exist: saving one is rejected (422), and a row left in `app_settings` by an
+  older version is ignored (it is only read once, by the [first-run import](#first-run-import)).
 - **Serial or parallel.** "Run mode" is `max_concurrent_videos`: Serial stores `1`, Parallel
   stores 2 or more. Transcript fetches are one at a time and paced either way, and run ahead of the AI notes.
 - **Saving.** `PUT /api/settings` validates the whole set with `AtlasSettings.problems()` first;
@@ -69,8 +71,8 @@ Drive panel owns those), `database_path` (it locates the saved settings, so set 
   each bad setting). A value equal to `config.yaml`/the default removes its saved row. "Reset to
   defaults" (`DELETE /api/settings`) removes every saved row.
 - **Live or restart.** Concurrency, poll and shutdown times, retries and backoff (including
-  rate-limit), the LLM request timeout, transcript pacing, Drive retries and the notes
-  provider/model settings apply to the running app on save. Running jobs finish with the values
+  rate-limit), the LLM request timeout, transcript pacing and Drive retries apply to the
+  running app on save. Running jobs finish with the values
   they started with; lowering the concurrency only stops new work being started. Server, logging
   and path settings are marked "Needs restart": they are saved, and the page shows a restart
   banner until the process has been restarted.
@@ -104,13 +106,12 @@ both. "Env" lists the override names in precedence order.
 
 ### Secrets (names, not values)
 
-These hold the **name** of the environment variable that contains the key.
+This holds the **name** of the environment variable that contains the YouTube key, which is read
+from the environment at run time. LLM keys are not settings: they live in the registry.
 
 | Setting | Default | Effect | Validation | Env |
 |---|---|---|---|---|
 | `youtube_api_key_env` | `"YOUTUBE_API_KEY"` | Variable holding the YouTube Data API key. | not empty | `ATLAS_YOUTUBE_API_KEY_ENV` |
-| `gemini_api_key_env` | `"GEMINI_API_KEY"` | Variable holding the Gemini key. | not empty | `ATLAS_GEMINI_API_KEY_ENV` |
-| `openrouter_api_key_env` | `"OPENROUTER_API_KEY"` | Variable holding the OpenRouter key. | not empty | `ATLAS_OPENROUTER_API_KEY_ENV` |
 
 ### Google Drive
 
@@ -130,24 +131,16 @@ These hold the **name** of the environment variable that contains the key.
 
 ### Notes generation
 
+Which models run, in which order, with which keys, is managed in the model registry (Models and
+Keys pages), not here. The old `notes_models`, `notes_provider`, `notes_model`, `gemini_*`,
+`openrouter_*`, `freellmapi_*`, `nvidia_*` and `*_api_key_env` settings (and their `NOTES_*`,
+`GEMINI_MODEL`... environment names) were removed; an unknown key in `config.yaml` stops startup,
+and old values in the environment or in `app_settings` are ignored (the saved ones are read once,
+by the [first-run import](#first-run-import)). `notes_prompt_name`, `notes_request_timeout_seconds`
+and `prompts_base_dir` are the notes settings that remain.
+
 | Setting | Default | Effect | Validation | Env |
 |---|---|---|---|---|
-| `notes_models` | `[]` | Ordered list of LiteLLM models, tried first to last (later ones are fallbacks). Each entry: `model` (`<provider>/<model>`, required), `api_key_env`, `api_base`, `input_token_limit`. See [Choosing models](#choosing-models-litellm). Empty falls back to the single-model shorthand below. | each entry needs `model` like `gemini/gemini-3.5-flash`; no other keys | `ATLAS_NOTES_MODELS`, `NOTES_MODELS` (a JSON list) |
-| `notes_provider` | `"gemini"` | Legacy single-model shorthand, used only when `notes_models` is empty. | `gemini`, `openrouter`, `freellmapi` or `nvidia` | `ATLAS_NOTES_PROVIDER`, `NOTES_PROVIDER` |
-| `notes_model` | `""` | Legacy shorthand: model for the active `notes_provider`. Advanced override; leave empty to use the model picked in the UI (`gemini_model` / `freellmapi_model` / `openrouter_model`). | none | `ATLAS_NOTES_MODEL`, `NOTES_MODEL` |
-| `gemini_model` | `"gemini-3.5-flash"` | Gemini model when `notes_model` is empty. The UI dropdown offers `gemini-3.8-flash`, `gemini-3.6-flash`, `gemini-3-flash-preview`, `gemini-flash-latest`, `gemini-3.1-pro-preview`. | none | `ATLAS_GEMINI_MODEL`, `GEMINI_MODEL` |
-| `gemini_input_token_limit` | `1000000` | Pre-flight limit: a transcript estimated (characters / 4) above this fails as permanent `transcript_too_large` without calling Gemini. | >= 1 | `ATLAS_GEMINI_INPUT_TOKEN_LIMIT`, `GEMINI_INPUT_TOKEN_LIMIT` |
-| `openrouter_model` | `""` | OpenRouter model when `notes_model` is empty; empty means `openai/gpt-5-mini`. | none | `ATLAS_OPENROUTER_MODEL`, `OPENROUTER_MODEL` |
-| `openrouter_base_url` | `"https://openrouter.ai/api/v1"` | OpenAI-compatible endpoint for the OpenRouter adapter. | none | `ATLAS_OPENROUTER_BASE_URL`, `OPENROUTER_BASE_URL` |
-| `openrouter_input_token_limit` | `128000` | Same pre-flight limit for OpenRouter; raise it when you pin a model with a bigger context. | >= 1 | `ATLAS_OPENROUTER_INPUT_TOKEN_LIMIT`, `OPENROUTER_INPUT_TOKEN_LIMIT` |
-| `freellmapi_model` | `""` | FreeLLMAPI model id (sent as `openai/<id>`) when `notes_provider` is `freellmapi` and `notes_model` is empty. Required for that provider. | none | `ATLAS_FREELLMAPI_MODEL`, `FREELLMAPI_MODEL` |
-| `freellmapi_base_url` | `"http://localhost:3001/v1"` | OpenAI-compatible endpoint notes are sent to. | none | `ATLAS_FREELLMAPI_BASE_URL`, `FREELLMAPI_BASE_URL` |
-| `freellmapi_models_url` | `""` | Base URL the UI fetches `/models` from (for example a tunnel to the same gateway). Empty uses `freellmapi_base_url`. | none | `ATLAS_FREELLMAPI_MODELS_URL`, `FREELLMAPI_MODELS_URL` |
-| `freellmapi_input_token_limit` | `128000` | Pre-flight limit for FreeLLMAPI models. | >= 1 | `ATLAS_FREELLMAPI_INPUT_TOKEN_LIMIT`, `FREELLMAPI_INPUT_TOKEN_LIMIT` |
-| `nvidia_model` | `"deepseek-ai/deepseek-v4.1-flash"` | NVIDIA model id (sent as `openai/<id>`) when `notes_provider` is `nvidia` and `notes_model` is empty. | none | `ATLAS_NVIDIA_MODEL`, `NVIDIA_MODEL` |
-| `nvidia_base_url` | `"https://integrate.api.nvidia.com/v1"` | OpenAI-compatible NVIDIA NIM endpoint notes are sent to; its `/models` feeds the UI list. | none | `ATLAS_NVIDIA_BASE_URL`, `NVIDIA_BASE_URL` |
-| `nvidia_input_token_limit` | `128000` | Pre-flight limit for NVIDIA models. | >= 1 | `ATLAS_NVIDIA_INPUT_TOKEN_LIMIT`, `NVIDIA_INPUT_TOKEN_LIMIT` |
-| `nvidia_request_timeout_seconds` | `3600.0` | Per-request timeout for the `nvidia` provider only. NVIDIA requests (large reasoning models) are slow, so this replaces `notes_request_timeout_seconds` for them. | > 0 | `ATLAS_NVIDIA_REQUEST_TIMEOUT_SECONDS`, `NVIDIA_REQUEST_TIMEOUT_SECONDS` |
 | `notes_prompt_name` | `"notes_v1_2.yaml"` | Prompt file inside `prompts_base_dir`. The file's own `version` key (e.g. `notes_v1.2`) is stored on each summary (`custom` for a one-off regenerate prompt typed in the review screen, which never changes this file). The file must contain `{{Title}}` and `{{Transcript}}`. `notes_v1_2` makes the model start the notes with a short `Summary` section, which the Drive index shows next to each video; older prompt files still work (the index then uses the first sentences of the Notes section). | not empty; file must exist | `ATLAS_NOTES_PROMPT_NAME`, `NOTES_PROMPT_NAME` |
 | `notes_request_timeout_seconds` | `300.0` | Timeout of one LLM call. A timeout is a transient `network_error`, retried with backoff. | > 0 | `ATLAS_NOTES_REQUEST_TIMEOUT_SECONDS` |
 | `prompts_base_dir` | `"src/prompts"` | Folder holding prompt files (`notes_v1.yaml`, `notes_v1_1.yaml`, `notes_v1_2.yaml`). | not empty | `ATLAS_PROMPTS_BASE_DIR` |
@@ -181,65 +174,99 @@ no unused keys in `config.yaml`, and no `AtlasSettings` field is missing from it
 ## Secrets (`.env`)
 
 From `.env.example`. None is needed to start Atlas; `GET /api/diagnostics` reports which are
-missing, and each feature fails with a message naming the variable.
+missing, and each feature fails with a message naming what to fix.
 
 | Variable | Needed for | Without it |
 |---|---|---|
-| `YOUTUBE_API_KEY` | Listing a playlist (YouTube Data API v3, enabled in Google Cloud) | `POST /api/playlists` answers 503 `CONFIG_MISSING` |
-| `GEMINI_API_KEY` | Notes with a `gemini/...` model (the default); a Google AI Studio key | That model is skipped; with no other model, each video fails with a permanent `config_error`, no retries |
-| `OPENROUTER_API_KEY` | Notes with an `openrouter/...` model | Same as above |
-| `NVIDIA_API_KEY` | Notes with the `nvidia` provider (NVIDIA NIM), and listing its models in Settings | `GET /api/settings/models?provider=nvidia` answers 400 `CONFIG_MISSING`; notes fail as above |
-| `FREELLMAPI_API_KEY` | Notes with the `freellmapi` provider, and listing its models in Settings | `GET /api/settings/models?provider=freellmapi` answers 400 `CONFIG_MISSING`; notes fail as above |
-| `<PROVIDER>_API_KEY` / the entry's `api_key_env` | Notes with any other `notes_models` entry | Same as above |
+| `YOUTUBE_API_KEY` | Listing a playlist (YouTube Data API v3, enabled in Google Cloud). Read from the environment at run time; accepts several keys (below). | `POST /api/playlists` answers 503 `CONFIG_MISSING` |
+| `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `FREELLMAPI_API_KEY`, `OPENAI_API_KEY` | **First-run import only**: copied into the Keys page once (see [First-run import](#first-run-import)). Not read afterwards. | Add the key on the Keys page instead |
 
-### Choosing models (LiteLLM)
+LLM keys live in the database and are managed on the Keys page. They are stored **unencrypted**:
+`data/atlas.sqlite3` and the `.bak` copies migrations write beside it contain them in plain text.
+Both are gitignored and dockerignored; do not share or commit them. The API only ever returns a
+masked value (`abcd...wxyz`); the full key comes back only from the explicit reveal action.
 
-Every LLM call goes through [LiteLLM](https://docs.litellm.ai/docs/providers), so a provider is a
-config entry, not code. `model` is LiteLLM's `<provider>/<model>` string. Example in
-`config.yaml`:
+### The LLM model registry
 
-```yaml
-notes_models:
-  - model: "gemini/gemini-3.5-flash"          # primary; key from GEMINI_API_KEY
-    input_token_limit: 1000000
-  - model: "openrouter/openai/gpt-5-mini"     # fallback; key from OPENROUTER_API_KEY
-  - model: "openai/gpt-5-mini"                # any OpenAI-compatible gateway, e.g. FreeLLMAPI
-    api_base: "http://localhost:3001/v1"
-    api_key_env: "FREELLMAPI_API_KEY"
+Modeled on FreeLLMAPI. Tables (migration `0007`): `llm_models`, `llm_api_keys`, `llm_fallback`
+(the one global ordered chain), `llm_cooldowns`, `llm_rate_usage`, `llm_key_monthly_usage`,
+`llm_meta`. Code: `src/infrastructure/llm/registry/` (`repo.py` storage, `service.py` policy,
+`seed.py`, `health.py`, `providers.py`).
+
+- **Models page** (`/models`): the fallback chain, top to bottom. Drag to reorder, switch a model
+  on or off, edit limits, add a model (provider, model id, optional endpoint and limits), test it
+  with a one-line ping. Edits are staged and applied with Save. Known providers: `gemini`,
+  `openrouter`, `freellmapi` (OpenAI-compatible gateway, default `http://localhost:3001/v1`),
+  `nvidia` (default timeout 3600 s) and `openai`; any other provider name is treated as a generic
+  OpenAI-compatible endpoint (set its `api_base`).
+- **Keys page** (`/keys`): keys grouped by provider, each with a label, masked value, status
+  (`unknown`, `healthy`, `rate_limited`, `invalid`, `error`), an on/off switch, optional monthly
+  request and token caps (0 or empty = unlimited), a cooldown badge, check, reveal and delete.
+  Several keys per provider are used round-robin. Replacing a key's value resets its status and
+  clears its cooldowns.
+- **Order of attempts.** For each call Atlas walks the enabled models in chain order. For a model it
+  tries the provider's usable keys one after another. A key is usable when it is enabled, its
+  status is `healthy` or `unknown`, it is not cooling down for that model, the model's
+  RPM/RPD/TPM/TPD limits (sliding 60 s and 24 h windows) have room, and the key is under its
+  monthly caps. A key-scoped error moves on to the next key; anything else (unknown model, 5xx,
+  network error) moves on to the next model. A transcript over a model's `input_token_limit`
+  skips that model. A bad *answer* (empty, cut off, missing sections) is not a reason to fall back:
+  it is a transient failure retried by the pipeline. When every model is turned away, a transient
+  error wins over a permanent one, so the pipeline still retries. An empty chain fails the video
+  with a permanent `config_error` ("No notes models are enabled").
+- **Cooldowns.** HTTP 429 cools the model-and-key pair down on a ladder of 2 min, 10 min, 1 h,
+  24 h (it climbs while the previous cooldown was set within 24 h; a success clears it), and a
+  provider `Retry-After` is honoured as a floor. A rejected key (401/403) is marked `invalid`
+  and cooled down for 5 min on every model; the third consecutive invalid verdict turns the key off
+  ("Disabled after 3 failed checks"). A key out of credit (402) is parked for 24 h.
+- **Health checks.** On demand only: Check one key or Check all on the Keys page. There is no
+  background re-check, so idle keys cost no provider calls (expired cooldowns and old ledger rows
+  are tidied once at startup). A check that gets 401/403 marks the key `invalid`; a 429 marks it
+  `rate_limited` and parks it for an hour (it is used again by itself afterwards); any other answer
+  or a network error leaves the status unchanged. An `invalid` key is not used until you press
+  Check and it passes, re-enable it, or replace its value. A successful real call marks a key
+  `healthy`.
+- **Usage and quota.** Requests and tokens per key and model are written to `llm_rate_usage` and
+  rolled into `llm_key_monthly_usage` (UTC month); `GET /api/llm/fallback/rate-limit-usage` and
+  `/token-usage` back the badges on the Models page.
+- `Summary.provider` / `Summary.model` and the usage ledger record the model that actually answered.
+- API: everything under `/api/llm` (models, keys, fallback chain, health, usage); see
+  `docs/ARCHITECTURE.md` section 9.
+
+#### First-run import
+
+The first start after migration `0007` seeds an empty registry once (marked in `llm_meta`):
+
+- **Models:** the model your previous version had selected, read from the settings it saved in
+  `app_settings` (`notes_provider`, then `notes_model` or that provider's `*_model`, with its
+  `*_base_url`, `*_input_token_limit` and `nvidia_request_timeout_seconds`). It becomes the first,
+  enabled model of the chain; with nothing saved the default is Gemini `gemini-3.5-flash`. Every
+  other provider that has a key (or a saved model) is added **disabled** after it, with its saved
+  model or its default (`gemini-3.5-flash`, `openai/gpt-5-mini`, `deepseek-ai/deepseek-v4.1-flash`).
+  FreeLLMAPI has no default model: with no saved `freellmapi_model` it gets none.
+- **Keys:** every key found in `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `FREELLMAPI_API_KEY`,
+  `NVIDIA_API_KEY` and `OPENAI_API_KEY`, including comma-separated lists and numbered extras
+  (`GEMINI_API_KEY_2`, ...), labelled "Imported from `<VARIABLE>` #n", duplicates dropped.
+
+The saved settings are read straight from the `app_settings` table; no setting for them exists any
+more, and `NOTES_PROVIDER`, `GEMINI_MODEL` and similar environment names are not read at all. The
+import never runs again, so deleting a model or key on the pages is permanent. Deleting
+`data/atlas.sqlite3` resets the registry and imports again. Do not hand-edit these tables.
+
+### Multiple YouTube keys
+
+`YOUTUBE_API_KEY` accepts several keys, so one key's quota no longer stalls ingest. Use either form
+(they can be mixed; duplicates are ignored):
+
+```
+YOUTUBE_API_KEY=keyA,keyB,keyC          # comma, semicolon or whitespace separated
+YOUTUBE_API_KEY_2=keyD                  # numbered extras: _2, _3, ...
 ```
 
-- `api_key_env` defaults to `<PROVIDER>_API_KEY` (`GEMINI_API_KEY`, `OPENROUTER_API_KEY`,
-  `OPENAI_API_KEY`, `GROQ_API_KEY` ...). It may hold several keys (see below).
-- `input_token_limit` defaults to 128000 (a wrong guess refuses early instead of paying for a
-  rejected call).
-- Models are tried in order. A model is skipped when its key is missing or the transcript is over
-  its `input_token_limit`; the next one takes over when every key of a model is rate-limited or
-  rejected, or on a 5xx / network error. A bad *answer* (empty, cut off, missing sections) is not
-  a reason to fall back: it is a transient failure retried by the pipeline. If every model is
-  turned away the transient error wins over a permanent one, so the pipeline still retries.
-- `Summary.provider` and the usage ledger record the model that actually answered.
-- Via env: `NOTES_MODELS='[{"model": "gemini/gemini-3.5-flash"}]'` (JSON).
-- With `notes_models` empty, `notes_provider` / `notes_model` / `gemini_*` / `openrouter_*` build a
-  single model exactly as before, so an older `config.yaml` keeps working.
-
-### Multiple keys per service
-
-Each of the three variables accepts several keys, so one key's rate limit or quota no longer stalls
-Atlas. Use either form (they can be mixed; duplicates are ignored):
-
-```
-GEMINI_API_KEY=keyA,keyB,keyC          # comma, semicolon or whitespace separated
-GEMINI_API_KEY_2=keyD                  # numbered extras: _2, _3, ...
-```
-
-Keys are used round-robin. A key that is rate-limited (HTTP 429) is parked for 60 s, one that is
-out of YouTube quota or out of OpenRouter credit for an hour, and a rejected key is dropped until
-`.env` changes; the call moves to the next key immediately. If every key is turned away the
-failure is the normal transient `rate_limited` and the pipeline's usual backoff applies. A
-failure that another key cannot fix (unknown model, private playlist, oversized transcript, 5xx)
-is never rotated. Quotas are per Google Cloud / AI Studio *project*, so keys must come from
-different projects to add capacity. `GET /api/diagnostics` shows the key count, never a value.
-Implementation: `src/shared/api_keys.py`.
+Keys are used round-robin; a key that is out of quota or rejected is skipped (`KeyPool`,
+`src/shared/api_keys.py`) and the call moves to the next one. Quotas are per Google Cloud
+*project*, so keys must come from different projects to add capacity. `GET /api/diagnostics`
+shows the key count, never a value.
 
 Google Drive uses no key in `.env`: upload the OAuth client JSON on the Settings screen (or save it
 at `google_creds_path`) and complete the consent once; the result is `token.json`. Both files are

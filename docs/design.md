@@ -123,7 +123,28 @@ Layout, top to bottom:
 - Show small metadata under the title: model used, prompt version, generated time. No video link or duration is shown in the published Doc, but it is fine to show the YouTube link here as a small "Open video" text link.
 - Published videos that were edited show a banner: "Edited since publishing" with a **Re-publish** button.
 
-### 6.4 Dialogs and feedback
+### 6.4 Models (LLM fallback chain)
+
+Reached from the top bar nav ("Models"). Backed by the model registry (PRD Section 17.1).
+
+- Header: title "Models", short line "Notes generation tries these in order." Primary **Add model** button. Secondary link to **Keys**.
+- **Unsaved-changes bar** (sticky, bottom): "Unsaved changes" with **Discard** (secondary) and **Save** (primary). Reorder and enable edits are staged locally and saved together; leaving the page with staged edits asks for confirmation.
+- **Chain table** (dense, same table style as Section 7): columns drag handle, Rank (`#01`), Model (display name plus provider chip and model id in muted text), Context, Quota (used / limit for the next usable key, badge turns amber at 80% and red when exhausted), Keys (count of usable keys; "No keys" in red links to Keys), Enabled switch, row menu (Edit, Test, Delete).
+- Drag to reorder with the handle (keyboard: focus the handle, Space to lift, arrows to move, Space to drop). Rank is also editable by typing a number.
+- A model with no usable key shows a muted row with a "No keys" badge and stays in the chain.
+- **Add model dialog:** Provider (select), Model id (text, with a **Fetch models** button that lists the provider's models when a key exists), Display name, optional limits (RPM, RPD, TPM, TPD), input token limit. **Test** sends a one-line ping and shows latency or the plain-text error.
+- Empty state: "No models yet. Add one to start generating notes." with the **Add model** button.
+
+### 6.5 Keys (API keys by provider)
+
+- Header: title "Keys", primary **Add key**, secondary **Check all**.
+- Keys are grouped under a provider heading with a group-level enable switch. Each row: checkbox, status badge (healthy green, rate limited amber, invalid red, error red, unknown neutral, always icon plus label), label, masked value (`abcd...wxyz`), cooldown badge with remaining time when cooling down, last checked (relative time with exact time in a tooltip), enable switch, row actions (Check, Edit, Reveal, Clear cooldowns, Delete).
+- Selecting rows shows a batch bar: Enable, Disable, Delete (confirm dialog states the count).
+- **Add / Edit key dialog:** Provider (add only), Label, Key (password-type input), optional monthly request cap and monthly token cap (0 means unlimited). Edit sends only changed fields; leaving Key empty keeps the stored key.
+- **Reveal** shows the full key in a dialog with a **Copy** button; it is never shown in lists, toasts or logs.
+- A key disabled automatically after repeated invalid checks shows "Disabled after 3 failed checks" in the Detail text.
+
+### 6.6 Dialogs and feedback
 
 - **Confirm dialogs** state the consequence and the count: "Delete playlist and all 187 stored videos, transcripts and notes? This does not delete Google Docs already in Drive." Destructive button uses the error color and is the right-hand button.
 - **Toasts** (bottom-right, auto-dismiss 4s) for success; errors stay until dismissed.
@@ -151,7 +172,8 @@ Layout, top to bottom:
 
 - Keep whatever frontend framework the existing repo uses (Atlas PRD Section 13). Put the color, spacing and typography tokens above in a single global stylesheet (`tokens.css`) so every component reads from it.
 - Map backend stage and failure values to badges in **one** helper (`stageToBadge(stage, failureType)`) so the table, summary strip and review screen can never disagree.
-- Build order follows the PRD milestones: Playlists screen with the detail table in M1 to M2, status strip and review screen in M3, publish button and Drive states in M4, re-sync and management actions in M5.
+- Build order follows the PRD milestones: Playlists screen with the detail table in M1 to M2, status strip and review screen in M3, publish button and Drive states in M4, re-sync and management actions in M5. The Models and Keys screens (6.4, 6.5) follow the PRD Section 17.1 registry work.
+- Key status maps to badges in **one** helper (`keyStatusToBadge(status, cooldown)`), alongside `stageToBadge`. Drag-reorder uses dnd-kit with pointer and keyboard sensors.
 
 ## 10. Out of Scope for v1 UI
 

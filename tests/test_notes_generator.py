@@ -1,9 +1,9 @@
-"""Tests for the notes generator: port, guardrails, the LiteLLM adapter and its factory.
+"""Tests for the notes generator: port, guardrails, the registry-driven LiteLLM adapter and factory.
 
 No test in this file touches the network or needs a real key. The provider boundary is exactly
 one seam -- the ``completion`` constructor argument on :class:`LiteLLMNotesGenerator`, shaped like
-``litellm.acompletion`` -- so every provider call is a double. Keys are fake values set in the
-environment by an autouse fixture.
+``litellm.acompletion`` -- so every provider call is a double. Models and keys are rows in a
+throwaway model registry (a temporary database), never environment variables.
 
 Settings come from :class:`FakeLoader`, a dict-backed object with the same ``__call__`` shape as
 ``AtlasSettings.to_loader()``; that keeps assertions independent of the developer's shell and
@@ -32,7 +32,7 @@ from src.domain.models.playlist import (
 from src.infrastructure.llm import notes_base
 from src.infrastructure.llm.factory import build_notes_generator
 from src.infrastructure.llm.litellm_notes import LiteLLMNotesGenerator
-from src.infrastructure.llm.models import DEFAULT_OPENROUTER_MODEL, resolve_model_specs
+from src.infrastructure.llm.models import DEFAULT_OPENROUTER_MODEL
 from src.infrastructure.llm.notes_base import (
     MIN_NOTES_CHARS,
     TITLE_PLACEHOLDER,
@@ -44,7 +44,9 @@ from src.infrastructure.llm.notes_base import (
     render_prompt,
     validate_notes,
 )
-from src.shared.api_keys import reset_pools
+from src.infrastructure.llm.registry.providers import litellm_model_for
+from src.infrastructure.llm.registry.repo import RegistryRepo
+from src.infrastructure.llm.registry.service import ModelRegistry
 
 FENCE = "`" * 3
 
@@ -62,6 +64,7 @@ GOOD_NOTES = NOTES_BODY + f"\n{FENCE}python\nfor item in items:\n    print(item)
 
 TEST_GEMINI_KEY = "test-gemini-key-not-real"
 TEST_OPENROUTER_KEY = "sk-or-test-not-a-real-key"
+OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 
 
 # --------------------------------------------------------------------------
@@ -136,25 +139,10 @@ class RecordingLedger:
         self.records.append(record)
 
 
-@pytest.fixture(autouse=True)
-def _provider_keys(monkeypatch: pytest.MonkeyPatch):
-    """Fake keys for the two default providers; key pools are process-wide, so start clean."""
-    monkeypatch.setenv("GEMINI_API_KEY", TEST_GEMINI_KEY)
-    monkeypatch.setenv("OPENROUTER_API_KEY", TEST_OPENROUTER_KEY)
-    reset_pools()
-    yield
-    reset_pools()
-
-
 @pytest.fixture
-def gemini_settings() -> FakeLoader:
+def settings() -> FakeLoader:
     return FakeLoader(
-        notes_provider="gemini",
-        notes_model="",
-        gemini_model="gemini-3.5-flash",
-        gemini_input_token_limit=1_000_000,
         notes_prompt_name="notes_v1.yaml",
-        gemini_api_key_env="GEMINI_API_KEY",
         max_auto_retries=2,
         backoff_base_seconds=1.0,
         backoff_cap_seconds=30.0,
@@ -163,27 +151,67 @@ def gemini_settings() -> FakeLoader:
 
 
 @pytest.fixture
-def openrouter_settings(gemini_settings: FakeLoader) -> FakeLoader:
-    return gemini_settings.override(
-        notes_provider="openrouter", openrouter_api_key_env="OPENROUTER_API_KEY"
+def registry(temp_db: Path) -> ModelRegistry:
+    """An empty registry in a throwaway database (chain order = the order models are added)."""
+    return ModelRegistry(RegistryRepo(temp_db))
+
+
+def add_model(registry: ModelRegistry, provider: str, model_id: str, **extra: Any) -> Any:
+    return registry.repo.add_model(
+        provider=provider,
+        model_id=model_id,
+        display_name=model_id,
+        litellm_model=litellm_model_for(provider, model_id),
+        api_base=extra.pop("api_base", None),
+        input_token_limit=extra.pop("input_token_limit", 1_000_000),
+        **extra,
     )
+
+
+def add_key(registry: ModelRegistry, provider: str, value: str) -> Any:
+    return registry.repo.add_key(provider=provider, label=f"{provider} key", key_value=value)
+
+
+def add_gemini(registry: ModelRegistry, **extra: Any) -> Any:
+    model = add_model(registry, "gemini", "gemini-3.5-flash", **extra)
+    add_key(registry, "gemini", TEST_GEMINI_KEY)
+    return model
+
+
+def add_openrouter(registry: ModelRegistry, **extra: Any) -> Any:
+    extra.setdefault("input_token_limit", 128_000)
+    model = add_model(
+        registry, "openrouter", DEFAULT_OPENROUTER_MODEL, api_base=OPENROUTER_BASE, **extra
+    )
+    add_key(registry, "openrouter", TEST_OPENROUTER_KEY)
+    return model
 
 
 @pytest.fixture
-def chain_settings(gemini_settings: FakeLoader) -> FakeLoader:
-    """Gemini first, OpenRouter as the fallback, both listed in ``notes_models``."""
-    return gemini_settings.override(
-        notes_models=[
-            {"model": "gemini/gemini-3.5-flash", "input_token_limit": 1_000_000},
-            {"model": "openrouter/openai/gpt-5-mini"},
-        ]
-    )
+def gemini_registry(registry: ModelRegistry) -> ModelRegistry:
+    add_gemini(registry)
+    return registry
+
+
+@pytest.fixture
+def openrouter_registry(registry: ModelRegistry) -> ModelRegistry:
+    add_openrouter(registry)
+    return registry
+
+
+@pytest.fixture
+def chain_registry(registry: ModelRegistry) -> ModelRegistry:
+    """Gemini first, OpenRouter as the fallback, each with its own key."""
+    add_gemini(registry)
+    add_openrouter(registry)
+    return registry
 
 
 def generator_for(
-    settings: FakeLoader, completion: FakeCompletion, **kwargs: Any
+    settings: FakeLoader, registry: ModelRegistry, completion: FakeCompletion, **kwargs: Any
 ) -> LiteLLMNotesGenerator:
-    return LiteLLMNotesGenerator(settings, completion=completion, **kwargs)
+    return LiteLLMNotesGenerator(settings, completion=completion, registry=registry, **kwargs)
+
 
 # --------------------------------------------------------------------------
 # 1. render_prompt
@@ -250,8 +278,8 @@ class TestRealPromptFile:
         assert TRANSCRIPT_PLACEHOLDER in prompt, "notes_v1.yaml lost the {{Transcript}} placeholder"
         assert data.get("version") == "notes_v1"
 
-    def test_prompt_source_reads_it_and_renders(self, gemini_settings: FakeLoader) -> None:
-        source = NotesPromptSource(gemini_settings)
+    def test_prompt_source_reads_it_and_renders(self, settings: FakeLoader) -> None:
+        source = NotesPromptSource(settings)
 
         assert source.path.name == "notes_v1.yaml"
         assert source.version() == "notes_v1"
@@ -384,11 +412,11 @@ class TestCheckInputSize:
 
 class TestSingleModel:
     async def test_generates_notes_and_returns_the_prompt_version(
-        self, gemini_settings: FakeLoader
+        self, settings: FakeLoader, gemini_registry: ModelRegistry
     ) -> None:
         completion = FakeCompletion()
 
-        result = await generator_for(gemini_settings, completion).generate_notes(
+        result = await generator_for(settings, gemini_registry, completion).generate_notes(
             title="Loops", transcript="for x in y: pass"
         )
 
@@ -407,10 +435,10 @@ class TestSingleModel:
         assert "api_base" not in sent
 
     async def test_a_one_off_prompt_replaces_the_prompt_file_and_is_tagged_custom(
-        self, gemini_settings: FakeLoader
+        self, settings: FakeLoader, gemini_registry: ModelRegistry
     ) -> None:
         completion = FakeCompletion()
-        generator = generator_for(gemini_settings, completion)
+        generator = generator_for(settings, gemini_registry, completion)
 
         custom = await generator.generate_notes(
             title="Loops",
@@ -425,43 +453,32 @@ class TestSingleModel:
         assert "Be brief." not in completion.calls[1]["messages"][0]["content"]
 
     async def test_a_one_off_prompt_without_placeholders_is_a_config_error(
-        self, gemini_settings: FakeLoader
+        self, settings: FakeLoader, gemini_registry: ModelRegistry
     ) -> None:
         with pytest.raises(NotesGeneratorConfigError):
-            await generator_for(gemini_settings, FakeCompletion()).generate_notes(
+            await generator_for(settings, gemini_registry, FakeCompletion()).generate_notes(
                 title="t", transcript="x", prompt_template="no placeholders here"
             )
 
-    async def test_notes_model_overrides_gemini_model(self, gemini_settings: FakeLoader) -> None:
-        settings = gemini_settings.override(notes_model="gemini-2.5-pro")
-        completion = FakeCompletion()
-
-        result = await generator_for(settings, completion).generate_notes(
-            title="t", transcript="x"
-        )
-
-        assert result.model == "gemini-2.5-pro"
-        assert completion.calls[0]["model"] == "gemini/gemini-2.5-pro"
-
     async def test_a_fenced_response_is_unwrapped_end_to_end(
-        self, gemini_settings: FakeLoader
+        self, settings: FakeLoader, gemini_registry: ModelRegistry
     ) -> None:
         completion = FakeCompletion(f"{FENCE}markdown\n{GOOD_NOTES}{FENCE}")
 
-        result = await generator_for(gemini_settings, completion).generate_notes(
+        result = await generator_for(settings, gemini_registry, completion).generate_notes(
             title="t", transcript="x"
         )
 
         assert result.content == GOOD_NOTES
 
     async def test_an_empty_response_is_a_transient_failure_and_is_not_retried_here(
-        self, gemini_settings: FakeLoader
+        self, settings: FakeLoader, gemini_registry: ModelRegistry
     ) -> None:
         """Retry/backoff belongs to ProcessVideoUseCase alone: one call per attempt."""
         completion = FakeCompletion("   ")
 
         with pytest.raises(NotesGenerationError) as excinfo:
-            await generator_for(gemini_settings, completion).generate_notes(
+            await generator_for(settings, gemini_registry, completion).generate_notes(
                 title="t", transcript="x"
             )
 
@@ -469,35 +486,39 @@ class TestSingleModel:
         assert excinfo.value.failure_kind is FailureKind.TRANSIENT
         assert len(completion.calls) == 1
 
-    async def test_a_truncated_response_is_rejected(self, gemini_settings: FakeLoader) -> None:
+    async def test_a_truncated_response_is_rejected(
+        self, settings: FakeLoader, gemini_registry: ModelRegistry
+    ) -> None:
         completion = FakeCompletion(finish_reason="length")
 
         with pytest.raises(NotesGenerationError) as excinfo:
-            await generator_for(gemini_settings, completion).generate_notes(
+            await generator_for(settings, gemini_registry, completion).generate_notes(
                 title="t", transcript="x"
             )
 
         assert excinfo.value.failure_type is FailureType.OUTPUT_MALFORMED
 
     async def test_an_oversized_transcript_never_reaches_the_provider(
-        self, gemini_settings: FakeLoader
+        self, settings: FakeLoader, registry: ModelRegistry
     ) -> None:
-        settings = gemini_settings.override(gemini_input_token_limit=10)
+        add_gemini(registry, input_token_limit=10)
         completion = FakeCompletion()
 
         with pytest.raises(NotesGenerationError) as excinfo:
-            await generator_for(settings, completion).generate_notes(
+            await generator_for(settings, registry, completion).generate_notes(
                 title="t", transcript="a" * 4000
             )
 
         assert excinfo.value.failure_type is FailureType.TRANSCRIPT_TOO_LARGE
         assert completion.calls == []
 
-    async def test_a_usage_record_is_emitted(self, gemini_settings: FakeLoader) -> None:
+    async def test_a_usage_record_is_emitted(
+        self, settings: FakeLoader, gemini_registry: ModelRegistry
+    ) -> None:
         ledger = RecordingLedger()
 
         await generator_for(
-            gemini_settings, FakeCompletion(), usage_ledger=ledger
+            settings, gemini_registry, FakeCompletion(), usage_ledger=ledger
         ).generate_notes(title="t", transcript="x")
 
         assert len(ledger.records) == 1
@@ -511,29 +532,36 @@ class TestSingleModel:
         assert record.cost_usd > 0.0  # gemini-3.5-flash is priced in CostCalculator
         assert record.cache_hit is False
 
-    async def test_missing_token_counts_default_to_zero(self, gemini_settings: FakeLoader) -> None:
+    async def test_missing_token_counts_default_to_zero(
+        self, settings: FakeLoader, gemini_registry: ModelRegistry
+    ) -> None:
         ledger = RecordingLedger()
 
         await generator_for(
-            gemini_settings, FakeCompletion(usage=None), usage_ledger=ledger
+            settings, gemini_registry, FakeCompletion(usage=None), usage_ledger=ledger
         ).generate_notes(title="t", transcript="x")
 
         record = ledger.records[0]
         assert (record.input_tokens, record.output_tokens, record.total_tokens) == (0, 0, 0)
 
-    async def test_no_ledger_configured_is_fine(self, gemini_settings: FakeLoader) -> None:
-        result = await generator_for(gemini_settings, FakeCompletion()).generate_notes(
+    async def test_no_ledger_configured_is_fine(
+        self, settings: FakeLoader, gemini_registry: ModelRegistry
+    ) -> None:
+        result = await generator_for(settings, gemini_registry, FakeCompletion()).generate_notes(
             title="t", transcript="x"
         )
         assert result.content == GOOD_NOTES
 
     async def test_a_ledger_failure_does_not_fail_generation(
-        self, gemini_settings: FakeLoader, openrouter_settings: FakeLoader
+        self,
+        settings: FakeLoader,
+        gemini_registry: ModelRegistry,
+        openrouter_registry: ModelRegistry,
     ) -> None:
-        for settings in (gemini_settings, openrouter_settings):
+        for registry in (gemini_registry, openrouter_registry):
             completion = FakeCompletion()
             generator = generator_for(
-                settings, completion, usage_ledger=RecordingLedger(explode=True)
+                settings, registry, completion, usage_ledger=RecordingLedger(explode=True)
             )
 
             result = await generator.generate_notes(title="t", transcript="x")
@@ -541,28 +569,36 @@ class TestSingleModel:
             assert result.content == GOOD_NOTES
             assert len(completion.calls) == 1
 
-    async def test_a_missing_key_names_the_variable_not_the_value(
-        self, gemini_settings: FakeLoader, monkeypatch: pytest.MonkeyPatch
+    async def test_a_missing_key_points_to_the_keys_page_and_makes_no_call(
+        self, settings: FakeLoader, registry: ModelRegistry
     ) -> None:
-        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        add_model(registry, "gemini", "gemini-3.5-flash")  # no key at all
         completion = FakeCompletion()
 
         with pytest.raises(NotesGeneratorConfigError) as excinfo:
-            await generator_for(gemini_settings, completion).generate_notes(
+            await generator_for(settings, registry, completion).generate_notes(
                 title="t", transcript="x"
             )
 
-        assert "GEMINI_API_KEY" in str(excinfo.value)
+        assert "Keys page" in str(excinfo.value)
         assert completion.calls == []
 
+    async def test_an_empty_chain_points_to_the_models_page(
+        self, settings: FakeLoader, registry: ModelRegistry
+    ) -> None:
+        with pytest.raises(NotesGeneratorConfigError, match="Models page"):
+            await generator_for(settings, registry, FakeCompletion()).generate_notes(
+                title="t", transcript="x"
+            )
 
-class TestOpenRouterLegacySettings:
+
+class TestOpenRouterModel:
     async def test_generates_notes_against_the_openrouter_endpoint(
-        self, openrouter_settings: FakeLoader
+        self, settings: FakeLoader, openrouter_registry: ModelRegistry
     ) -> None:
         completion = FakeCompletion()
 
-        result = await generator_for(openrouter_settings, completion).generate_notes(
+        result = await generator_for(settings, openrouter_registry, completion).generate_notes(
             title="Loops", transcript="for x in y: pass"
         )
 
@@ -571,27 +607,16 @@ class TestOpenRouterLegacySettings:
         assert result.prompt_version == "notes_v1"
         sent = completion.calls[0]
         assert sent["model"] == f"openrouter/{DEFAULT_OPENROUTER_MODEL}"
-        assert sent["api_base"] == "https://openrouter.ai/api/v1"
+        assert sent["api_base"] == OPENROUTER_BASE
         assert sent["api_key"] == TEST_OPENROUTER_KEY
 
-    async def test_notes_model_overrides_the_default(
-        self, openrouter_settings: FakeLoader
-    ) -> None:
-        settings = openrouter_settings.override(notes_model="anthropic/claude-sonnet-4")
-
-        result = await generator_for(settings, FakeCompletion()).generate_notes(
-            title="t", transcript="x"
-        )
-
-        assert result.model == "anthropic/claude-sonnet-4"
-
     async def test_a_usage_record_is_emitted_with_the_openrouter_cost(
-        self, openrouter_settings: FakeLoader
+        self, settings: FakeLoader, openrouter_registry: ModelRegistry
     ) -> None:
         ledger = RecordingLedger()
 
         await generator_for(
-            openrouter_settings, FakeCompletion(usage=(1100, 400)), usage_ledger=ledger
+            settings, openrouter_registry, FakeCompletion(usage=(1100, 400)), usage_ledger=ledger
         ).generate_notes(title="t", transcript="x")
 
         record = ledger.records[0]
@@ -602,13 +627,13 @@ class TestOpenRouterLegacySettings:
         assert record.cost_usd > 0.0
 
     async def test_an_oversized_transcript_is_refused_before_the_call(
-        self, openrouter_settings: FakeLoader
+        self, settings: FakeLoader, registry: ModelRegistry
     ) -> None:
-        settings = openrouter_settings.override(openrouter_input_token_limit=8)
+        add_openrouter(registry, input_token_limit=8)
         completion = FakeCompletion()
 
         with pytest.raises(NotesGenerationError) as excinfo:
-            await generator_for(settings, completion).generate_notes(
+            await generator_for(settings, registry, completion).generate_notes(
                 title="t", transcript="a" * 4000
             )
 
@@ -617,85 +642,62 @@ class TestOpenRouterLegacySettings:
 
 
 # --------------------------------------------------------------------------
-# 7. models are configuration: custom endpoints, key rotation, fallback
+# 7. models are data: custom endpoints, key rotation, fallback
 # --------------------------------------------------------------------------
 
 
 class TestConfiguredModels:
-    def test_a_new_provider_is_only_a_config_entry(self) -> None:
-        settings = FakeLoader(
-            notes_models=[
-                {
-                    "model": "openai/gpt-5-mini",
-                    "api_base": "http://localhost:3001/v1",
-                    "api_key_env": "FREELLMAPI_API_KEY",
-                    "input_token_limit": 200_000,
-                },
-                {"model": "groq/llama-3.3-70b-versatile"},
-            ]
-        )
-
-        first, second = resolve_model_specs(settings)
-
-        assert (first.provider, first.model) == ("openai", "gpt-5-mini")
-        assert first.api_base == "http://localhost:3001/v1"
-        assert first.api_key_env == "FREELLMAPI_API_KEY"
-        assert first.input_token_limit == 200_000
-        assert second.api_key_env == "GROQ_API_KEY"  # default derived from the provider name
-        assert second.api_base is None
-
-    @pytest.mark.parametrize("model", ["gpt-5-mini", "", "gemini/"])
-    def test_an_entry_without_provider_and_model_is_rejected(self, model: str) -> None:
-        with pytest.raises(ValueError, match="notes_models"):
-            resolve_model_specs(FakeLoader(notes_models=[{"model": model}]))
-
     async def test_a_custom_endpoint_is_passed_to_the_provider_call(
-        self, gemini_settings: FakeLoader, monkeypatch: pytest.MonkeyPatch
+        self, settings: FakeLoader, registry: ModelRegistry
     ) -> None:
-        monkeypatch.setenv("FREELLMAPI_API_KEY", "omni-test-key")
-        settings = gemini_settings.override(
-            notes_models=[
-                {
-                    "model": "openai/gpt-5-mini",
-                    "api_base": "http://localhost:3001/v1",
-                    "api_key_env": "FREELLMAPI_API_KEY",
-                }
-            ]
-        )
+        add_model(registry, "freellmapi", "gpt-5-mini", api_base="http://localhost:3001/v1")
+        add_key(registry, "freellmapi", "omni-test-key")
         completion = FakeCompletion()
 
-        result = await generator_for(settings, completion).generate_notes(
+        result = await generator_for(settings, registry, completion).generate_notes(
             title="t", transcript="x"
         )
 
-        assert result.provider == "openai"
+        assert (result.provider, result.model) == ("freellmapi", "gpt-5-mini")
         sent = completion.calls[0]
-        assert sent["model"] == "openai/gpt-5-mini"
+        assert sent["model"] == "openai/gpt-5-mini"  # an OpenAI-compatible gateway
         assert sent["api_base"] == "http://localhost:3001/v1"
         assert sent["api_key"] == "omni-test-key"
 
-    async def test_keys_of_one_model_rotate_before_falling_back(
-        self, chain_settings: FakeLoader, monkeypatch: pytest.MonkeyPatch
+    async def test_a_per_model_timeout_overrides_the_global_one(
+        self, settings: FakeLoader, registry: ModelRegistry
     ) -> None:
-        monkeypatch.setenv("GEMINI_API_KEY", "gem-key-1,gem-key-2")
-        reset_pools()
+        add_model(registry, "nvidia", "slow-model", request_timeout_seconds=3600.0)
+        add_key(registry, "nvidia", "nv-key")
+        completion = FakeCompletion()
+
+        await generator_for(settings, registry, completion).generate_notes(
+            title="t", transcript="x"
+        )
+
+        assert completion.calls[0]["timeout"] == 3600.0
+
+    async def test_keys_of_one_model_rotate_before_falling_back(
+        self, settings: FakeLoader, chain_registry: ModelRegistry
+    ) -> None:
+        add_key(chain_registry, "gemini", "gem-key-2")
         completion = FakeCompletion(RuntimeError("429 Too Many Requests"), GOOD_NOTES)
 
-        result = await generator_for(chain_settings, completion).generate_notes(
+        result = await generator_for(settings, chain_registry, completion).generate_notes(
             title="t", transcript="x"
         )
 
         assert result.provider == "gemini"
-        assert [call["api_key"] for call in completion.calls] == ["gem-key-1", "gem-key-2"]
+        assert [call["api_key"] for call in completion.calls] == [TEST_GEMINI_KEY, "gem-key-2"]
 
     async def test_falls_back_to_the_next_model_when_the_first_is_turned_away(
-        self, chain_settings: FakeLoader
+        self, settings: FakeLoader, chain_registry: ModelRegistry
     ) -> None:
         completion = FakeCompletion(RuntimeError("503 Service Unavailable"), GOOD_NOTES)
         ledger = RecordingLedger()
 
         result = await generator_for(
-            chain_settings, completion, usage_ledger=ledger
+            settings, chain_registry, completion, usage_ledger=ledger
         ).generate_notes(title="t", transcript="x")
 
         assert (result.provider, result.model) == ("openrouter", "openai/gpt-5-mini")
@@ -709,23 +711,24 @@ class TestConfiguredModels:
         ]
 
     async def test_a_rejected_key_on_the_first_model_still_falls_back(
-        self, chain_settings: FakeLoader
+        self, settings: FakeLoader, chain_registry: ModelRegistry
     ) -> None:
         completion = FakeCompletion(RuntimeError("401 Unauthorized"), GOOD_NOTES)
 
-        result = await generator_for(chain_settings, completion).generate_notes(
+        result = await generator_for(settings, chain_registry, completion).generate_notes(
             title="t", transcript="x"
         )
 
         assert result.provider == "openrouter"
 
     async def test_a_model_without_a_key_is_skipped(
-        self, chain_settings: FakeLoader, monkeypatch: pytest.MonkeyPatch
+        self, settings: FakeLoader, registry: ModelRegistry
     ) -> None:
-        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        add_model(registry, "gemini", "gemini-3.5-flash")  # no Gemini key
+        add_openrouter(registry)
         completion = FakeCompletion()
 
-        result = await generator_for(chain_settings, completion).generate_notes(
+        result = await generator_for(settings, registry, completion).generate_notes(
             title="t", transcript="x"
         )
 
@@ -733,17 +736,13 @@ class TestConfiguredModels:
         assert len(completion.calls) == 1
 
     async def test_a_transcript_too_big_for_one_model_goes_to_a_bigger_one(
-        self, gemini_settings: FakeLoader
+        self, settings: FakeLoader, registry: ModelRegistry
     ) -> None:
-        settings = gemini_settings.override(
-            notes_models=[
-                {"model": "openrouter/openai/gpt-5-mini", "input_token_limit": 10},
-                {"model": "gemini/gemini-3.5-flash", "input_token_limit": 1_000_000},
-            ]
-        )
+        add_openrouter(registry, input_token_limit=10)
+        add_gemini(registry, input_token_limit=1_000_000)
         completion = FakeCompletion()
 
-        result = await generator_for(settings, completion).generate_notes(
+        result = await generator_for(settings, registry, completion).generate_notes(
             title="t", transcript="a" * 4000
         )
 
@@ -751,12 +750,12 @@ class TestConfiguredModels:
         assert len(completion.calls) == 1
 
     async def test_every_model_failing_raises_the_transient_error_so_the_pipeline_retries(
-        self, chain_settings: FakeLoader
+        self, settings: FakeLoader, chain_registry: ModelRegistry
     ) -> None:
         completion = FakeCompletion(RuntimeError("401 Unauthorized"), RuntimeError("429 Too Many"))
 
         with pytest.raises(NotesGenerationError) as excinfo:
-            await generator_for(chain_settings, completion).generate_notes(
+            await generator_for(settings, chain_registry, completion).generate_notes(
                 title="t", transcript="x"
             )
 
@@ -764,43 +763,30 @@ class TestConfiguredModels:
         assert excinfo.value.failure_kind is FailureKind.TRANSIENT
 
     async def test_every_model_rejecting_its_key_is_a_permanent_config_error(
-        self, chain_settings: FakeLoader
+        self, settings: FakeLoader, chain_registry: ModelRegistry
     ) -> None:
         completion = FakeCompletion(RuntimeError("401 Unauthorized"))
 
         with pytest.raises(NotesGeneratorConfigError):
-            await generator_for(chain_settings, completion).generate_notes(
+            await generator_for(settings, chain_registry, completion).generate_notes(
                 title="t", transcript="x"
             )
 
         assert len(completion.calls) == 2
 
     async def test_a_bad_response_does_not_trigger_a_fallback(
-        self, chain_settings: FakeLoader
+        self, settings: FakeLoader, chain_registry: ModelRegistry
     ) -> None:
         """Only a model that is turned away falls back; its answer is judged as is."""
         completion = FakeCompletion("   ")
 
         with pytest.raises(NotesGenerationError) as excinfo:
-            await generator_for(chain_settings, completion).generate_notes(
+            await generator_for(settings, chain_registry, completion).generate_notes(
                 title="t", transcript="x"
             )
 
         assert excinfo.value.failure_type is FailureType.OUTPUT_MALFORMED
         assert len(completion.calls) == 1
-
-    @pytest.mark.parametrize(
-        ("overrides", "message"),
-        [
-            ({"notes_models": [{"model": "nope"}]}, "notes_models"),
-            ({"notes_provider": "llama.cpp"}, "llama.cpp"),
-        ],
-    )
-    def test_unusable_configuration_raises_a_clear_error(
-        self, gemini_settings: FakeLoader, overrides: dict[str, Any], message: str
-    ) -> None:
-        with pytest.raises(ValueError, match=message):
-            build_notes_generator(gemini_settings.override(**overrides))
 
 
 # --------------------------------------------------------------------------
@@ -809,25 +795,18 @@ class TestConfiguredModels:
 
 
 class TestBuildNotesGenerator:
-    def test_defaults_to_gemini(self, gemini_settings: FakeLoader) -> None:
-        generator = build_notes_generator(gemini_settings)
+    def test_builds_a_generator_on_the_registry(
+        self, settings: FakeLoader, gemini_registry: ModelRegistry
+    ) -> None:
+        generator = build_notes_generator(settings, registry=gemini_registry)
 
         assert isinstance(generator, LiteLLMNotesGenerator)
         assert generator.provider == "gemini"
 
-    def test_openrouter_is_selected_by_legacy_settings(
-        self, openrouter_settings: FakeLoader
+    def test_the_primary_model_is_the_first_of_the_chain(
+        self, settings: FakeLoader, chain_registry: ModelRegistry
     ) -> None:
-        assert build_notes_generator(openrouter_settings).provider == "openrouter"
-
-    def test_provider_matching_is_forgiving_about_case_and_padding(
-        self, openrouter_settings: FakeLoader
-    ) -> None:
-        settings = openrouter_settings.override(notes_provider=" OpenRouter ")
-        assert build_notes_generator(settings).provider == "openrouter"
-
-    def test_notes_models_win_over_the_legacy_provider(self, chain_settings: FakeLoader) -> None:
-        generator = build_notes_generator(chain_settings.override(notes_provider="openrouter"))
+        generator = build_notes_generator(settings, registry=chain_registry)
 
         assert generator.provider == "gemini"
         assert [spec.litellm_model for spec in generator.specs] == [
@@ -835,19 +814,29 @@ class TestBuildNotesGenerator:
             "openrouter/openai/gpt-5-mini",
         ]
 
-    def test_the_real_settings_loader_is_accepted(self) -> None:
-        loader = AtlasSettings(notes_provider="gemini").to_loader()
-        assert build_notes_generator(loader).provider == "gemini"
+    def test_the_chain_is_read_live_not_at_build_time(
+        self, settings: FakeLoader, chain_registry: ModelRegistry
+    ) -> None:
+        generator = build_notes_generator(settings, registry=chain_registry)
+        first, second = chain_registry.repo.list_models()
 
-    def test_the_real_settings_loader_reads_notes_models(self) -> None:
-        loader = AtlasSettings(
-            notes_models=[{"model": "openai/gpt-5-mini", "api_base": "http://localhost:3001/v1"}]
-        ).to_loader()
+        chain_registry.repo.replace_chain([(second.id, 1, True), (first.id, 2, True)])
 
-        (spec,) = build_notes_generator(loader).specs
+        assert generator.provider == "openrouter"
 
-        assert spec.api_base == "http://localhost:3001/v1"
-        assert spec.api_key_env == "OPENAI_API_KEY"
+    def test_an_empty_registry_builds_and_has_no_primary_model(
+        self, settings: FakeLoader, registry: ModelRegistry
+    ) -> None:
+        generator = build_notes_generator(settings, registry=registry)
+
+        assert (generator.provider, generator.model, generator.specs) == ("", "", ())
+
+    def test_the_real_settings_loader_is_accepted(self, registry: ModelRegistry) -> None:
+        assert build_notes_generator(AtlasSettings().to_loader(), registry=registry).provider == ""
+
+    def test_a_registry_is_required(self, settings: FakeLoader) -> None:
+        with pytest.raises(TypeError):
+            build_notes_generator(settings)  # type: ignore[call-arg]
 
 
 # --------------------------------------------------------------------------
@@ -861,15 +850,16 @@ FAKE_OPENROUTER_KEY = "sk-or-v1-0000000000000000000000000000TEST"
 class TestSecretHygiene:
     async def test_the_gemini_key_never_reaches_an_exception_a_log_or_the_ledger(
         self,
-        gemini_settings: FakeLoader,
-        monkeypatch: pytest.MonkeyPatch,
+        settings: FakeLoader,
+        registry: ModelRegistry,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        monkeypatch.setenv("GEMINI_API_KEY", FAKE_KEY)
+        add_model(registry, "gemini", "gemini-3.5-flash")
+        add_key(registry, "gemini", FAKE_KEY)
         # Worst case: the provider echoes the credential back inside its error.
         completion = FakeCompletion(RuntimeError(f"400 invalid key {FAKE_KEY}"))
         ledger = RecordingLedger()
-        generator = generator_for(gemini_settings, completion, usage_ledger=ledger)
+        generator = generator_for(settings, registry, completion, usage_ledger=ledger)
 
         with caplog.at_level(logging.DEBUG), pytest.raises(NotesGenerationError) as excinfo:
             await generator.generate_notes(title="t", transcript="a secret transcript line")
@@ -883,14 +873,15 @@ class TestSecretHygiene:
 
     async def test_the_openrouter_key_never_reaches_an_exception_a_log_or_the_ledger(
         self,
-        openrouter_settings: FakeLoader,
-        monkeypatch: pytest.MonkeyPatch,
+        settings: FakeLoader,
+        registry: ModelRegistry,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        monkeypatch.setenv("OPENROUTER_API_KEY", FAKE_OPENROUTER_KEY)
+        add_model(registry, "openrouter", "openai/gpt-5-mini", api_base=OPENROUTER_BASE)
+        add_key(registry, "openrouter", FAKE_OPENROUTER_KEY)
         completion = FakeCompletion(RuntimeError(f"401 Unauthorized: {FAKE_OPENROUTER_KEY}"))
         ledger = RecordingLedger()
-        generator = generator_for(openrouter_settings, completion, usage_ledger=ledger)
+        generator = generator_for(settings, registry, completion, usage_ledger=ledger)
 
         # "Unauthorized" is a rejected key: a permanent config error, not a retryable one.
         with caplog.at_level(logging.DEBUG), pytest.raises(NotesGeneratorConfigError) as excinfo:
@@ -905,19 +896,21 @@ class TestSecretHygiene:
 
     async def test_a_successful_call_logs_neither_key_nor_transcript(
         self,
-        chain_settings: FakeLoader,
-        monkeypatch: pytest.MonkeyPatch,
+        settings: FakeLoader,
+        registry: ModelRegistry,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        monkeypatch.setenv("GEMINI_API_KEY", FAKE_KEY)
-        monkeypatch.setenv("OPENROUTER_API_KEY", FAKE_OPENROUTER_KEY)
+        add_model(registry, "gemini", "gemini-3.5-flash")
+        add_key(registry, "gemini", FAKE_KEY)
+        add_model(registry, "openrouter", "openai/gpt-5-mini", api_base=OPENROUTER_BASE)
+        add_key(registry, "openrouter", FAKE_OPENROUTER_KEY)
         transcript = "a very secret transcript line about closures"
         # First model fails, so the fallback path is logged as well.
         completion = FakeCompletion(RuntimeError("503 Service Unavailable"), GOOD_NOTES)
 
         with caplog.at_level(logging.DEBUG):
             await generator_for(
-                chain_settings, completion, usage_ledger=RecordingLedger()
+                settings, registry, completion, usage_ledger=RecordingLedger()
             ).generate_notes(title="t", transcript=transcript)
 
         assert caplog.text, "expected the adapter to log something at all"
@@ -925,11 +918,12 @@ class TestSecretHygiene:
         assert FAKE_OPENROUTER_KEY not in caplog.text
         assert transcript not in caplog.text
 
-    def test_the_adapter_never_stores_the_key_on_itself(
-        self, gemini_settings: FakeLoader, monkeypatch: pytest.MonkeyPatch
+    def test_the_adapter_never_stores_a_key_on_itself(
+        self, settings: FakeLoader, registry: ModelRegistry
     ) -> None:
-        monkeypatch.setenv("GEMINI_API_KEY", FAKE_KEY)
-        generator = generator_for(gemini_settings, FakeCompletion())
+        add_model(registry, "gemini", "gemini-3.5-flash")
+        add_key(registry, "gemini", FAKE_KEY)
+        generator = generator_for(settings, registry, FakeCompletion())
 
         assert FAKE_KEY not in repr(vars(generator))
 
@@ -956,12 +950,7 @@ class TestSecretHygiene:
         assert result.returncode == 0, result.stderr
 
 
-def test_notes_generator_module_is_importable_without_a_key(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-
+def test_notes_generator_module_is_importable_without_a_key() -> None:
     assert MIN_NOTES_CHARS > 0
     assert Path(notes_base.__file__).name == "notes_base.py"
     assert len(GOOD_NOTES) > MIN_NOTES_CHARS

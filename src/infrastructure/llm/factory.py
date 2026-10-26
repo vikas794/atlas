@@ -1,4 +1,4 @@
-"""Factory that builds the configured notes generator (PRD section 18, 21).
+"""Factory that builds the notes generator (PRD section 18, 21).
 
 Lives in infrastructure (not in the domain port) because choosing an adapter means
 importing infrastructure modules. The adapter module is imported inside the function
@@ -12,26 +12,31 @@ retries and backoff (persisted, so they survive a restart and are capped by
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from src.domain.interfaces.notes_generator import NotesGeneratorPort
 from src.domain.interfaces.usage_ledger import UsageLedgerPort
 from src.infrastructure.llm.base import SettingsLoader
 
+if TYPE_CHECKING:
+    from src.infrastructure.llm.registry.service import ModelRegistry
+
 
 def build_notes_generator(
     settings_loader: SettingsLoader,
+    *,
+    registry: ModelRegistry,
     usage_ledger: UsageLedgerPort | None = None,
 ) -> NotesGeneratorPort:
-    """Build the notes generator for the models listed in ``notes_models``.
+    """Build the notes generator on the model registry.
 
-    With ``notes_models`` empty the single model named by the legacy ``notes_provider``
-    settings is used. Every provider goes through the same LiteLLM adapter.
-
-    Raises:
-        ValueError: If a model entry (or ``notes_provider``) names something Atlas cannot serve.
+    The models, their fallback order and the API keys all come from the registry (database), so
+    this never fails for configuration reasons: an empty chain or missing keys surface when a
+    note is generated. Every provider goes through the same LiteLLM adapter.
     """
     from src.infrastructure.llm.litellm_notes import LiteLLMNotesGenerator
 
-    return LiteLLMNotesGenerator(settings_loader, usage_ledger=usage_ledger)
+    return LiteLLMNotesGenerator(settings_loader, usage_ledger=usage_ledger, registry=registry)
 
 
 __all__ = ["build_notes_generator"]

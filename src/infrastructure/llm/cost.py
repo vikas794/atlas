@@ -39,6 +39,10 @@ class CostCalculator:
         # Gemini 2.5 (paid tier, text, prompts <= 200k tokens). gemini-2.5-flash is the
         # Atlas default; without it every notes call was recorded at $0. "-lite" is listed
         # before its prefix so prefix matching cannot price it as the bigger model.
+        # Gemini 3.5 flash (the registry's seeded default): estimated at the 2.5 flash tier,
+        # again with "-lite" first. LiteLLM's own price, when it knows one, wins at call time.
+        "gemini-3.5-flash-lite": ModelPricing(input_cost_per_million=0.10, output_cost_per_million=0.40),
+        "gemini-3.5-flash": ModelPricing(input_cost_per_million=0.30, output_cost_per_million=2.50),
         "gemini-2.5-flash-lite": ModelPricing(input_cost_per_million=0.10, output_cost_per_million=0.40),
         "gemini-2.5-flash": ModelPricing(input_cost_per_million=0.30, output_cost_per_million=2.50),
         "gemini-2.5-pro": ModelPricing(input_cost_per_million=1.25, output_cost_per_million=10.00),

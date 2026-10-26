@@ -8,6 +8,7 @@ at the moment the feature is used, and a missing key is never cached.
 
 from __future__ import annotations
 
+import time
 from functools import lru_cache, partial
 from pathlib import Path
 from typing import Any
@@ -29,7 +30,6 @@ from src.application.use_cases.playlist.publish import PublishPlaylistUseCase
 from src.application.worker import PlaylistWorker
 from src.config import AtlasSettings, load_settings
 from src.config.settings import SettingsLoader, repo_root
-from src.domain.exceptions import ConfigurationError
 from src.domain.interfaces.drive_publisher import DrivePublisherPort
 from src.domain.interfaces.notes_generator import NotesGeneratorPort
 from src.domain.interfaces.playlist_provider import PlaylistProviderPort
@@ -40,6 +40,9 @@ from src.domain.services.sync_diff import PlaylistEntry
 from src.infrastructure.google.drive import GoogleDriveExporter
 from src.infrastructure.google.publisher import GoogleDrivePublisher
 from src.infrastructure.llm.factory import build_notes_generator
+from src.infrastructure.llm.registry.repo import RegistryRepo
+from src.infrastructure.llm.registry.seed import seed_registry
+from src.infrastructure.llm.registry.service import ModelRegistry
 from src.infrastructure.storage.playlist_repo import PlaylistRepository
 from src.infrastructure.storage.settings_repo import SqlSettingsRepository
 from src.infrastructure.storage.sql import SqlUsageLedger
@@ -94,15 +97,26 @@ def get_transcript_provider() -> TranscriptProviderPort:
 
 
 @lru_cache(maxsize=1)
+def get_model_registry() -> ModelRegistry:
+    """The LLM model registry (models, keys, fallback chain); seeded once from the old settings/env."""
+    registry = ModelRegistry(RegistryRepo(get_storage_settings()["database_path"]))
+    seed_registry(registry)
+    # Housekeeping once per start (no background task): expired cooldowns and ledger rows
+    # older than the longest rate window (a day) are dead weight.
+    now = time.time()
+    registry.repo.sweep_cooldowns(now)
+    registry.repo.prune_usage(now - 2 * 86400.0)
+    return registry
+
+
+@lru_cache(maxsize=1)
 def get_notes_generator() -> NotesGeneratorPort:
-    """Get the notes generator named by ``NOTES_PROVIDER`` (no retries inside; see the factory)."""
-    try:
-        return build_notes_generator(
-            settings_loader=get_settings_loader(),
-            usage_ledger=get_usage_ledger(),
-        )
-    except ValueError as exc:
-        raise ConfigurationError(str(exc)) from exc
+    """Get the notes generator driven by the model registry (no retries inside; see the factory)."""
+    return build_notes_generator(
+        settings_loader=get_settings_loader(),
+        usage_ledger=get_usage_ledger(),
+        registry=get_model_registry(),
+    )
 
 
 _youtube_provider: PlaylistProviderPort | None = None
@@ -281,7 +295,7 @@ def apply_settings(settings: AtlasSettings) -> None:
 
     Plain attributes on the live worker, use case, transcript provider and Drive publisher are
     updated in place; running jobs finish with the values they started with. The cached loader
-    and notes generator are rebuilt so the model and request timeout follow. Restart-only
+    and notes generator are rebuilt so the request timeout follows. Restart-only
     settings (server, logging, paths) are untouched.
     """
     from src.transport.http.fastapi.schemas.playlists import _max_auto_retries
@@ -305,10 +319,7 @@ def apply_settings(settings: AtlasSettings) -> None:
     use_case.rate_limit_max_auto_retries = settings.rate_limit_max_auto_retries
     use_case.rate_limit_backoff_base_seconds = settings.rate_limit_backoff_base_seconds
     use_case.rate_limit_backoff_cap_seconds = settings.rate_limit_backoff_cap_seconds
-    try:
-        use_case.notes_generator = get_notes_generator()
-    except ConfigurationError:
-        pass  # keys missing: keep the generator that works; the next run reports it
+    use_case.notes_generator = get_notes_generator()
     provider = use_case.transcript_provider
     if hasattr(provider, "_min_interval"):
         provider._min_interval = max(0.0, settings.transcript_min_interval_seconds)
@@ -329,6 +340,7 @@ _CACHED_FACTORIES = (
     get_settings_repo,
     get_playlist_repo,
     get_transcript_provider,
+    get_model_registry,
     get_notes_generator,
     get_drive_exporter,
     get_drive_publisher,

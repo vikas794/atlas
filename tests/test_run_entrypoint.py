@@ -32,11 +32,11 @@ def free_port() -> int:
 
 
 def test_invalid_config_prints_the_problems_and_exits_2() -> None:
-    result = run_module("--check", ATLAS_MAX_CONCURRENT_VIDEOS="0", NOTES_PROVIDER="claude")
+    result = run_module("--check", ATLAS_MAX_CONCURRENT_VIDEOS="0", ATLAS_PORT="70000")
     assert result.returncode == 2
     assert "Atlas cannot start: invalid configuration" in result.stderr
     assert "max_concurrent_videos: must be at least 1" in result.stderr
-    assert "notes_provider: must be one of gemini, openrouter" in result.stderr
+    assert "port: must be between 1 and 65535" in result.stderr
     assert "Traceback" not in result.stderr
 
 

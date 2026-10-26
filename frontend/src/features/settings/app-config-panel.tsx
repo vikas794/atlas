@@ -1,13 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, Lock, RotateCcw, SlidersHorizontal } from 'lucide-react'
 import { useId, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import { ConfirmDialog } from '../../components/shared/confirm-dialog'
 import { DisabledReason } from '../../components/shared/disabled-reason'
 import { useToast } from '../../components/shared/toast'
 import { Button } from '../../components/ui/button'
+import { buttonClasses } from '../../components/ui/button-styles'
 import { Card } from '../../components/ui/card'
-import { getModels, getSettings, resetSettings, updateSettings } from '../../lib/api'
+import { getSettings, resetSettings, updateSettings } from '../../lib/api'
 import { ApiError, errorMessage, failureMessage } from '../../lib/errors'
 import { queryKeys } from '../../lib/query-keys'
 import type { SettingField, SettingValue, SettingsResponse } from '../../lib/types'
@@ -17,15 +19,6 @@ import { cn } from '../../lib/utils'
 type Draft = Record<string, string | boolean>
 
 const RUN_MODE_KEY = 'max_concurrent_videos'
-
-/** Notes fields the model picker owns, so the generic list skips them. */
-const PICKER_KEYS = new Set(['notes_provider', 'gemini_model', 'freellmapi_model', 'nvidia_model', 'openrouter_model'])
-const MODEL_KEY_BY_PROVIDER: Record<string, string> = {
-  gemini: 'gemini_model',
-  freellmapi: 'freellmapi_model',
-  nvidia: 'nvidia_model',
-  openrouter: 'openrouter_model',
-}
 
 function asText(value: SettingValue): string {
   return String(value)
@@ -227,16 +220,9 @@ export function AppConfigPanel() {
                         error={errorOf(RUN_MODE_KEY)}
                       />
                     ) : null}
-                    {group.id === 'notes' ? (
-                      <ModelPicker
-                        fieldsByKey={fieldsByKey}
-                        valueOf={valueOf}
-                        errorOf={errorOf}
-                        onChange={change}
-                      />
-                    ) : null}
+                    {group.id === 'notes' ? <ModelsLinkCard /> : null}
                     {fields
-                      .filter((field) => field.key !== RUN_MODE_KEY && !PICKER_KEYS.has(field.key))
+                      .filter((field) => field.key !== RUN_MODE_KEY)
                       .map((field) => (
                         <FieldRow
                           key={field.key}
@@ -334,141 +320,22 @@ function Group({
   )
 }
 
-/**
- * Which AI model writes the notes: a provider dropdown, then a model dropdown for it. Gemini
- * offers a fixed list; FreeLLMAPI's list is fetched from the gateway (searchable, since it is long).
- */
-function ModelPicker({
-  fieldsByKey,
-  valueOf,
-  errorOf,
-  onChange,
-}: {
-  fieldsByKey: Map<string, SettingField>
-  valueOf: (field: SettingField) => string | boolean
-  errorOf: (key: string) => string | undefined
-  onChange: (key: string, raw: string) => void
-}) {
-  const providerId = useId()
-  const modelId = useId()
-  const listId = useId()
-  const providerField = fieldsByKey.get('notes_provider')
-  const provider = providerField ? String(valueOf(providerField)) : ''
-  const modelField = fieldsByKey.get(MODEL_KEY_BY_PROVIDER[provider] ?? '')
-  const searchable = provider === 'freellmapi' || provider === 'nvidia'
-  const hasList = provider === 'gemini' || searchable
-
-  const models = useQuery({
-    queryKey: queryKeys.models(provider),
-    queryFn: () => getModels(provider),
-    enabled: hasList,
-    retry: false,
-    staleTime: 5 * 60_000,
-  })
-
-  if (!providerField) return null
-  const disabled = providerField.locked || !providerField.editable
-  const modelDisabled = !modelField || modelField.locked || !modelField.editable
-  const current = modelField ? String(valueOf(modelField)) : ''
-  const options = models.data?.models ?? []
-  const withCurrent = current && !options.includes(current) ? [current, ...options] : options
-
+/** Where the AI provider, models and API keys are managed now. */
+function ModelsLinkCard() {
   return (
-    <div className="space-y-3">
-      <div className="space-y-1">
-        <label htmlFor={providerId} className="text-body font-medium text-text">
-          AI provider
-        </label>
-        <select
-          id={providerId}
-          className="input max-w-xs"
-          value={provider}
-          disabled={disabled}
-          onChange={(event) => onChange('notes_provider', event.target.value)}
-        >
-          {providerField.choices.map((choice) => (
-            <option key={choice} value={choice}>
-              {choice}
-            </option>
-          ))}
-        </select>
-        {errorOf('notes_provider') ? (
-          <p role="alert" className="text-label text-st-error-fg">
-            {errorOf('notes_provider')}
-          </p>
-        ) : null}
-        <Badges field={providerField} />
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-border bg-surface-muted px-4 py-3">
+      <p className="text-body text-text-muted">
+        Which models write the notes, in what order, and their API keys are managed on the Models
+        and Keys screens.
+      </p>
+      <div className="flex gap-3">
+        <Link to="/models" className={buttonClasses({ variant: 'secondary' })}>
+          Models
+        </Link>
+        <Link to="/keys" className={buttonClasses({ variant: 'secondary' })}>
+          Keys
+        </Link>
       </div>
-
-      {modelField ? (
-        <div className="space-y-1">
-          <label htmlFor={modelId} className="text-body font-medium text-text">
-            AI model
-          </label>
-          {provider === 'gemini' ? (
-            <select
-              id={modelId}
-              className="input max-w-xs"
-              value={current}
-              disabled={modelDisabled}
-              onChange={(event) => onChange(modelField.key, event.target.value)}
-            >
-              {withCurrent.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <div className="flex flex-wrap items-center gap-2">
-              <input
-                id={modelId}
-                className="input max-w-md"
-                type="text"
-                list={searchable ? listId : undefined}
-                value={current}
-                disabled={modelDisabled}
-                placeholder={searchable ? 'Search or type a model id' : undefined}
-                aria-invalid={errorOf(modelField.key) ? true : undefined}
-                onChange={(event) => onChange(modelField.key, event.target.value)}
-              />
-              {searchable ? (
-                <>
-                  <datalist id={listId}>
-                    {options.map((name) => (
-                      <option key={name} value={name} />
-                    ))}
-                  </datalist>
-                  <Button
-                    variant="secondary"
-                    onClick={() => void models.refetch()}
-                    disabled={models.isFetching}
-                  >
-                    <RotateCcw className="size-icon" aria-hidden="true" />
-                    {models.isFetching ? 'Loading…' : 'Refresh models'}
-                  </Button>
-                </>
-              ) : null}
-            </div>
-          )}
-          {models.isError ? (
-            <p role="alert" className="text-label text-st-error-fg">
-              Could not load the model list: {errorMessage(models.error)}
-            </p>
-          ) : searchable && models.data ? (
-            <p className="text-label text-text-muted">{options.length} models available.</p>
-          ) : null}
-          {errorOf(modelField.key) ? (
-            <p role="alert" className="text-label text-st-error-fg">
-              {errorOf(modelField.key)}
-            </p>
-          ) : null}
-          <p className="text-label text-text-muted">
-            The model that writes the notes. Save to apply it; videos already running finish with
-            the previous one.
-          </p>
-        </div>
-      ) : null}
     </div>
   )
 }

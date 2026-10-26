@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import sqlite3
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -13,9 +13,6 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-NOTES_PROVIDERS = ("gemini", "openrouter", "freellmapi", "nvidia")
-#: Keys an entry of ``notes_models`` may carry (see ``AtlasSettings.notes_models``).
-NOTES_MODEL_KEYS = ("model", "api_key_env", "api_base", "input_token_limit")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 
@@ -71,28 +68,24 @@ class AtlasSettings:
     Environment overrides, highest precedence first:
 
     1. ``ATLAS_<FIELD_NAME>`` (e.g. ``ATLAS_MAX_CONCURRENT_VIDEOS``);
-    2. the documented, unprefixed names in :data:`ENV_ALIASES`
-       (``NOTES_PROVIDER``, ``GEMINI_MODEL``, ``OPENROUTER_MODEL`` ...), which is what
-       ``.env.example`` lists;
+    2. the documented, unprefixed names in :data:`ENV_ALIASES` (``NOTES_PROMPT_NAME``),
+       which is what ``.env.example`` lists;
     3. ``config.yaml``; then the defaults below.
 
     An **empty** value counts as unset (``KEY=`` in a ``.env`` file is the normal way to
     leave a setting at its default), and a malformed number is ignored with a warning
     instead of crashing startup.
 
-    API keys are never stored here: ``*_api_key_env`` name the environment variables that
-    hold them (``YOUTUBE_API_KEY``, ``GEMINI_API_KEY``, ``OPENROUTER_API_KEY``).
+    The YouTube key is never stored here: ``youtube_api_key_env`` names the environment
+    variable that holds it. LLM providers, models and keys live in the model registry
+    (database), not in settings.
     """
 
     # --- Storage ---------------------------------------------------------
     database_path: str = "data/atlas.sqlite3"
 
-    # --- Secrets (names of the env vars that hold keys, never the keys) ----
-    openrouter_api_key_env: str = "OPENROUTER_API_KEY"
+    # --- Secrets (name of the env var that holds the key, never the key) ----
     youtube_api_key_env: str = "YOUTUBE_API_KEY"
-    gemini_api_key_env: str = "GEMINI_API_KEY"
-    freellmapi_api_key_env: str = "FREELLMAPI_API_KEY"
-    nvidia_api_key_env: str = "NVIDIA_API_KEY"
 
     # --- Google OAuth ----------------------------------------------------
     google_creds_path: str = "credentials.json"
@@ -114,30 +107,7 @@ class AtlasSettings:
     ytdlp_cookies_from_browser: str = ""
 
     # --- Notes generation (playlist -> per-video Markdown notes) ----------
-    #: Ordered LiteLLM models, tried first to last (the rest are fallbacks). Each entry is a
-    #: mapping with ``model`` ("<litellm-provider>/<model>", e.g. "gemini/gemini-3.5-flash") and
-    #: optional ``api_key_env``, ``api_base`` (OpenAI-compatible gateways such as FreeLLMAPI) and
-    #: ``input_token_limit``. Empty -> derived from the legacy ``notes_provider`` settings below.
-    notes_models: list[dict[str, Any]] = field(default_factory=list)
-    notes_provider: str = "gemini"  # legacy single-provider shorthand: gemini | openrouter
-    notes_model: str = ""  # empty -> the provider's own default model
-    gemini_model: str = "gemini-3.5-flash"
-    gemini_input_token_limit: int = 1000000
-    openrouter_model: str = ""  # used when notes_model is empty
-    openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    openrouter_input_token_limit: int = 128000
-    #: FreeLLMAPI: an OpenAI-compatible gateway. Notes go to ``freellmapi_base_url``; the model
-    #: list for the UI is read from ``freellmapi_models_url`` (empty -> the base URL).
-    freellmapi_model: str = ""
-    freellmapi_base_url: str = "http://localhost:3001/v1"
-    freellmapi_models_url: str = ""
-    freellmapi_input_token_limit: int = 128000
-    #: NVIDIA NIM (build.nvidia.com): an OpenAI-compatible endpoint. Its reasoning models are slow,
-    #: so it has its own, much longer per-request timeout than ``notes_request_timeout_seconds``.
-    nvidia_model: str = "deepseek-ai/deepseek-v4.1-flash"
-    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
-    nvidia_input_token_limit: int = 128000
-    nvidia_request_timeout_seconds: float = 3600.0
+    #: Which LLM models and keys are used is managed in the model registry (Models and Keys pages).
     notes_prompt_name: str = "notes_v1_2.yaml"  # the prompt file's own `version` is recorded
     notes_request_timeout_seconds: float = 300.0  # a hung LLM call must not hold a slot forever
 
@@ -198,35 +168,6 @@ class AtlasSettings:
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
-    def _notes_models_problems(self) -> list[str]:
-        found: list[str] = []
-        for index, entry in enumerate(self.notes_models, start=1):
-            where = f"notes_models[{index}]"
-            if not isinstance(entry, dict):
-                found.append(f"{where}: must be a mapping with at least a 'model' key")
-                continue
-            unknown = sorted(set(entry) - set(NOTES_MODEL_KEYS))
-            if unknown:
-                found.append(
-                    f"{where}: unknown key(s) {', '.join(unknown)} "
-                    f"(allowed: {', '.join(NOTES_MODEL_KEYS)})"
-                )
-            model = entry.get("model")
-            if not isinstance(model, str) or "/" not in model.strip("/ "):
-                found.append(
-                    f"{where}.model: must look like '<provider>/<model>', e.g. "
-                    f"'gemini/gemini-3.5-flash' (got {model!r})"
-                )
-            for key in ("api_key_env", "api_base"):
-                if key in entry and not isinstance(entry[key], str):
-                    found.append(f"{where}.{key}: must be text (got {entry[key]!r})")
-            limit = entry.get("input_token_limit")
-            if limit is not None and (
-                isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
-            ):
-                found.append(f"{where}.input_token_limit: must be a whole number of at least 1")
-        return found
-
     def problems(self) -> list[str]:
         """Human-readable reasons this configuration cannot run (empty when it is valid)."""
         found: list[str] = []
@@ -238,12 +179,9 @@ class AtlasSettings:
         for name in (
             "database_path", "google_creds_path", "google_token_path", "transcript_output_folder",
             "prompts_base_dir", "notes_prompt_name", "log_file", "transcript_language",
-            "gemini_api_key_env", "youtube_api_key_env", "openrouter_api_key_env",
-            "freellmapi_api_key_env", "nvidia_api_key_env",
+            "youtube_api_key_env",
         ):  # fmt: skip
             need(bool(str(getattr(self, name)).strip()), name, "must not be empty")
-        need(self.notes_provider in NOTES_PROVIDERS, "notes_provider",
-             f"must be one of {', '.join(NOTES_PROVIDERS)}")  # fmt: skip
         need(str(self.log_level).upper() in LOG_LEVELS, "log_level",
              f"must be one of {', '.join(LOG_LEVELS)}")  # fmt: skip
         need(bool(self.host.strip()), "host", "must not be empty")
@@ -265,16 +203,8 @@ class AtlasSettings:
              "drive_backoff_cap_seconds", "must be at least drive_backoff_base_seconds")  # fmt: skip
         need(self.notes_request_timeout_seconds > 0, "notes_request_timeout_seconds",
              "must be greater than 0")  # fmt: skip
-        need(self.nvidia_request_timeout_seconds > 0, "nvidia_request_timeout_seconds",
-             "must be greater than 0")  # fmt: skip
         need(self.worker_poll_interval_seconds > 0, "worker_poll_interval_seconds",
              "must be greater than 0")  # fmt: skip
-        for name in (
-            "gemini_input_token_limit", "openrouter_input_token_limit",
-            "freellmapi_input_token_limit", "nvidia_input_token_limit",
-        ):  # fmt: skip
-            need(getattr(self, name) >= 1, name, "must be at least 1")
-        found.extend(self._notes_models_problems())
         prompts_dir = Path(self.prompts_base_dir)
         if not prompts_dir.is_absolute():
             prompts_dir = repo_root() / prompts_dir
@@ -296,23 +226,7 @@ class AtlasSettings:
 #: Documented, unprefixed environment variable names -> AtlasSettings field names. These are
 #: the names ``.env.example`` lists; ``ATLAS_<FIELD>`` still wins when both are set.
 ENV_ALIASES: dict[str, str] = {
-    "NOTES_MODELS": "notes_models",
-    "NOTES_PROVIDER": "notes_provider",
-    "NOTES_MODEL": "notes_model",
     "NOTES_PROMPT_NAME": "notes_prompt_name",
-    "GEMINI_MODEL": "gemini_model",
-    "GEMINI_INPUT_TOKEN_LIMIT": "gemini_input_token_limit",
-    "OPENROUTER_MODEL": "openrouter_model",
-    "OPENROUTER_BASE_URL": "openrouter_base_url",
-    "OPENROUTER_INPUT_TOKEN_LIMIT": "openrouter_input_token_limit",
-    "FREELLMAPI_MODEL": "freellmapi_model",
-    "FREELLMAPI_BASE_URL": "freellmapi_base_url",
-    "FREELLMAPI_MODELS_URL": "freellmapi_models_url",
-    "FREELLMAPI_INPUT_TOKEN_LIMIT": "freellmapi_input_token_limit",
-    "NVIDIA_MODEL": "nvidia_model",
-    "NVIDIA_BASE_URL": "nvidia_base_url",
-    "NVIDIA_INPUT_TOKEN_LIMIT": "nvidia_input_token_limit",
-    "NVIDIA_REQUEST_TIMEOUT_SECONDS": "nvidia_request_timeout_seconds",
 }
 
 # Older ``ATLAS_*`` names that predate the field names and must keep working

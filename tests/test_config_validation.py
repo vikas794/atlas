@@ -62,7 +62,6 @@ def test_a_nested_layout_is_reported(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("env", "value", "expected"),
     [
-        ("NOTES_PROVIDER", "claude", "notes_provider: must be one of gemini, openrouter"),
         ("ATLAS_MAX_CONCURRENT_VIDEOS", "0", "max_concurrent_videos: must be at least 1"),
         ("ATLAS_MAX_AUTO_RETRIES", "-1", "max_auto_retries: must be 0 or more"),
         ("ATLAS_BACKOFF_CAP_SECONDS", "1", "backoff_cap_seconds: must be at least backoff_base"),
@@ -84,7 +83,7 @@ def test_out_of_range_values_are_reported(
 
 def test_all_problems_are_reported_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ATLAS_MAX_CONCURRENT_VIDEOS", "0")
-    monkeypatch.setenv("NOTES_PROVIDER", "nope")
+    monkeypatch.setenv("ATLAS_PORT", "0")
     with pytest.raises(SettingsError) as excinfo:
         load_settings()
     assert len(excinfo.value.problems) == 2

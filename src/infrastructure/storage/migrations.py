@@ -381,6 +381,90 @@ MIGRATIONS: list[tuple[str, list[str]]] = [
             "ALTER TABLE videos ADD COLUMN regen_prompt TEXT",
         ],
     ),
+    (
+        "0007_model_registry",
+        [
+            # LLM model registry (modelled on FreeLLMAPI): models, keys, one ordered fallback
+            # chain, cooldowns and the rate-limit / quota ledgers. Keys are stored in plain text.
+            """
+            CREATE TABLE llm_models (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                litellm_model TEXT NOT NULL,
+                api_base TEXT,
+                input_token_limit INTEGER NOT NULL DEFAULT 128000,
+                request_timeout_seconds REAL,
+                rpm_limit INTEGER,
+                rpd_limit INTEGER,
+                tpm_limit INTEGER,
+                tpd_limit INTEGER,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                source TEXT NOT NULL DEFAULT 'user',
+                created_at TEXT NOT NULL,
+                UNIQUE (provider, model_id)
+            )
+            """,
+            """
+            CREATE TABLE llm_api_keys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider TEXT NOT NULL,
+                label TEXT NOT NULL,
+                key_value TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'unknown',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                consecutive_failures INTEGER NOT NULL DEFAULT 0,
+                last_checked_at TEXT,
+                last_healthy_at TEXT,
+                last_health_error TEXT,
+                monthly_request_cap INTEGER,
+                monthly_token_cap INTEGER,
+                created_at TEXT NOT NULL
+            )
+            """,
+            "CREATE INDEX idx_llm_keys_provider ON llm_api_keys(provider)",
+            """
+            CREATE TABLE llm_fallback (
+                model_id INTEGER PRIMARY KEY REFERENCES llm_models(id) ON DELETE CASCADE,
+                priority INTEGER NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1
+            )
+            """,
+            # model_id = '*' cools the whole key down (rejected key, no credit).
+            """
+            CREATE TABLE llm_cooldowns (
+                key_id INTEGER NOT NULL REFERENCES llm_api_keys(id) ON DELETE CASCADE,
+                model_id TEXT NOT NULL,
+                expires_at REAL NOT NULL,
+                source TEXT NOT NULL DEFAULT 'heuristic',
+                set_at REAL NOT NULL,
+                PRIMARY KEY (key_id, model_id)
+            )
+            """,
+            """
+            CREATE TABLE llm_rate_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key_id INTEGER NOT NULL REFERENCES llm_api_keys(id) ON DELETE CASCADE,
+                model_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                tokens INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL
+            )
+            """,
+            "CREATE INDEX idx_llm_rate_usage ON llm_rate_usage(key_id, model_id, kind, created_at)",
+            """
+            CREATE TABLE llm_key_monthly_usage (
+                key_id INTEGER NOT NULL REFERENCES llm_api_keys(id) ON DELETE CASCADE,
+                month TEXT NOT NULL,
+                requests INTEGER NOT NULL DEFAULT 0,
+                tokens INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (key_id, month)
+            )
+            """,
+            "CREATE TABLE llm_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        ],
+    ),
 ]
 
 #: Migrations that must run with ``PRAGMA foreign_keys = OFF`` (the pragma is a

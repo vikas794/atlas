@@ -333,15 +333,12 @@ def gemini_429() -> Exception:
 
 @pytest.fixture(autouse=True)
 def _llm_keys(monkeypatch: pytest.MonkeyPatch):
-    """A fake Gemini key, and no key cooldown: these tests are about the pipeline's own retry
-    layer, so a 429 must not park the (single) key and short-circuit the next attempt."""
-    from src.shared.api_keys import KeyPool, reset_pools
+    """No key cooldown: these tests are about the pipeline's own retry layer, so a 429 must not
+    park the (single) key and short-circuit the next attempt."""
+    from tests.conftest import disable_key_cooldowns
 
-    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key-not-real")
-    monkeypatch.setattr(KeyPool, "cool_down", lambda self, key, seconds=0: None)
-    reset_pools()
+    disable_key_cooldowns(monkeypatch)
     yield
-    reset_pools()
 
 
 class GeminiClient:
@@ -361,13 +358,16 @@ class GeminiClient:
 
 
 def gemini(client: GeminiClient) -> LiteLLMNotesGenerator:
+    from tests.conftest import gemini_test_registry
+
     settings = {
-        "gemini_model": "gemini-3.5-flash",
         "notes_prompt_name": "notes_v1_1.yaml",
         "prompts_base_dir": "src/prompts",
     }
     return LiteLLMNotesGenerator(
-        lambda key, default=None: settings.get(key, default), completion=client
+        lambda key, default=None: settings.get(key, default),
+        completion=client,
+        registry=gemini_test_registry(),
     )
 
 
@@ -486,7 +486,7 @@ async def test_invalid_gemini_key_fails_permanently_after_one_call(
     (video,) = await repo.list_videos(playlist_pk)
     assert video.failure_type == FailureType.CONFIG_ERROR
     assert video.failure_kind == FailureKind.PERMANENT
-    assert "GEMINI_API_KEY" in video.failure_reason
+    assert "Keys page" in video.failure_reason
     assert video.next_retry_at is None and video.retry_count == 0
     assert client.calls == 1
 

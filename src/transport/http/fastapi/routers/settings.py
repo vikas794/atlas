@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import urllib.error
-import urllib.request
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
@@ -19,10 +16,8 @@ from src.config.editable import (
 )
 from src.config.settings import SettingsLayers, check_value, field_kind, read_layers
 from src.domain.exceptions import NotesGeneratorConfigError
-from src.infrastructure.llm.models import GEMINI_MODEL_CHOICES
 from src.infrastructure.llm.notes_base import NotesPromptSource
 from src.infrastructure.storage.settings_repo import SqlSettingsRepository
-from src.shared.api_keys import read_api_keys
 from src.transport.http.fastapi.dependencies import (
     apply_settings,
     get_boot_settings,
@@ -32,7 +27,6 @@ from src.transport.http.fastapi.dependencies import (
 from src.transport.http.fastapi.errors import HTTPError
 from src.transport.http.fastapi.schemas.playlists import NotesPromptResponse
 from src.transport.http.fastapi.schemas.settings import (
-    ModelListResponse,
     SettingField,
     SettingGroup,
     SettingsResponse,
@@ -165,71 +159,6 @@ def _reload_and_apply() -> None:
 async def get_settings() -> SettingsResponse:
     """Every editable setting with its effective value, source and whether it applies live."""
     return await asyncio.to_thread(_snapshot)
-
-
-def _fetch_openai_models(label: str, base: str, key_env: str) -> list[str]:
-    """Model ids from an OpenAI-compatible ``GET <base>/models`` (sorted, de-duplicated)."""
-    base = base.strip().rstrip("/")
-    keys = read_api_keys(key_env)
-    if not keys:
-        raise HTTPError(
-            status_code=400,
-            detail=f"{key_env} is not set. Add the {label} API key to .env to list its models.",
-            error_code="CONFIG_MISSING",
-        )
-    request = urllib.request.Request(  # noqa: S310 - URL comes from the operator's own settings
-        f"{base}/models", headers={"Authorization": f"Bearer {keys[0]}"}
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310
-            payload = json.load(response)
-    except urllib.error.HTTPError as exc:
-        raise HTTPError(
-            status_code=502,
-            detail=f"{label} answered {exc.code} for {base}/models.",
-            error_code="PROVIDER_ERROR",
-        ) from exc
-    except (urllib.error.URLError, OSError, ValueError) as exc:
-        raise HTTPError(
-            status_code=502,
-            detail=f"Could not reach {label} at {base}: {getattr(exc, 'reason', exc)}",
-            error_code="PROVIDER_ERROR",
-        ) from exc
-    data = payload.get("data") if isinstance(payload, dict) else None
-    ids = {m["id"] for m in data or [] if isinstance(m, dict) and isinstance(m.get("id"), str)}
-    return sorted(ids)
-
-
-def _fetch_freellmapi_models() -> list[str]:
-    settings = load_settings()
-    return _fetch_openai_models(
-        "FreeLLMAPI",
-        settings.freellmapi_models_url or settings.freellmapi_base_url,
-        settings.freellmapi_api_key_env,
-    )
-
-
-def _fetch_nvidia_models() -> list[str]:
-    settings = load_settings()
-    return _fetch_openai_models("NVIDIA", settings.nvidia_base_url, settings.nvidia_api_key_env)
-
-
-@router.get("/models", response_model=ModelListResponse)
-async def list_models(provider: str) -> ModelListResponse:
-    """The models selectable for ``provider``: a fixed Gemini list, or the live list of FreeLLMAPI or NVIDIA."""
-    if provider == "gemini":
-        return ModelListResponse(provider=provider, models=list(GEMINI_MODEL_CHOICES))
-    if provider == "freellmapi":
-        models = await asyncio.to_thread(_fetch_freellmapi_models)
-        return ModelListResponse(provider=provider, models=models)
-    if provider == "nvidia":
-        models = await asyncio.to_thread(_fetch_nvidia_models)
-        return ModelListResponse(provider=provider, models=models)
-    raise HTTPError(
-        status_code=404,
-        detail=f"No model list for provider {provider!r}.",
-        error_code="NOT_FOUND",
-    )
 
 
 def _read_notes_prompt() -> NotesPromptResponse:

@@ -113,11 +113,11 @@ def test_invalid_values_are_422_per_field_and_nothing_is_written(client: TestCli
 def test_unknown_and_secret_keys_are_rejected(client: TestClient) -> None:
     response = client.put(
         "/api/settings",
-        json={"values": {"gemini_api_key_env": "X", "nope": 1, "database_path": "x.db"}},
+        json={"values": {"youtube_api_key_env": "X", "nope": 1, "database_path": "x.db"}},
     )
     assert response.status_code == 422
     assert set(response.json()["details"]["fields"]) == {
-        "gemini_api_key_env",
+        "youtube_api_key_env",
         "nope",
         "database_path",
     }
@@ -171,64 +171,42 @@ def test_saving_updates_the_running_worker_and_use_case(
     assert worker.process_video.backoff_cap_seconds == 400.0
 
 
-def test_gemini_model_list_is_fixed(client: TestClient) -> None:
-    body = client.get("/api/settings/models", params={"provider": "gemini"}).json()
-    assert body["models"][0] == "gemini-3.8-flash"
-    assert "gemini-3.1-pro-preview" in body["models"]
+def test_the_removed_provider_and_model_settings_cannot_be_saved(client: TestClient) -> None:
+    """Provider, model and key choice moved to the model registry (/api/llm)."""
+    response = client.put(
+        "/api/settings",
+        json={
+            "values": {
+                "notes_provider": "freellmapi",
+                "gemini_model": "x",
+                "nvidia_request_timeout_seconds": 5,
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "VALIDATION_ERROR"
+    assert set(body["details"]["fields"]) == {
+        "notes_provider",
+        "gemini_model",
+        "nvidia_request_timeout_seconds",
+    }
+    assert deps.get_settings_repo().load_all() == {}
 
 
-def test_freellmapi_model_list_needs_a_key(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("FREELLMAPI_API_KEY", raising=False)
-    response = client.get("/api/settings/models", params={"provider": "freellmapi"})
-    assert response.status_code == 400
+def test_the_settings_list_has_no_provider_or_model_fields(client: TestClient) -> None:
+    keys = {f["key"] for f in client.get("/api/settings").json()["fields"]}
+
+    assert "notes_prompt_name" in keys and "notes_request_timeout_seconds" in keys
+    assert not {k for k in keys if k.startswith(("gemini_", "openrouter_", "freellmapi_", "nvidia_"))}
+    assert not keys & {"notes_provider", "notes_model", "notes_models"}
 
 
-def test_freellmapi_model_list_is_fetched_and_sorted(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import io
-    import json
+def test_the_old_model_list_endpoint_is_gone(client: TestClient) -> None:
+    response = client.get("/api/settings/models", params={"provider": "gemini"})
 
-    from src.transport.http.fastapi.routers import settings as router
-
-    monkeypatch.setenv("FREELLMAPI_API_KEY", "k")
-    seen: dict[str, str] = {}
-
-    def fake_urlopen(request, timeout):  # noqa: ANN001
-        seen["url"] = request.full_url
-        seen["auth"] = request.get_header("Authorization")
-        return io.BytesIO(json.dumps({"data": [{"id": "b"}, {"id": "a"}, {"id": "a"}]}).encode())
-
-    monkeypatch.setattr(router.urllib.request, "urlopen", fake_urlopen)
-    body = client.get("/api/settings/models", params={"provider": "freellmapi"}).json()
-    assert body["models"] == ["a", "b"]
-    assert seen == {"url": "http://localhost:3001/v1/models", "auth": "Bearer k"}
-
-
-def test_freellmapi_provider_builds_an_openai_compatible_spec() -> None:
-    from src.infrastructure.llm.models import resolve_model_specs
-
-    values = {"notes_provider": "freellmapi", "freellmapi_model": "gh/gemini-3.6-flash"}
-    (spec,) = resolve_model_specs(lambda key, default=None: values.get(key, default))
-    assert spec.litellm_model == "openai/gh/gemini-3.6-flash"
-    assert spec.api_base == "http://localhost:3001/v1"
-    assert spec.api_key_env == "FREELLMAPI_API_KEY"
-    assert spec.provider == "freellmapi"
-    assert spec.model == "gh/gemini-3.6-flash"
-
-
-def test_nvidia_provider_builds_a_spec_with_a_long_timeout() -> None:
-    from src.infrastructure.llm.models import resolve_model_specs
-
-    values = {"notes_provider": "nvidia"}
-    (spec,) = resolve_model_specs(lambda key, default=None: values.get(key, default))
-    assert spec.litellm_model == "openai/deepseek-ai/deepseek-v4.1-flash"
-    assert spec.api_base == "https://integrate.api.nvidia.com/v1"
-    assert spec.api_key_env == "NVIDIA_API_KEY"
-    assert spec.provider == "nvidia"
-    assert spec.request_timeout_seconds == 3600.0
+    assert response.status_code == 404
 
 
 def test_the_notes_prompt_endpoint_returns_the_current_prompt_file(client: TestClient) -> None:

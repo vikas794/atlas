@@ -25,7 +25,6 @@ from src.config.settings import (
     load_settings,
     repo_root,
 )
-from src.infrastructure.llm.models import resolve_model_specs
 from src.shared.api_keys import read_api_keys
 from src.shared.oauth_client import client_secrets_problem
 
@@ -73,13 +72,11 @@ def check_config() -> tuple[Check, AtlasSettings | None]:
         settings = load_settings()
     except SettingsError as exc:
         return _check("config", "error", "; ".join(exc.problems)), None
-    primary = resolve_model_specs(settings.to_loader())[0].litellm_model
     return (
         _check(
             "config",
             "ok",
-            f"src/configs/config.yaml is valid (notes model: {primary}, "
-            f"{settings.max_concurrent_videos} video(s) at a time).",
+            f"src/configs/config.yaml is valid ({settings.max_concurrent_videos} video(s) at a time).",
         ),
         settings,
     )
@@ -144,32 +141,88 @@ def check_youtube_key(settings: AtlasSettings) -> Check:
     )
 
 
-def check_llm_key(settings: AtlasSettings) -> Check:
-    try:
-        specs = resolve_model_specs(settings.to_loader())
-    except ValueError as exc:
-        return _check("llm_key", "error", str(exc))
+def _registry_snapshot(settings: AtlasSettings) -> tuple[list[tuple[str, str]], dict[str, list[str]]] | None:
+    """Read-only look at the model registry: ``(chain, statuses)`` or None when it is empty.
 
-    missing = [spec for spec in specs if not _key_is_set(spec.api_key_env)]
-    primary = specs[0]
+    ``chain`` is ``[(provider, model_id)]`` of the enabled chain models in priority order;
+    ``statuses`` maps a provider to the status of each of its enabled keys. Counts and names
+    only, never key values. A missing database or table counts as an empty registry.
+    """
+    path = Path(get_storage_settings(settings)["database_path"])
+    if not path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=2)
+        try:
+            chain = [
+                (row[0], row[1])
+                for row in conn.execute(
+                    "SELECT m.provider, m.model_id FROM llm_models m "
+                    "JOIN llm_fallback f ON f.model_id = m.id "
+                    "WHERE m.enabled = 1 AND f.enabled = 1 ORDER BY f.priority"
+                )
+            ]
+            statuses: dict[str, list[str]] = {}
+            total_keys = 0
+            for provider, status, enabled in conn.execute(
+                "SELECT provider, status, enabled FROM llm_api_keys"
+            ):
+                total_keys += 1
+                if enabled:
+                    statuses.setdefault(provider, []).append(status)
+            total_models = conn.execute("SELECT COUNT(*) FROM llm_models").fetchone()[0]
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+    if not total_models and not total_keys:
+        return None
+    return chain, statuses
+
+
+def _check_registry_llm(chain: list[tuple[str, str]], statuses: dict[str, list[str]]) -> Check:
+    if not chain:
+        return _check(
+            "llm_key",
+            "error",
+            "No notes models are enabled, so notes cannot be generated. "
+            "Enable or add a model on the Models page.",
+        )
+
+    def usable(provider: str) -> int:
+        return sum(1 for s in statuses.get(provider, []) if s in ("healthy", "unknown"))
+
+    order = ", ".join(f"{provider}/{model}" for provider, model in chain)
+    missing = [p for p in dict.fromkeys(p for p, _ in chain) if usable(p) == 0]
     if not missing:
-        names = ", ".join(spec.litellm_model for spec in specs)
-        keys = "; ".join(_key_summary(spec.api_key_env) for spec in specs)
-        return _check("llm_key", "ok", f"{keys} (models, in fallback order: {names}).")
-    if len(missing) < len(specs):
-        absent = ", ".join(f"{spec.api_key_env} (for {spec.litellm_model})" for spec in missing)
-        status = "error" if missing[0] is primary else "warning"
+        providers = dict.fromkeys(p for p, _ in chain)
+        keys = "; ".join(f"{p}: {usable(p)} usable key(s)" for p in providers)
+        return _check("llm_key", "ok", f"{keys} (models, in fallback order: {order}).")
+    absent = ", ".join(missing)
+    if len(missing) < len({p for p, _ in chain}):
+        status = "error" if chain[0][0] in missing else "warning"
         return _check(
             "llm_key",
             status,
-            f"Not set: {absent}. Those models are skipped; add the keys to .env to use them.",
+            f"No usable key for: {absent}. Those models are skipped; add or fix a key on the Keys page.",
         )
-    names = ", ".join(spec.api_key_env for spec in specs)
     return _check(
         "llm_key",
         "error",
-        f"{names} is not set, so notes cannot be generated. Add the key to .env.",
+        f"No usable key for: {absent}, so notes cannot be generated. Add a key on the Keys page.",
     )
+
+
+def check_llm_key(settings: AtlasSettings) -> Check:
+    snapshot = _registry_snapshot(settings)
+    if snapshot is None:
+        return _check(
+            "llm_key",
+            "error",
+            "No notes models or API keys yet, so notes cannot be generated. Add a model on the "
+            "Models page and a key on the Keys page.",
+        )
+    return _check_registry_llm(*snapshot)
 
 
 def check_drive_credentials(settings: AtlasSettings) -> Check:

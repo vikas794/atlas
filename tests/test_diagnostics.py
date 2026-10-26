@@ -31,7 +31,7 @@ GEMINI = "AIzaSyGEMINI1234567890abcdefghijklmnop"
 def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, api_env):
     """Temp DB/creds/token/dist; no developer .env; keys controlled per test."""
     monkeypatch.setattr("src.config.settings.load_dotenv", lambda *a, **k: False)
-    for name in ("YOUTUBE_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "NOTES_PROVIDER"):
+    for name in ("YOUTUBE_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("ATLAS_GOOGLE_CREDS_PATH", str(tmp_path / "credentials.json"))
     monkeypatch.setenv("ATLAS_GOOGLE_TOKEN_PATH", str(tmp_path / "token.json"))
@@ -83,7 +83,8 @@ def test_first_run_without_keys_or_drive(env) -> None:
     assert checks["youtube_key"]["status"] == "error"
     assert "YOUTUBE_API_KEY" in checks["youtube_key"]["message"]
     assert checks["llm_key"]["status"] == "error"
-    assert "GEMINI_API_KEY" in checks["llm_key"]["message"]
+    assert "gemini" in checks["llm_key"]["message"]
+    assert "Keys page" in checks["llm_key"]["message"]
     assert checks["drive_credentials"]["status"] == "warning"
     assert checks["drive_token"]["status"] == "warning"
     assert checks["frontend_build"]["status"] == "warning"
@@ -109,12 +110,28 @@ def test_everything_configured_is_ok_and_no_secret_is_returned(
         assert secret not in text
 
 
-def test_the_llm_check_follows_the_configured_provider(env, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NOTES_PROVIDER", "openrouter")
+def test_the_llm_check_follows_the_first_run_import_of_the_saved_provider(
+    env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The registry is seeded once from the old saved ``notes_provider``; only Gemini has a key."""
+    import os
+
+    from src.infrastructure.storage.db import connect, initialize
+
+    initialize(os.environ["ATLAS_DATABASE_PATH"])
+    conn = connect(os.environ["ATLAS_DATABASE_PATH"])
+    conn.execute(
+        "INSERT INTO app_settings (key, value_json, updated_at) "
+        "VALUES ('notes_provider', '\"openrouter\"', 'x')"
+    )
+    conn.close()
     monkeypatch.setenv("GEMINI_API_KEY", GEMINI)
+
     check = by_id(get_report())["llm_key"]
+
     assert check["status"] == "error"
-    assert "OPENROUTER_API_KEY" in check["message"]
+    assert "openrouter" in check["message"]  # the first chain model is the saved provider's
+    assert "Keys page" in check["message"]
 
 
 def test_an_invalid_credentials_file_is_an_error(env: Path) -> None:

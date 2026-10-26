@@ -1,7 +1,7 @@
 """Which settings the UI may edit, how they are grouped and whether they apply live.
 
-Secrets are not editable here: the ``*_api_key_env`` names, and the Google credential/token
-paths (the Drive panel owns those). Everything else is, flagged ``live`` when a running
+Secrets are not editable here: the ``youtube_api_key_env`` name, and the Google credential/token
+paths (the Drive panel owns those). LLM models and keys are managed on the Models and Keys pages. Everything else is, flagged ``live`` when a running
 Atlas picks the new value up without a restart.
 """
 
@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from src.config.settings import LOG_LEVELS, NOTES_PROVIDERS
+from src.config.settings import LOG_LEVELS
 
 
 @dataclass(frozen=True)
@@ -73,38 +73,6 @@ EDITABLE_FIELDS: tuple[EditableField, ...] = (
     EditableField("drive_backoff_cap_seconds", "drive", "Drive backoff cap",
                   "The longest wait between Drive retries.", unit="s", minimum=0),
 
-    EditableField("notes_provider", "notes", "Notes provider",
-                  "Single-provider shorthand, used when no model list is set.",
-                  choices=NOTES_PROVIDERS),
-    EditableField("notes_model", "notes", "Notes model",
-                  "Advanced: overrides the model picked above. Leave empty."),
-    EditableField("gemini_model", "notes", "Gemini model", "Used when the provider is gemini."),
-    EditableField("gemini_input_token_limit", "notes", "Gemini input token limit",
-                  "Longer transcripts are split to fit.", minimum=1),
-    EditableField("openrouter_model", "notes", "OpenRouter model",
-                  "Used when the provider is openrouter and no notes model is set."),
-    EditableField("openrouter_base_url", "notes", "OpenRouter base URL", ""),
-    EditableField("openrouter_input_token_limit", "notes", "OpenRouter input token limit",
-                  "", minimum=1),
-    EditableField("freellmapi_model", "notes", "FreeLLMAPI model",
-                  "Used when the provider is freellmapi and no notes model is set."),
-    EditableField("freellmapi_base_url", "notes", "FreeLLMAPI base URL",
-                  "OpenAI-compatible endpoint notes are sent to, for example "
-                  "http://localhost:3001/v1."),
-    EditableField("freellmapi_models_url", "notes", "FreeLLMAPI model list URL",
-                  "Where the model list is fetched from (its /models is appended). Empty uses "
-                  "the base URL."),
-    EditableField("freellmapi_input_token_limit", "notes", "FreeLLMAPI input token limit",
-                  "Longer transcripts are split to fit.", minimum=1),
-    EditableField("nvidia_model", "notes", "NVIDIA model",
-                  "Used when the provider is nvidia and no notes model is set."),
-    EditableField("nvidia_base_url", "notes", "NVIDIA base URL",
-                  "OpenAI-compatible endpoint, https://integrate.api.nvidia.com/v1 by default."),
-    EditableField("nvidia_input_token_limit", "notes", "NVIDIA input token limit",
-                  "Longer transcripts are split to fit.", minimum=1),
-    EditableField("nvidia_request_timeout_seconds", "timeouts", "NVIDIA request timeout",
-                  "NVIDIA requests are slow; one is abandoned after this long.", unit="s",
-                  minimum=1),
     EditableField("notes_prompt_name", "notes", "Notes prompt file",
                   "A file in the prompts folder."),
 

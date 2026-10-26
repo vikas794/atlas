@@ -229,47 +229,33 @@ describe('AppConfigPanel', () => {
       'false',
     )
   })
-  it('picks the AI model from a dropdown and saves only that field', async () => {
+  it('points to the Models and Keys screens from the notes group', async () => {
     const notes = settings({
       groups: [{ id: 'notes', label: 'Notes generation' }],
       fields: [
         field({
-          key: 'notes_provider',
+          key: 'notes_request_timeout_seconds',
           group: 'notes',
-          label: 'Notes provider',
-          kind: 'text',
-          choices: ['gemini', 'openrouter', 'freellmapi'],
-          value: 'gemini',
-          default: 'gemini',
-        }),
-        field({
-          key: 'gemini_model',
-          group: 'notes',
-          label: 'Gemini model',
-          kind: 'text',
-          value: 'gemini-3.5-flash',
-          default: 'gemini-3.5-flash',
+          label: 'LLM request timeout',
+          kind: 'float',
+          value: 300,
+          default: 300,
         }),
       ],
     })
-    const api = setup(notes)
-      .on('GET', '/api/settings/models', {
-        provider: 'gemini',
-        models: ['gemini-3.8-flash', 'gemini-3.6-flash'],
-      })
-      .on('PUT', '/api/settings', notes)
+    setup(notes)
     const user = userEvent.setup()
     renderRoute('/settings')
 
     await user.click(await screen.findByRole('button', { name: 'Notes generation' }))
-    const model = await screen.findByLabelText('AI model')
-    await screen.findByRole('option', { name: 'gemini-3.8-flash' })
-    await user.selectOptions(model, 'gemini-3.8-flash')
-    await user.click(screen.getByRole('button', { name: 'Save changes' }))
 
-    await waitFor(() => expect(api.callsTo('PUT', '/api/settings')).toHaveLength(1))
-    expect(api.callsTo('PUT', '/api/settings')[0].body).toEqual({
-      values: { gemini_model: 'gemini-3.8-flash' },
-    })
+    // One link in the top bar, one in the notes group.
+    const modelsLinks = screen.getAllByRole('link', { name: 'Models' })
+    const keysLinks = screen.getAllByRole('link', { name: 'Keys' })
+    expect(modelsLinks).toHaveLength(2)
+    expect(keysLinks).toHaveLength(2)
+    expect(modelsLinks.every((link) => link.getAttribute('href') === '/models')).toBe(true)
+    expect(keysLinks.every((link) => link.getAttribute('href') === '/keys')).toBe(true)
+    expect(screen.getByLabelText(/LLM request timeout/)).toBeInTheDocument()
   })
 })

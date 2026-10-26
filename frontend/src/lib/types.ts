@@ -261,11 +261,6 @@ export interface SettingsResponse {
   restart_required: boolean
 }
 
-export interface ModelListResponse {
-  provider: string
-  models: string[]
-}
-
 /* ------------------------------------------------------------- Diagnostics */
 
 export type DiagnosticStatus = 'ok' | 'warning' | 'error'
@@ -296,4 +291,165 @@ export interface DiagnosticsResponse {
 export interface NotesPrompt {
   prompt: string
   version: string
+}
+
+/* ------------------------------------------------------- LLM model registry */
+
+export type KeyStatus = 'unknown' | 'healthy' | 'rate_limited' | 'invalid' | 'error'
+
+export interface LlmProvider {
+  name: string
+  label: string
+  default_api_base: string | null
+  key_count: number
+  usable_key_count: number
+}
+
+/** One model row. `priority` and `chain_enabled` come from the fallback chain. */
+export interface LlmModel {
+  id: number
+  provider: string
+  model_id: string
+  display_name: string
+  litellm_model: string
+  api_base: string | null
+  input_token_limit: number
+  request_timeout_seconds: number | null
+  rpm_limit: number | null
+  rpd_limit: number | null
+  tpm_limit: number | null
+  tpd_limit: number | null
+  enabled: boolean
+  source: string
+  priority: number | null
+  chain_enabled: boolean
+}
+
+/** A chain entry: the model plus how many keys can serve it right now. */
+export interface FallbackEntry extends LlmModel {
+  key_count: number
+  usable_key_count: number
+  /** Why no key can serve it ("no_keys", "cooling_down", "rate_limited", "monthly_cap"). */
+  blocked: string | null
+}
+
+export interface FallbackResponse {
+  entries: FallbackEntry[]
+}
+
+export interface FallbackUpdate {
+  model_id: number
+  priority: number
+  enabled: boolean
+}
+
+export interface RateWindow {
+  used: number
+  limit: number | null
+}
+
+export interface RateLimitRow {
+  model_pk: number
+  rpm: RateWindow
+  rpd: RateWindow
+  tpm: RateWindow
+  tpd: RateWindow
+}
+
+export interface RateLimitUsageResponse {
+  rows: RateLimitRow[]
+}
+
+export interface TokenUsageKey {
+  key_id: number
+  requests: number
+  tokens: number
+  request_cap: number | null
+  token_cap: number | null
+}
+
+export interface TokenUsageResponse {
+  month: string
+  total_requests: number
+  total_tokens: number
+  keys: TokenUsageKey[]
+}
+
+export interface KeyCooldown {
+  model_id: string
+  /** Unix epoch seconds. */
+  expires_at: number
+  source: string
+}
+
+export interface LlmKey {
+  id: number
+  provider: string
+  label: string
+  masked_key: string
+  status: KeyStatus
+  enabled: boolean
+  consecutive_failures: number
+  last_checked_at: string | null
+  last_healthy_at: string | null
+  last_health_error: string | null
+  monthly_request_cap: number | null
+  monthly_token_cap: number | null
+  cooldowns: KeyCooldown[]
+  auto_disabled: boolean
+}
+
+export interface NewLlmModel {
+  provider: string
+  model_id: string
+  display_name?: string
+  api_base?: string | null
+  input_token_limit?: number
+  request_timeout_seconds?: number | null
+  rpm_limit?: number | null
+  rpd_limit?: number | null
+  tpm_limit?: number | null
+  tpd_limit?: number | null
+}
+
+export type LlmModelPatch = Partial<
+  Pick<
+    LlmModel,
+    | 'display_name'
+    | 'api_base'
+    | 'input_token_limit'
+    | 'request_timeout_seconds'
+    | 'rpm_limit'
+    | 'rpd_limit'
+    | 'tpm_limit'
+    | 'tpd_limit'
+    | 'enabled'
+  >
+>
+
+export interface NewLlmKey {
+  provider: string
+  key: string
+  label?: string
+  monthly_request_cap?: number | null
+  monthly_token_cap?: number | null
+}
+
+export interface LlmKeyPatch {
+  label?: string
+  key?: string
+  enabled?: boolean
+  monthly_request_cap?: number | null
+  monthly_token_cap?: number | null
+}
+
+export interface ModelTestResult {
+  success: boolean
+  latency_ms: number
+  error: string | null
+}
+
+export interface AvailableModelsResponse {
+  provider: string
+  models: string[]
 }

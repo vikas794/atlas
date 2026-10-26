@@ -8,6 +8,7 @@ No network: the completion call is a double that raises real ``litellm`` excepti
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import httpx
@@ -21,7 +22,9 @@ from src.infrastructure.llm.notes_base import (
     check_finish_reason,
     classify_provider_exception,
 )
-from src.shared.api_keys import reset_pools
+from src.infrastructure.llm.registry.providers import litellm_model_for
+from src.infrastructure.llm.registry.repo import RegistryRepo
+from src.infrastructure.llm.registry.service import ModelRegistry
 
 GOOD_NOTES = (
     "## Notes\n\n- loops: for, while and do-while, each with a worked example.\n\n"
@@ -31,28 +34,31 @@ GOOD_NOTES = (
 FAKE_KEY = "AIzaSyTESTKEY0000000000000000000000000000"
 
 
-@pytest.fixture(autouse=True)
-def _keys(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("GEMINI_API_KEY", FAKE_KEY)
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-not-a-real-key")
-    reset_pools()
-    yield
-    reset_pools()
+_MODELS = {
+    "gemini": ("gemini-3.5-flash", 1_000_000),
+    "openrouter": ("openai/gpt-5-mini", 128_000),
+}
 
 
 def _settings(**overrides: Any):
-    values = {
-        "notes_provider": "gemini",
-        "notes_model": "",
-        "gemini_model": "gemini-3.5-flash",
-        "gemini_input_token_limit": 1_000_000,
-        "notes_prompt_name": "notes_v1_1.yaml",
-        "gemini_api_key_env": "GEMINI_API_KEY",
-        "openrouter_api_key_env": "OPENROUTER_API_KEY",
-        "prompts_base_dir": "src/prompts",
-        **overrides,
-    }
+    values = {"notes_prompt_name": "notes_v1_1.yaml", "prompts_base_dir": "src/prompts", **overrides}
     return lambda key, default=None: values.get(key, default)
+
+
+def _registry(provider: str) -> ModelRegistry:
+    """A registry (in this test's throwaway database) with one model and one key for ``provider``."""
+    registry = ModelRegistry(RegistryRepo(os.environ["ATLAS_DATABASE_PATH"]))
+    model_id, limit = _MODELS[provider]
+    registry.repo.add_model(
+        provider=provider,
+        model_id=model_id,
+        display_name=model_id,
+        litellm_model=litellm_model_for(provider, model_id),
+        api_base=None,
+        input_token_limit=limit,
+    )
+    registry.repo.add_key(provider=provider, label="test key", key_value=FAKE_KEY)
+    return registry
 
 
 def llm_error(cls: type[Exception], code: int, message: str, provider: str = "gemini") -> Exception:
@@ -83,13 +89,15 @@ class Completion:
         return type("Response", (), {"choices": [choice], "usage": None})()
 
 
-async def _run(completion: Completion, **settings: Any) -> Any:
-    generator = LiteLLMNotesGenerator(_settings(**settings), completion=completion)
+async def _run(completion: Completion, provider: str = "gemini") -> Any:
+    generator = LiteLLMNotesGenerator(
+        _settings(), completion=completion, registry=_registry(provider)
+    )
     return await generator.generate_notes(title="Loops", transcript="short transcript")
 
 
 async def _openrouter(completion: Completion) -> Any:
-    return await _run(completion, notes_provider="openrouter")
+    return await _run(completion, provider="openrouter")
 
 
 # ----------------------------------------------------------------- Gemini
@@ -103,7 +111,7 @@ async def test_gemini_invalid_key_is_a_permanent_config_error() -> None:
     )
     with pytest.raises(NotesGeneratorConfigError) as excinfo:
         await _run(Completion(error=error))
-    assert "GEMINI_API_KEY" in str(excinfo.value)
+    assert "Keys page" in str(excinfo.value)
     assert FAKE_KEY not in str(excinfo.value)
     assert FAKE_KEY not in excinfo.value.diagnostic  # type: ignore[attr-defined]
 
@@ -246,7 +254,7 @@ async def test_the_call_carries_a_request_timeout() -> None:
 )
 async def test_openrouter_auth_errors_are_config_errors(cls: type[Exception], code: int) -> None:
     error = llm_error(cls, code, "No auth credentials found", "openrouter")
-    with pytest.raises(NotesGeneratorConfigError, match="OPENROUTER_API_KEY"):
+    with pytest.raises(NotesGeneratorConfigError, match="Keys page"):
         await _openrouter(Completion(error=error))
 
 
@@ -288,7 +296,7 @@ def test_classifier_never_echoes_provider_text_in_the_reason() -> None:
     error = classify_provider_exception(
         RuntimeError("weird provider text with transcript words"),
         provider_label="Gemini",
-        api_key_env="GEMINI_API_KEY",
+        api_key_env="registry:test key",
         model="m",
     )
     assert isinstance(error, NotesGenerationError)
@@ -323,7 +331,9 @@ async def test_usage_is_recorded_with_provider_tokens_and_priced() -> None:
         return type("Response", (), {"choices": [choice], "usage": usage})()
 
     ledger = Ledger()
-    generator = LiteLLMNotesGenerator(_settings(), usage_ledger=ledger, completion=completion)
+    generator = LiteLLMNotesGenerator(
+        _settings(), usage_ledger=ledger, completion=completion, registry=_registry("gemini")
+    )
     await generator.generate_notes(title="Loops", transcript="short transcript")
 
     (record,) = ledger.records

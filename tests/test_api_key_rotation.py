@@ -1,8 +1,7 @@
-"""Several API keys per service: parsing, the rotation pool, and failover in each adapter."""
+"""Several YouTube API keys: parsing, the rotation pool and failover (LLM keys: see the registry tests)."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any
 
 import httplib2
@@ -13,7 +12,6 @@ from backend.services.diagnostics import check_llm_key, check_youtube_key
 from src.config import load_settings
 from src.domain.exceptions import ConfigurationError
 from src.domain.models.playlist import FailureType, PipelineError
-from src.infrastructure.llm.litellm_notes import LiteLLMNotesGenerator
 from src.infrastructure.youtube import playlist as yt
 from src.infrastructure.youtube.playlist import YouTubePlaylistProvider
 from src.shared.api_keys import KeyPool, pool_for, read_api_keys, reset_pools
@@ -25,7 +23,7 @@ NOTES = "## Notes\n" + "A useful line of notes. " * 6 + "\n\n## Key Points\n- on
 
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch: pytest.MonkeyPatch):
-    for name in ("GEMINI_API_KEY", "YOUTUBE_API_KEY", "OPENROUTER_API_KEY"):
+    for name in ("GEMINI_API_KEY", "YOUTUBE_API_KEY"):
         monkeypatch.delenv(name, raising=False)
         for i in range(2, 5):
             monkeypatch.delenv(f"{name}_{i}", raising=False)
@@ -166,87 +164,36 @@ def test_youtube_without_any_key_still_names_the_variable() -> None:
         YouTubePlaylistProvider()
 
 
-# --- LLM (through LiteLLM) --------------------------------------------------------------------------------
-
-
-class _ApiError(Exception):
-    def __init__(self, code: int, message: str) -> None:
-        super().__init__(message)
-        self.code = code
-
-
-def _generator(monkeypatch: pytest.MonkeyPatch, errors: dict[str, Exception]) -> tuple[Any, list[str]]:
-    """A notes generator whose provider call fails per API key, recording which keys were tried."""
-    calls: list[str] = []
-
-    async def completion(*, api_key: str, **_: Any) -> Any:
-        calls.append(api_key)
-        if api_key in errors:
-            raise errors[api_key]
-        message = SimpleNamespace(content=NOTES)
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=message, finish_reason="stop")], usage=None
-        )
-
-    return LiteLLMNotesGenerator(load_settings().to_loader(), completion=completion), calls
-
-
-async def test_gemini_rate_limited_key_fails_over_and_is_parked(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("GEMINI_API_KEY", f"{KEY_A},{KEY_B}")
-    generator, calls = _generator(monkeypatch, {KEY_A: _ApiError(429, "RESOURCE_EXHAUSTED")})
-
-    notes = await generator.generate_notes(title="T", transcript="hello")
-    assert notes.provider == "gemini"
-    assert calls == [KEY_A, KEY_B]
-
-    await generator.generate_notes(title="T", transcript="hello")
-    assert calls[2:] == [KEY_B]  # A is cooling down
-
-
-async def test_gemini_every_key_rate_limited_surfaces_a_transient_rate_limit(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("GEMINI_API_KEY", f"{KEY_A},{KEY_B}")
-    err = _ApiError(429, "RESOURCE_EXHAUSTED")
-    generator, calls = _generator(monkeypatch, {KEY_A: err, KEY_B: err})
-
-    with pytest.raises(PipelineError) as excinfo:
-        await generator.generate_notes(title="T", transcript="hello")
-
-    assert excinfo.value.failure_type is FailureType.RATE_LIMITED
-    assert calls == [KEY_A, KEY_B]
-
-
-async def test_gemini_rejected_key_is_skipped_but_a_server_error_does_not_rotate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("GEMINI_API_KEY", f"{KEY_A},{KEY_B}")
-    generator, calls = _generator(monkeypatch, {KEY_A: _ApiError(400, "API key not valid")})
-    await generator.generate_notes(title="T", transcript="hello")
-    assert calls == [KEY_A, KEY_B]
-    assert pool_for("GEMINI_API_KEY").status()["disabled"] == 1
-
-    reset_pools()
-    generator, calls = _generator(monkeypatch, {KEY_A: _ApiError(503, "unavailable")})
-    with pytest.raises(PipelineError) as excinfo:
-        await generator.generate_notes(title="T", transcript="hello")
-    assert excinfo.value.failure_type is FailureType.PROVIDER_ERROR
-    assert calls == [KEY_A]
-
-
 # --- diagnostics ---------------------------------------------------------------------------
 
 
 def test_diagnostics_reports_the_key_count_but_never_a_value(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("YOUTUBE_API_KEY", f"{KEY_A},{KEY_B}")
-    monkeypatch.setenv("GEMINI_API_KEY", KEY_C)
     settings = load_settings()
 
-    youtube, llm = check_youtube_key(settings), check_llm_key(settings)
+    youtube = check_youtube_key(settings)
 
-    assert "2 keys" in youtube.message and "keys" not in llm.message.split("(")[0]
-    for check in (youtube, llm):
-        assert check.status == "ok"
-        assert not any(k in check.message for k in (KEY_A, KEY_B, KEY_C))
+    assert "2 keys" in youtube.message and youtube.status == "ok"
+    assert not any(k in youtube.message for k in (KEY_A, KEY_B))
+
+
+def test_llm_diagnostics_count_registry_keys_but_never_show_a_value() -> None:
+    from src.infrastructure.llm.registry.providers import litellm_model_for
+    from src.infrastructure.llm.registry.repo import RegistryRepo
+    from src.transport.http.fastapi.dependencies import get_storage_settings
+
+    repo = RegistryRepo(get_storage_settings()["database_path"])
+    repo.add_model(
+        provider="gemini",
+        model_id="gemini-a",
+        display_name="gemini-a",
+        litellm_model=litellm_model_for("gemini", "gemini-a"),
+        api_base=None,
+        input_token_limit=1000,
+    )
+    repo.add_key(provider="gemini", label="one", key_value=KEY_C)
+
+    llm = check_llm_key(load_settings())
+
+    assert llm.status == "ok" and "gemini: 1 usable key(s)" in llm.message
+    assert KEY_C not in llm.message

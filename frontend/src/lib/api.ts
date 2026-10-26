@@ -1,17 +1,29 @@
 import type {
   ActionResponse,
+  AvailableModelsResponse,
   DiagnosticsResponse,
   DriveActionResponse,
   DriveStatusResponse,
-  ModelListResponse,
+  FallbackResponse,
+  FallbackUpdate,
+  LlmKey,
+  LlmKeyPatch,
+  LlmModel,
+  LlmModelPatch,
+  LlmProvider,
+  ModelTestResult,
+  NewLlmKey,
+  NewLlmModel,
   NotesPrompt,
   Playlist,
   PlaylistListResponse,
   PublishResponse,
+  RateLimitUsageResponse,
   SettingsResponse,
   SettingValue,
   Stage,
   Summary,
+  TokenUsageResponse,
   UsageAggregateResponse,
   Video,
   VideoListResponse,
@@ -229,9 +241,92 @@ export function resetSettings() {
   return request<SettingsResponse>('/api/settings', { method: 'DELETE' })
 }
 
-/** Models selectable for the notes provider (Gemini: fixed list; FreeLLMAPI: fetched live). */
-export function getModels(provider: string) {
-  return request<ModelListResponse>(`/api/settings/models?provider=${encodeURIComponent(provider)}`)
+/* ----------------------------------------------------------- LLM registry */
+
+const LLM = '/api/llm'
+
+export function getLlmProviders() {
+  return request<{ providers: LlmProvider[] }>(`${LLM}/providers`)
+}
+
+export function getLlmModels() {
+  return request<{ models: LlmModel[] }>(`${LLM}/models`)
+}
+
+export function createLlmModel(model: NewLlmModel) {
+  return request<LlmModel>(`${LLM}/models`, { method: 'POST', body: JSON.stringify(model) })
+}
+
+export function updateLlmModel(id: number, patch: LlmModelPatch) {
+  return request<LlmModel>(`${LLM}/models/${id}`, { method: 'PATCH', body: JSON.stringify(patch) })
+}
+
+export function deleteLlmModel(id: number) {
+  return request<void>(`${LLM}/models/${id}`, { method: 'DELETE' })
+}
+
+/** Sends a one-line ping through the model; a failure is a normal answer, not a thrown error. */
+export function testLlmModel(id: number) {
+  return request<ModelTestResult>(`${LLM}/models/${id}/test`, { method: 'POST' })
+}
+
+export function getFallback() {
+  return request<FallbackResponse>(`${LLM}/fallback`)
+}
+
+/** Replaces the chain order and enable flags in one call. */
+export function saveFallback(entries: FallbackUpdate[]) {
+  return request<FallbackResponse>(`${LLM}/fallback`, {
+    method: 'PUT',
+    body: JSON.stringify({ entries }),
+  })
+}
+
+export function getRateLimitUsage() {
+  return request<RateLimitUsageResponse>(`${LLM}/fallback/rate-limit-usage`)
+}
+
+export function getTokenUsage() {
+  return request<TokenUsageResponse>(`${LLM}/fallback/token-usage`)
+}
+
+export function getLlmKeys() {
+  return request<{ keys: LlmKey[] }>(`${LLM}/keys`)
+}
+
+export function createLlmKey(key: NewLlmKey) {
+  return request<LlmKey>(`${LLM}/keys`, { method: 'POST', body: JSON.stringify(key) })
+}
+
+export function updateLlmKey(id: number, patch: LlmKeyPatch) {
+  return request<LlmKey>(`${LLM}/keys/${id}`, { method: 'PATCH', body: JSON.stringify(patch) })
+}
+
+export function deleteLlmKey(id: number) {
+  return request<void>(`${LLM}/keys/${id}`, { method: 'DELETE' })
+}
+
+/** The full key value; only called when the user asks to see or copy it. */
+export function revealLlmKey(id: number) {
+  return request<{ key: string }>(`${LLM}/keys/${id}/reveal`, { method: 'POST' })
+}
+
+export function clearKeyCooldowns(id: number) {
+  return request<{ cleared: number }>(`${LLM}/keys/${id}/cooldowns`, { method: 'DELETE' })
+}
+
+export function checkLlmKey(id: number) {
+  return request<LlmKey>(`${LLM}/keys/${id}/check`, { method: 'POST' })
+}
+
+export function checkAllLlmKeys() {
+  return request<{ keys: LlmKey[] }>(`${LLM}/keys/check-all`, { method: 'POST' })
+}
+
+export function getAvailableModels(provider: string) {
+  return request<AvailableModelsResponse>(
+    `${LLM}/providers/${encodeURIComponent(provider)}/available-models`,
+  )
 }
 
 /* ------------------------------------------------------------- Diagnostics */

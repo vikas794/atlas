@@ -46,15 +46,7 @@ class SettingsUpdateRequest(BaseModel):
     values: dict[str, Any]
 
 
-class ModelListResponse(BaseModel):
-    """Model ids a provider offers, for the notes-model dropdown."""
-
-    provider: str
-    models: list[str]
-
-
 __all__ = [
-    "ModelListResponse",
     "SettingField",
     "SettingGroup",
     "SettingsResponse",

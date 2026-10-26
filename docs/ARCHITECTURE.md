@@ -38,7 +38,7 @@ flowchart LR
 | Composition root | `src/transport/http/fastapi/dependencies.py` | The only module that knows both ports and adapters. Builds everything lazily, so the app starts without any API key; a missing key surfaces as `ConfigurationError` (HTTP 503 `CONFIG_MISSING`) when the feature is used. |
 | Application | `src/application/` | `IngestPlaylistUseCase`, `ProcessVideoUseCase`, `PublishPlaylistUseCase`, the user actions in `actions.py` (approve, approve-all, edit, retry, regenerate, reprocess, delete, transcript cleanup) and `PlaylistWorker`. Depends only on ports. |
 | Domain | `src/domain/` | `Playlist`, `Video`, `Transcript`, `Summary`, `Stage`, `FailureType`/`FailureKind` (`models/playlist.py`); pure services (`stage_machine`, `backoff`, `failure_classifier`, `sync_diff`, `playlist_url`, `doc_naming`, `markdown_to_docs`); ports in `interfaces/`. |
-| Infrastructure | `src/infrastructure/` | `youtube/playlist.py` (playlist listing), `transcript/ytdlp/provider.py`, `llm/` (`litellm_notes.py` single LiteLLM adapter, `models.py` model list, `factory.py`, cost table), `storage/` (connection + migration runner, `PlaylistRepository`, `SqlUsageLedger`), `google/` (`GoogleDriveExporter` for OAuth and raw API calls, `GoogleDrivePublisher` for idempotent publishing). |
+| Infrastructure | `src/infrastructure/` | `youtube/playlist.py` (playlist listing), `transcript/ytdlp/provider.py`, `llm/` (`litellm_notes.py` single LiteLLM adapter, `models.py` the per-call `ModelSpec`, `factory.py`, cost table, `registry/` the DB-backed model registry: `repo.py`, `service.py`, `seed.py`, `health.py`, `providers.py`), `storage/` (connection + migration runner, `PlaylistRepository`, `SqlUsageLedger`), `google/` (`GoogleDriveExporter` for OAuth and raw API calls, `GoogleDrivePublisher` for idempotent publishing). |
 | Entry points | `backend/__main__.py`, `backend/main.py`, `backend/spa.py`, `backend/services/diagnostics.py` | Startup checks (config, port), the FastAPI app and lifespan, serving `frontend/dist` with an SPA fallback, `GET /api/diagnostics`. |
 | Config / shared | `src/config/settings.py`, `src/configs/config.yaml`, `src/prompts/`, `src/shared/` | `AtlasSettings` (see CONFIG.md), versioned prompt files, logging, secret redaction, file helpers. |
 
@@ -62,6 +62,17 @@ is written to `<db>.pre-<version>.bak`. Migration `0005` adds `app_settings(key,
 updated_at)`: one row per setting changed on the Settings page. `load_settings` reads it
 (tolerantly: no file or table means no overrides) between `config.yaml` and the environment;
 `SqlSettingsRepository` writes it. See `docs/CONFIG.md`.
+
+Migration `0007` adds the LLM model registry, independent of the playlist tables: `llm_models`
+(provider, model id, LiteLLM name, endpoint, input token limit, timeout, RPM/RPD/TPM/TPD limits,
+enabled; unique on provider + model id), `llm_api_keys` (provider, label, plain-text `key_value`,
+status, enabled, consecutive failures, health timestamps and error, monthly request/token caps),
+`llm_fallback` (model id, priority, enabled: the single global chain), `llm_cooldowns` (key id +
+model scope, `*` = the whole key; expiry and source), `llm_rate_usage` (sliding-window request and
+token ledger per key and model), `llm_key_monthly_usage` (requests and tokens per key and UTC
+month) and `llm_meta` (the `seeded` marker). Cooldown, usage and monthly rows cascade when their
+key is deleted; the chain row cascades with its model. `RegistryRepo`
+(`llm/registry/repo.py`) opens one short-lived connection per call, like the other repositories.
 
 Final schema (verified by migrating an empty database):
 
@@ -334,12 +345,16 @@ Where the type comes from:
   (`transcript_too_large`, never truncated; the next configured model is tried instead).
   LiteLLM raises OpenAI-style exceptions; the classifier reads their status code and class name
   (`ContextWindowExceededError`, `ContentPolicyViolationError`, `APIConnectionError` / `Timeout`).
-- **Multiple API keys**: `src/shared/api_keys.py` parses a comma-separated / numbered list per
-  service into a thread-safe `KeyPool` (round-robin, per-key cooldown, disable). The YouTube
-  provider (`_execute`) and the LLM adapter (`notes_base.call_with_keys`, once per configured
-  model) fail over to the next key on a key-scoped error (quota, 429, rejected key, 402) and
-  re-raise anything else. When a model is turned away entirely, `LiteLLMNotesGenerator` falls
-  back to the next model in `notes_models`.
+- **Multiple API keys**: for YouTube, `src/shared/api_keys.py` parses a comma-separated /
+  numbered list into a thread-safe `KeyPool` (round-robin, per-key cooldown, disable); the
+  provider (`_execute`) fails over to the next key on a key-scoped error and re-raises anything
+  else. For the LLM, keys live in the registry (`llm_api_keys`): `LiteLLMNotesGenerator` asks
+  `ModelRegistry.candidates()` for the enabled chain models and their usable keys, and records each
+  outcome (`begin_attempt`, `record_success`, `record_failure`), which writes the cooldowns,
+  key status and usage ledgers. A key-scoped error (429, rejected key, 402) moves to the next key;
+  anything else moves to the next model. When a model is turned away entirely, the generator falls
+  back to the next model in the chain. The generator needs a registry (`build_notes_generator`
+  takes it as a required argument): there is no env-based path.
   Output checks (`validate_notes`, `check_finish_reason`) raise `output_malformed` for empty,
   too-short, section-less, cut-off or blocked responses.
 - Any other exception in `ProcessVideoUseCase` is a permanent `internal_error` (traceback logged).
@@ -517,7 +532,12 @@ recovered on the next start.
   running worker (`max_concurrent_videos`, poll and shutdown times), `ProcessVideoUseCase`
   (retries, backoff), the transcript provider's pacing and the Drive publisher's retry limits in
   place, and rebuilds the cached settings loader and notes generator. The worker is mutated, not
-  rebuilt: the lifespan holds that instance.
+  rebuilt: the lifespan holds that instance. The model registry is read live from the database on
+  every call, so model, key and chain edits on the Models and Keys pages need no apply step.
+- **Key checks are on demand.** There is no background health task (it would spend provider
+  calls for nothing): a key is checked from the Keys page (Check, Check all) and implicitly by use,
+  since a served request marks it healthy and a rejection marks it invalid. Expired cooldowns and
+  old ledger rows are tidied once at startup (`dependencies.get_model_registry`).
 - **One process, one event loop.** The worker runs inside the uvicorn process as asyncio tasks
   (`backend/main.py` lifespan). There is no separate worker process or queue service.
 - **Two video pools.** Transcript download and AI notes run in separate pools, so a slow LLM
@@ -561,6 +581,15 @@ recovered on the next start.
 | `GET /api/drive/status`, `POST /api/drive/credentials`, `POST /api/drive/auth` | Drive state, upload the OAuth client JSON, run consent |
 | `GET /api/settings/notes-prompt` | The prompt template the generator uses now (for the temporary regenerate prompt) |
 | `GET/PUT/DELETE /api/settings` | Editable configuration: list with source and live/restart flags; validate and save; reset |
+| `GET /api/llm/providers` | Known providers with key counts and usable key counts |
+| `GET/POST /api/llm/models`, `PATCH/DELETE /api/llm/models/{id}`, `POST /api/llm/models/{id}/test` | Model registry: list in chain order, add (201; 409 duplicate), edit, delete (204), one-line ping (throttled to one per 5 s per model) |
+| `GET/PUT /api/llm/fallback` | The ordered chain (`entries` with `model_id`, `priority`, `enabled`, plus key counts and why a model is blocked); PUT replaces order and enabled flags |
+| `GET /api/llm/fallback/rate-limit-usage`, `GET /api/llm/fallback/token-usage` | Window usage against each model's limits; monthly requests and tokens per key against caps |
+| `GET/POST /api/llm/keys`, `PATCH/DELETE /api/llm/keys/{id}` | API keys, always masked (`masked_key`) with status, cooldowns and caps; add (201), edit (a new `key` resets status and cooldowns), delete (204) |
+| `POST /api/llm/keys/{id}/reveal` | The only call that returns a full key |
+| `DELETE /api/llm/keys/{id}/cooldowns` | Clear a key's cooldowns (`{cleared}`) |
+| `POST /api/llm/keys/{id}/check`, `POST /api/llm/keys/check-all` | Health-check one key or all |
+| `GET /api/llm/providers/{provider}/available-models` | Model ids the provider reports, using its first usable key (400 `CONFIG_MISSING` without one, 502 `PROVIDER_ERROR`) |
 | `GET /api/usage` | Usage ledger aggregates |
 | `GET /api/health`, `GET /api/diagnostics` | Liveness; readiness checks and the last 50 warnings/errors |
 | `DELETE /api/diagnostics/recent-errors` | Empty the in-memory warnings/errors buffer (204; `logs/atlas.log` is untouched) |
@@ -574,21 +603,30 @@ The UI polls; there are no websockets.
 
 ## 10. Adding an LLM provider
 
-Usually just config: every provider goes through one adapter,
-`src/infrastructure/llm/litellm_notes.py::LiteLLMNotesGenerator`, built by `factory.py` from the
-ordered `notes_models` list (`src/infrastructure/llm/models.py::resolve_model_specs`).
+Usually no code: every provider goes through one adapter,
+`src/infrastructure/llm/litellm_notes.py::LiteLLMNotesGenerator`, built by `factory.py` with a
+`ModelRegistry` (`src/infrastructure/llm/registry/service.py`, wired in
+`dependencies.get_model_registry`). Providers, models, keys and fallback order are database rows
+edited on the Models and Keys pages, not configuration.
 
-1. Pick the model's LiteLLM name (`<provider>/<model>`, see https://docs.litellm.ai/docs/providers)
-   and add an entry to `notes_models` in `src/configs/config.yaml`; set `api_base` for an
-   OpenAI-compatible gateway (FreeLLMAPI, a local server) and `api_key_env` when the key variable
-   is not `<PROVIDER>_API_KEY`. Put the key in `.env`. See `docs/CONFIG.md`.
-2. Optional: prices in `src/infrastructure/llm/cost.py`. LiteLLM's own price (when it knows the
+1. On the Keys page add a key for the provider; on the Models page add the model (provider, model
+   id, and an `api_base` for an OpenAI-compatible gateway such as FreeLLMAPI or a local server).
+   An unknown provider name is treated as a generic OpenAI-compatible provider
+   (`registry/providers.py::provider_info`), sent to LiteLLM as `openai/<model id>`.
+2. Optional, for a provider that needs a label, a default endpoint or a custom key health check:
+   add a `ProviderInfo` to `PROVIDERS` in `registry/providers.py` (LiteLLM prefix, default
+   `api_base`, `health` kind `bearer-models`, `gemini` or `openrouter`, first-run env variable). A
+   new `health` kind also needs a branch in `registry/health.py`.
+3. Optional: prices in `src/infrastructure/llm/cost.py`. LiteLLM's own price (when it knows the
    model) is used first; unknown models then cost 0.0.
-3. Optional: a conventional key variable for the provider in `models.py::_DEFAULT_KEY_ENVS`.
 
 The adapter reuses `notes_base` (prompt file and version, `render_prompt`, `check_input_size`,
-`classify_provider_exception`, `check_finish_reason`, `validate_notes`, `call_with_keys`), so a new
-model gets the same failure taxonomy, key rotation and usage recording without code. Atlas calls
-`litellm.acompletion` directly with its own `KeyPool` rather than `litellm.Router`, so key
-cooldowns and retries stay in one place (`ProcessVideoUseCase` owns retries). LiteLLM is pinned
-exactly in `pyproject.toml`; review its changelog before bumping.
+`classify_provider_exception`, `check_finish_reason`, `validate_notes`), so a new model gets the
+same failure taxonomy, key rotation and usage recording without code. Atlas calls
+`litellm.acompletion` directly and runs its own selection, cooldown and rate-limit policy in the
+registry rather than `litellm.Router`, so key cooldowns and retries stay in one place
+(`ProcessVideoUseCase` owns retries). LiteLLM is pinned exactly in `pyproject.toml`; review its
+changelog before bumping. The first start after migration `0007` imports the model your previous
+version had saved (`notes_provider` and the `*_model` rows in `app_settings`, read directly from
+the table because those settings no longer exist) and the `*_API_KEY` environment variables into
+the registry once (`registry/seed.py`).

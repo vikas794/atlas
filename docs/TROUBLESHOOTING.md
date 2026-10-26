@@ -158,16 +158,37 @@ language." (no subtitle track at all; any existing track is used even if it is n
 
 ### `config_error`: LLM key missing or rejected
 
-- `GEMINI_API_KEY is not set. Add your Google AI Studio (Gemini) API key to .env as GEMINI_API_KEY=<key> to generate notes.`
-- `Gemini rejected the API key (HTTP 400). Check that GEMINI_API_KEY in .env holds a valid key with access to this model.`
-- `... does not know the model '...' (HTTP 404). Check NOTES_MODEL ...` or `... lack of credits (HTTP 402)`.
+- `No notes models are enabled. Add one on the Models page.`
+- `No usable API key for <provider>. Add one on the Keys page.`
+- `Gemini rejected the API key '<label>' (Keys page) (HTTP 400). ...` (the wording names the key's label)
+- `... does not know the model '...' (HTTP 404). ...` or `... lack of credits (HTTP 402)`.
 
-Cause: a permanent `config_error`, so the video fails without spending retries. Fix the key or
-model in `.env` / `config.yaml`, restart Atlas, then press Retry on the failed videos.
-The same kind is used for a missing or invalid prompt file. With several models in
-`notes_models` a model with a missing or rejected key is skipped and the next one is used; the
-error is raised only when every model was turned away (`GET /api/diagnostics` lists which keys
-are missing).
+Cause: a permanent `config_error`, so the video fails without spending retries. Fix it on the
+**Models** or **Keys** page (no restart needed), then press Retry on the failed videos. The same
+kind is used for a missing or invalid prompt file. A model with no usable key is skipped and the
+next one in the chain is used; the error is raised only when every model was turned away
+(`GET /api/diagnostics` shows key counts and statuses, never values).
+
+### A key shows `invalid`, `rate_limited` or a cooldown badge
+
+On the Keys page: `invalid` means the provider rejected the key (a health check or a real call got
+401/403). Atlas parks it for 5 minutes and turns it off after the third consecutive invalid
+check ("Disabled after 3 failed checks"). Replace the key value (that resets status and cooldowns),
+or switch it back on, then press Check. `rate_limited` or a cooldown badge means a 429: the
+model-and-key pair waits 2 min, then 10 min, 1 h, 24 h if it keeps happening, or the provider's
+`Retry-After`. "Clear cooldowns" on the key's row lifts them early. A network error during a
+check (or a non-401/403/429 answer) does not change the status; check that the endpoint is reachable (for FreeLLMAPI, that the
+gateway is running at its `api_base`). A model shows "No keys" when no key of its provider is
+usable (off, invalid, cooling down, over a monthly cap or over the model's RPM/RPD/TPM/TPD).
+
+### The Models or Keys list is empty, or the old model is gone
+
+The registry is seeded once, at the first start after migration `0007`, from the model your
+previous version had saved (the `notes_provider` / `*_model` rows of `app_settings`) and the
+`*_API_KEY` variables. Those settings no longer exist and changing the variables afterwards does
+nothing; use the pages.
+Deleted models and keys stay deleted. Deleting `data/atlas.sqlite3` resets everything and imports
+again. LLM keys are stored unencrypted in that file (and in its `.bak` copies): keep it private.
 
 ### LLM 429, 5xx or timeout
 
@@ -186,10 +207,9 @@ automatically, then Retry or Regenerate.
 ### Transcript too large
 
 `The transcript is about N tokens (M characters), which is over the L-token input limit for this model.`
-Cause: the estimate (characters / 4) exceeds the model's `input_token_limit` (in
-`notes_models`, or `gemini_input_token_limit` / `openrouter_input_token_limit` for the legacy
-settings) for every configured model, or the provider rejected the prompt as too long. Permanent;
-Atlas never truncates. Fix: use a model with a larger context and raise the matching limit,
+Cause: the estimate (characters / 4) exceeds the model's input token limit (edit it on the Models
+page) for every enabled model, or the provider rejected the prompt as too long. Permanent;
+Atlas never truncates. Fix: add or enable a model with a larger context and raise its limit,
 then Retry.
 
 ### A video stays `queued`
@@ -248,7 +268,8 @@ edited video), so if nothing changed, nothing is re-created until then.
 ### A saved value does not change anything
 
 The field shows "Set by an environment variable": an `ATLAS_*` variable (or alias such as
-`GEMINI_MODEL`) in the shell or `.env` takes precedence over a saved value. Unset it and restart.
+`NOTES_PROMPT_NAME`) in the shell or `.env` takes precedence over a saved value. Unset it and restart.
+The AI model is not a setting: change it on the Models page.
 Settings marked "Needs restart" (server, logging, paths) are saved but only used after a restart.
 
 ### Settings were not saved (422)

@@ -13,7 +13,8 @@ one Drive folder. It is a local, single-user tool: one process, one SQLite file,
 - Node.js `^20.19.0 || >=22.12.0` (required by Vite 7), only to install and build the frontend.
 - Recommended: [Deno](https://deno.com) (`winget install DenoLand.Deno` on Windows). yt-dlp uses
   it as its JavaScript runtime for YouTube; without it yt-dlp warns and some downloads fail.
-- A YouTube Data API v3 key and a Gemini (Google AI Studio) or OpenRouter key.
+- A YouTube Data API v3 key and at least one LLM key (Gemini via Google AI Studio, OpenRouter,
+  NVIDIA, a FreeLLMAPI gateway, ...), added on the Keys page or via `.env` on first start.
 - For publishing: a Google Cloud project with the Drive API and Docs API enabled.
 
 ## One-time setup
@@ -27,9 +28,14 @@ if it does not exist. Put your keys in `.env`:
 
 ```dotenv
 YOUTUBE_API_KEY=...      # required to add playlists
-GEMINI_API_KEY=...       # required for the default gemini/... model
-OPENROUTER_API_KEY=...   # only for openrouter/... models (any LiteLLM provider works: see docs/CONFIG.md)
+GEMINI_API_KEY=...       # optional: imported into the Keys page on first start
 ```
+
+LLM providers, models, fallback order and API keys are managed in the app: open **Models** to
+choose and order the models and **Keys** to add keys (any LiteLLM provider works). Keys set in
+`.env` (`GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `FREELLMAPI_API_KEY`, `NVIDIA_API_KEY`,
+`OPENAI_API_KEY`) are imported once on first start; after that use the Keys page. They are stored
+unencrypted in `data/atlas.sqlite3`, so keep that file private.
 
 Every other setting lives in `src/configs/config.yaml` and can be overridden per run with
 `ATLAS_<SETTING>` (for example `ATLAS_PORT=8001`). See [docs/CONFIG.md](docs/CONFIG.md). The

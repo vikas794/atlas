@@ -235,3 +235,46 @@ async def drain_pipeline(worker: PlaylistWorker, rounds: int = 20) -> None:
         )
         if not started:
             return
+
+
+# ---------------------------------------------------------------------------
+# LLM model registry helpers (pipeline tests that drive a real LiteLLMNotesGenerator)
+# ---------------------------------------------------------------------------
+
+
+def gemini_test_registry() -> Any:
+    """The isolated database's model registry with one Gemini model and one fake key.
+
+    Idempotent: a second call in the same test reuses the rows. The key is a placeholder; the
+    provider call is always a test double.
+    """
+    from src.infrastructure.llm.registry.providers import litellm_model_for
+    from src.infrastructure.llm.registry.repo import RegistryRepo
+    from src.infrastructure.llm.registry.service import ModelRegistry
+
+    registry = ModelRegistry(RegistryRepo(os.environ["ATLAS_DATABASE_PATH"]))
+    if not registry.repo.list_models():
+        registry.repo.add_model(
+            provider="gemini",
+            model_id="gemini-3.5-flash",
+            display_name="gemini-3.5-flash",
+            litellm_model=litellm_model_for("gemini", "gemini-3.5-flash"),
+            api_base=None,
+            input_token_limit=1_000_000,
+        )
+        registry.repo.add_key(provider="gemini", label="test key", key_value="test-gemini-key-not-real")
+    return registry
+
+
+def disable_key_cooldowns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A rate-limited key must not be parked: these tests count the pipeline's own retries."""
+    from src.infrastructure.llm.registry.service import ModelRegistry
+
+    original = ModelRegistry.record_failure
+
+    def record_failure(self: Any, key: Any, model: Any, problem: Any, retry_after: Any = None) -> None:
+        if problem == "rate_limited":
+            return
+        original(self, key, model, problem, retry_after)
+
+    monkeypatch.setattr(ModelRegistry, "record_failure", record_failure)

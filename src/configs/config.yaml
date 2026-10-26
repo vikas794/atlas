@@ -6,7 +6,7 @@
 #
 # Relative paths resolve against the repository root. Any key can be overridden for one
 # run with ATLAS_<KEY_IN_UPPERCASE> in the environment or .env (empty values count as
-# unset); the notes keys also accept the short names listed in .env.example.
+# unset); NOTES_PROMPT_NAME is also accepted as a short name (see .env.example).
 
 # --- HTTP server -----------------------------------------------------------------
 host: "127.0.0.1"  # keep local: Atlas has no authentication
@@ -19,11 +19,10 @@ cors_origins: ""
 database_path: "data/atlas.sqlite3"
 
 # --- Secrets -------------------------------------------------------------------
-# These are the NAMES of the environment variables that hold the keys, never keys
-# themselves. Put the actual values in .env (see .env.example).
-openrouter_api_key_env: "OPENROUTER_API_KEY"
+# This is the NAME of the environment variable that holds the YouTube key, never the key
+# itself. Put the actual value in .env (see .env.example). LLM providers, models and keys
+# are managed in the app (Models and Keys pages), not here.
 youtube_api_key_env: "YOUTUBE_API_KEY"
-gemini_api_key_env: "GEMINI_API_KEY"
 
 # --- Google OAuth --------------------------------------------------------------
 google_creds_path: "credentials.json"
@@ -40,28 +39,9 @@ ytdlp_cookies_file: ""  # optional cookies.txt (Netscape) to avoid YouTube throt
 ytdlp_cookies_from_browser: ""  # or a browser name: chrome | firefox | edge ... (use a throwaway account)
 
 # --- Notes generation ----------------------------------------------------------
-# Models are LiteLLM names (<provider>/<model>), tried in order; later ones are fallbacks.
-# Uncomment to use instead of the single-model shorthand below (see docs/CONFIG.md):
-# notes_models:
-#   - model: "gemini/gemini-3.5-flash"
-#     input_token_limit: 1000000
-#   - model: "openrouter/openai/gpt-5-mini"
-#   - model: "openai/gpt-5-mini"                # OpenAI-compatible gateway, e.g. FreeLLMAPI
-#     api_base: "http://localhost:3001/v1"
-#     api_key_env: "FREELLMAPI_API_KEY"
-notes_provider: "gemini"  # single-model shorthand (used when notes_models is empty): gemini | openrouter | freellmapi | nvidia
-notes_model: ""  # empty -> use gemini_model / openrouter_model / the provider default
-gemini_model: "gemini-3.5-flash"
-gemini_input_token_limit: 1000000
-openrouter_model: ""
-openrouter_base_url: "https://openrouter.ai/api/v1"
-openrouter_input_token_limit: 128000
+# Which LLM models and keys are used is managed on the Models and Keys pages.
 notes_prompt_name: "notes_v1_2.yaml"  # the recorded prompt version is this file's own `version`
 notes_request_timeout_seconds: 300.0  # one LLM call; a timeout is retried like a network error
-nvidia_model: "deepseek-ai/deepseek-v4.1-flash"  # used when notes_provider is nvidia
-nvidia_base_url: "https://integrate.api.nvidia.com/v1"
-nvidia_input_token_limit: 128000
-nvidia_request_timeout_seconds: 3600.0  # NVIDIA is slow; overrides notes_request_timeout_seconds
 
 # --- Pipeline concurrency & retries --------------------------------------------
 max_concurrent_videos: 2

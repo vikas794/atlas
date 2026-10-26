@@ -31,8 +31,13 @@ SENTINEL = "<default-was-used>"
 
 
 @pytest.fixture
-def settings(clean_atlas_env: None) -> AtlasSettings:
-    """Settings loaded from the real repo config, with ATLAS_* overrides cleared."""
+def settings(clean_atlas_env: None, monkeypatch: pytest.MonkeyPatch) -> AtlasSettings:
+    """Settings loaded from the real repo config, with ATLAS_* overrides cleared.
+
+    The saved (UI) settings of the developer's real database are ignored too: clearing
+    ATLAS_DATABASE_PATH would otherwise make these tests read ``data/atlas.sqlite3``.
+    """
+    monkeypatch.setattr("src.config.settings._read_db_overrides", lambda *a, **k: {})
     return load_settings()
 
 
@@ -167,10 +172,6 @@ def test_removed_legacy_fields_are_gone() -> None:
 
 def test_new_pipeline_fields_have_expected_defaults() -> None:
     expected = {
-        "notes_provider": "gemini",
-        "notes_model": "",
-        "gemini_model": "gemini-3.5-flash",
-        "gemini_input_token_limit": 1000000,
         "notes_prompt_name": "notes_v1_2.yaml",
         "max_concurrent_videos": 2,
         "max_auto_retries": 4,

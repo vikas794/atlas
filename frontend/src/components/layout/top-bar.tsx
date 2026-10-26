@@ -57,6 +57,8 @@ export function ThemeToggle() {
 }
 
 const NAV_LINKS = [
+  { to: '/models', label: 'Models' },
+  { to: '/keys', label: 'Keys' },
   { to: '/diagnostics', label: 'Diagnostics' },
   { to: '/settings', label: 'Settings' },
 ] as const

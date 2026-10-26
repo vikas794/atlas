@@ -25,7 +25,7 @@ Learning a technical subject via YouTube playlists is time-expensive — a "Comp
 - Accept one YouTube playlist URL at a time as input
 - Fetch all video metadata (title, video ID, playlist order) for the playlist
 - Fetch transcript for each video
-- Generate AI notes per video using the existing custom prompt (provider: Gemini, swappable via config)
+- Generate AI notes per video using the existing custom prompt (any provider and model, managed in the model registry with an ordered fallback chain; Gemini is the default seed)
 - Persist all playlist/video/transcript/summary state in a local database so no step is recomputed unnecessarily
 - Frontend review UI: view, edit, and approve generated notes per video, plus a bulk "approve all" action
 - On approval, create a Google Drive folder per playlist containing one Google Doc per video (numbered by playlist order) plus one index Doc listing video titles in order, each linked to its Doc and followed by a short description of the video
@@ -113,6 +113,8 @@ SQLite, roughly normalized around four entities:
 
 **Summary** — video_id (FK), generated notes content, model/provider used, generated_at, edited flag, approved flag, approved_at.
 
+**Model registry** (Section 17.1) — `llm_models`, `llm_api_keys`, `llm_fallback` (ordered chain), `llm_cooldowns`, `llm_rate_usage` (sliding-window ledger) and `llm_key_monthly_usage` (quota tracking). Independent of the four playlist entities above.
+
 Pipeline stage (per video) is an explicit enum, e.g.: `queued → fetching_transcript → transcript_ready → generating_notes → pending_review → approved → published`, with a parallel `failed` state carrying a `failure_type` (`transient` | `permanent`) and `failure_reason` (free text, e.g. "TranscriptsDisabled", "rate_limited", "video_private").
 
 ## 8. Failure Handling & Status Taxonomy
@@ -160,7 +162,7 @@ This keeps re-runs cheap: cost scales with the number of *new* videos only, not 
 
 **Resilience.** Transient failures must not require manual intervention by default (exponential backoff); permanent failures must not retry indefinitely and waste quota.
 
-**Portability of the AI layer.** The AI provider/model must be configurable, not hardcoded, since the underlying prompt is provider-agnostic.
+**Portability of the AI layer.** The AI providers, models and keys must be managed data (the model registry, Section 17.1), not hardcoded, since the underlying prompt is provider-agnostic.
 
 **Simplicity.** Explicitly no auth, no multi-user support, no cloud deployment, no scheduler, and no multi-playlist queue in v1 — these are deferred, not designed around.
 
@@ -234,13 +236,28 @@ A JSON REST API between frontend and backend. Exact paths can adapt to the exist
 - **POST /videos/{id}/retry** and **POST /videos/{id}/regenerate** — manual retry; regenerate notes (optional body `{prompt}` is a one-off prompt for this regenerate only). **GET /settings/notes-prompt** returns the prompt currently in use, as the starting point for that temporary prompt.
 - **POST /playlists/{id}/publish** — publish approved videos to Drive.
 - **DELETE /videos/{id}/transcript** and **DELETE /playlists/{id}/transcripts** — manual transcript cleanup.
+- **/api/llm/\*** — model registry: models, keys, fallback chain, health checks and usage (see Section 17.1).
 - **Conventions:** consistent error body (code, message, details), proper HTTP status codes, long-running work returns immediately and runs in a background worker, and the frontend polls status (no websockets in v1).
 
 ## 17. Configuration, Secrets & Environment
 
 - All settings come from environment variables or a local .env file; a committed .env.example documents every key with no real values.
-- **Settings:** Gemini API key and model name, prompt file path, database path, max concurrent videos, retry limits and backoff base/cap, Google OAuth credentials path and token path.
-- **Secrets hygiene:** .env, OAuth client secret and the stored token file are listed in .gitignore and never committed. Logs never print keys, tokens or full transcripts.
+- **Settings:** prompt file path, database path, max concurrent videos, retry limits and backoff base/cap, Google OAuth credentials path and token path. LLM providers, models and API keys are not settings; they live in the model registry (Section 17.1).
+- **Secrets hygiene:** .env, OAuth client secret, the stored token file and the local SQLite database (and its migration `.bak` backups) are listed in .gitignore and .dockerignore and never committed. Logs and API responses never print keys, tokens or full transcripts; the API returns LLM keys masked.
+
+### 17.1 LLM Model Registry (providers, models, keys)
+
+Modeled on the FreeLLMAPI structure. Providers, models and API keys are managed in the database and the UI, not through environment variables or `config.yaml`.
+
+- **Models:** each row is a provider plus model id with display name, LiteLLM model string, optional `api_base`, input token limit, optional request timeout, optional RPM/RPD/TPM/TPD limits, and an enabled flag. Gemini, OpenRouter, NVIDIA and the FreeLLMAPI gateway are ordinary providers.
+- **API keys:** each provider has one or more keys with label, status (`unknown`, `healthy`, `rate_limited`, `invalid`, `error`), enabled flag, last-checked and last-healthy times, last health error, and optional monthly request and token caps. Keys are stored in the database as plain text (not encrypted; the machine is single-user and local). Responses mask them; a reveal action returns the full value on request. Existing `*_API_KEY` env vars and `.env` entries are imported once as seed rows on first run.
+- **Fallback chain:** one global ordered list of models, each with a priority and an enabled flag. Notes generation tries enabled models in priority order and, for each, rotates through the provider's usable keys (enabled, healthy or unknown, not cooling down, within rate limits and monthly caps). The first success wins; the summary records the provider and model actually used.
+- **Cooldowns and failures:** a rate-limited (429) model-and-key pair is cooled down on a ladder (2 min, 10 min, 1 h, 24 h within a rolling 24 h; a success clears it), honoring `Retry-After` when given. A rejected key (401) is marked invalid and gets a short cooldown. Three consecutive invalid health verdicts auto-disable the key. A permanent-versus-transient classification still follows Section 8.
+- **Rate-limit ledger and quota tracking:** per model and key, requests and tokens are counted in sliding minute and day windows and checked against the model's limits before a call. Monthly request and token usage per key is tracked and compared to the key's caps.
+- **Health checks:** on demand only (Check and Check all on the Keys page). There is no background re-check, so idle keys cost no provider calls; a key's status also updates from real use.
+- **API (outline):** list, add, edit, delete and test models; list, add, edit, delete, check and reveal keys; clear a key's cooldowns; read and replace the fallback chain; read rate-limit and token usage. Prefix `/api/llm`, same error-body convention as Section 16.
+- **UI:** a Models screen (ordered chain with drag-reorder, enable toggles, quota badges, add model) and a Keys screen (grouped by provider, masked keys, status, add/edit/delete/check) as specified in the design guide.
+- **Out of scope for v1:** named profiles, scoring or routing strategies beyond priority order, signed catalog sync, custom-endpoint model discovery, key encryption.
 - **Setup:** the README gives a one-time setup (install, create .env, run migrations, complete the Google consent flow once) and a single command to start backend and frontend.
 
 ## 18. AI Notes Generation Spec
