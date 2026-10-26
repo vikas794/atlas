@@ -6,16 +6,17 @@ export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
 export type ButtonSize = 'sm' | 'md'
 
 const variants: Record<ButtonVariant, string> = {
-  primary: 'border-transparent bg-accent text-on-accent hover:opacity-90',
-  secondary: 'border-border bg-surface text-text hover:bg-surface-muted',
+  primary:
+    'border-transparent bg-accent text-on-accent shadow-card hover:-translate-y-px hover:shadow-card-hover hover:brightness-110 active:translate-y-0',
+  secondary: 'border-border bg-surface text-text hover:border-text-muted hover:bg-surface-muted',
   ghost: 'border-transparent bg-transparent text-text-muted hover:bg-surface-muted hover:text-text',
-  danger: 'border-transparent bg-st-error-fg text-on-accent hover:opacity-90',
+  danger: 'border-transparent bg-st-error-fg text-on-accent hover:brightness-110',
 }
 
 const sizes: Record<ButtonSize, string> = {
   // Section 5: controls are 32px tall.
-  sm: 'h-control px-3',
-  md: 'h-control px-4',
+  sm: 'h-control px-4',
+  md: 'h-control px-5',
 }
 
 /**
@@ -27,7 +28,7 @@ export function buttonClasses(
 ): string {
   const { variant = 'primary', size = 'md', className } = options
   return cn(
-    'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded border text-label transition',
+    'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-pill border text-body font-medium transition',
     // Section 7: disabled controls sit at 50% opacity; wrap in <DisabledReason> to say why.
     'disabled:cursor-not-allowed disabled:opacity-50',
     variants[variant],

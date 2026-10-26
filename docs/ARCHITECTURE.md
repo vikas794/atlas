@@ -589,7 +589,8 @@ recovered on the next start.
 | `POST /api/llm/keys/{id}/reveal` | The only call that returns a full key |
 | `DELETE /api/llm/keys/{id}/cooldowns` | Clear a key's cooldowns (`{cleared}`) |
 | `POST /api/llm/keys/{id}/check`, `POST /api/llm/keys/check-all` | Health-check one key or all |
-| `GET /api/llm/providers/{provider}/available-models` | Model ids the provider reports, using its first usable key (400 `CONFIG_MISSING` without one, 502 `PROVIDER_ERROR`) |
+| `GET /api/llm/providers/{provider}/available-models` | Model ids for the add-model picker: LiteLLM's bundled table (`infrastructure/llm/catalog.py`; Gemini and OpenAI only, empty for OpenRouter/NVIDIA/FreeLLMAPI) merged with the provider's live list from its first usable key. `live` says whether the live list was reached; `warning` carries the provider error when only the table is shown; `input_token_limits` prefills the form. 400 `CONFIG_MISSING` / 502 `PROVIDER_ERROR` only when the table is empty too |
+| `POST /api/llm/models/bulk` | `{provider, model_ids[], api_base?}`: adds every id disabled at the end of the chain (limit from LiteLLM when known); returns `{added, skipped}`, existing ids are skipped |
 | `GET /api/usage` | Usage ledger aggregates |
 | `GET /api/health`, `GET /api/diagnostics` | Liveness; readiness checks and the last 50 warnings/errors |
 | `DELETE /api/diagnostics/recent-errors` | Empty the in-memory warnings/errors buffer (204; `logs/atlas.log` is untouched) |
@@ -600,6 +601,25 @@ Errors use `{code, message, details}` with messages passed through the secret re
 pipeline error such as `RATE_LIMITED` during ingest). Unknown `/api/*` paths get the JSON 404
 envelope; other GETs are served from `frontend/dist` with an SPA fallback (`backend/spa.py`).
 The UI polls; there are no websockets.
+
+### Frontend visual system
+
+The SPA (`frontend/`) uses one token file, `src/tokens.css`, mapped into Tailwind by
+`tailwind.config.js`; components never hardcode colours. The current look is the "glass and glow"
+redesign, which intentionally departs from the flat style in `docs/design.md`:
+
+- **Fonts:** Geist (UI and display), Lexend (notes), JetBrains Mono (ids, keys).
+- **Depth tokens:** `--glass-*`, `--glow`, `--mesh-*`, `--shadow-card*`, `--shadow-float`; the
+  `.glass`, `.panel`, `.card-lift` and `.text-gradient` classes live in `src/index.css`. A fixed
+  mesh gradient sits behind the app on `body::before`.
+- **Shared primitives** (`src/components/shared/`): `PageHeader`, `StatCard`, `ProviderMark`,
+  `Meter`, `CountUp`; the top bar is a floating glass pill; `StagedBar` and the Keys batch bar float
+  at the bottom.
+- **Motion:** `gsap` + `@gsap/react`. `lib/use-reveal.ts` staggers `[data-reveal]` children and
+  `CountUp` tweens numbers. Both are skipped under `prefers-reduced-motion` and in jsdom
+  (`lib/motion.ts`).
+- **Keys and Models screens:** a stat row (`grid-flow-dense`) above provider-grouped key cards and a
+  drag-sortable model chain (dnd-kit, same keyboard behaviour) with quota meters.
 
 ## 10. Adding an LLM provider
 

@@ -1,9 +1,11 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { KeyRound, Plus } from 'lucide-react'
+import { ArrowRight, KeyRound, Layers, Plus, Power, Zap } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useBlocker } from 'react-router-dom'
 
 import { ConfirmDialog } from '../../components/shared/confirm-dialog'
+import { PageHeader } from '../../components/shared/page-header'
+import { StatCard } from '../../components/shared/stat-card'
 import { EmptyState, ErrorState, SkeletonTableRows } from '../../components/shared/state-panels'
 import { StagedBar } from '../../components/shared/staged-bar'
 import { useToast } from '../../components/shared/toast'
@@ -26,6 +28,7 @@ import {
   type StagedEntry,
 } from '../../lib/model-chain'
 import { queryKeys } from '../../lib/query-keys'
+import { useReveal } from '../../lib/use-reveal'
 import type { FallbackEntry, RateLimitRow } from '../../lib/types'
 import { ModelDialog } from './model-dialog'
 import { ModelTable } from './model-table'
@@ -62,6 +65,23 @@ export function ModelsScreen() {
     () => new Map<number, RateLimitRow>((usage.data?.rows ?? []).map((row) => [row.model_pk, row])),
     [usage.data],
   )
+
+  const stats = useMemo(
+    () => ({
+      enabled: entries.filter((entry) => entry.enabled).length,
+      ready: entries.filter((entry) => entry.enabled && entry.usable_key_count > 0).length,
+      noKeys: entries.filter((entry) => entry.key_count === 0).length,
+    }),
+    [entries],
+  )
+  const servingOrder = useMemo(
+    () =>
+      entries
+        .filter((entry) => entry.enabled && entry.usable_key_count > 0)
+        .map((entry) => entry.display_name || entry.model_id),
+    [entries],
+  )
+  const scope = useReveal<HTMLDivElement>([entries.length])
 
   const stage = (next: FallbackEntry[]) => setStaged(toStaged(next))
 
@@ -123,28 +143,81 @@ export function ModelsScreen() {
   const isEmpty = chain.isSuccess && entries.length === 0
 
   return (
-    <div>
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-page text-text">Models</h1>
-          <p className="mt-1 text-body text-text-muted">
-            Notes generation tries these in order. If a model has no usable key or fails, the next
-            one takes over.
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Link to="/keys" className={buttonClasses({ variant: 'secondary' })}>
-            <KeyRound aria-hidden="true" className="size-icon" />
-            Keys
-          </Link>
-          <Button onClick={openAdd}>
-            <Plus aria-hidden="true" className="size-icon" />
-            Add model
-          </Button>
-        </div>
-      </div>
+    <div ref={scope}>
+      <PageHeader
+        title="Models"
+        description="Notes generation tries these in order. If a model has no usable key or fails, the next one takes over."
+        actions={
+          <>
+            <Link to="/keys" className={buttonClasses({ variant: 'secondary' })}>
+              <KeyRound aria-hidden="true" className="size-icon" />
+              Keys
+            </Link>
+            <Button onClick={openAdd}>
+              <Plus aria-hidden="true" className="size-icon" />
+              Add model
+            </Button>
+          </>
+        }
+      />
 
-      <div className="mt-5">
+      {entries.length > 0 ? (
+        <>
+          <div className="mt-6 grid grid-flow-dense grid-cols-2 gap-4 lg:grid-cols-4">
+            <StatCard
+              label="In the chain"
+              value={entries.length}
+              hint="Tried top to bottom"
+              icon={Layers}
+            />
+            <StatCard
+              label="Enabled"
+              value={stats.enabled}
+              hint="Eligible to serve"
+              icon={Power}
+              tone="success"
+            />
+            <StatCard
+              label="Ready now"
+              value={stats.ready}
+              hint="Enabled with a usable key"
+              icon={Zap}
+              tone="progress"
+            />
+            <StatCard
+              label="Missing keys"
+              value={stats.noKeys}
+              hint="Add a key to bring them online"
+              icon={KeyRound}
+              tone={stats.noKeys > 0 ? 'error' : 'neutral'}
+            />
+          </div>
+
+          {servingOrder.length > 0 ? (
+            <div data-reveal className="panel mt-4 flex flex-wrap items-center gap-2 px-5 py-3">
+              <span className="mr-1 text-label text-text-muted">Serving order</span>
+              {servingOrder.map((name, index) => (
+                <span key={`${name}-${index}`} className="inline-flex items-center gap-2">
+                  {index > 0 ? (
+                    <ArrowRight aria-hidden="true" className="size-icon text-text-muted" />
+                  ) : null}
+                  <span
+                    className={
+                      index === 0
+                        ? 'rounded-pill bg-accent px-3 py-1 text-label text-on-accent'
+                        : 'rounded-pill bg-surface-muted px-3 py-1 text-label text-text'
+                    }
+                  >
+                    {name}
+                  </span>
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
+      <div className="mt-6">
         {chain.isError ? (
           <ErrorState
             title="Could not load the models"
@@ -152,7 +225,7 @@ export function ModelsScreen() {
             onRetry={() => void chain.refetch()}
           />
         ) : chain.isPending ? (
-          <div className="overflow-hidden rounded border border-border bg-surface">
+          <div className="panel overflow-hidden">
             <table className="w-full">
               <tbody>
                 <SkeletonTableRows

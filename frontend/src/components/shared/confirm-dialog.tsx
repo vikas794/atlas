@@ -71,12 +71,12 @@ export function ConfirmDialog({
   return (
     <Dialog.Root open={open} onOpenChange={handleOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-text/40" />
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-text/40 backdrop-blur-sm" />
         <Dialog.Content
           onEscapeKeyDown={preventWhileBusy}
           onPointerDownOutside={preventWhileBusy}
           onInteractOutside={preventWhileBusy}
-          className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-modal -translate-x-1/2 -translate-y-1/2 rounded-modal border border-border bg-surface p-5 shadow-modal"
+          className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-modal -translate-x-1/2 -translate-y-1/2 rounded-modal border border-card-border bg-surface p-6 shadow-modal"
         >
           <div className="flex items-start gap-4">
             {isDestructive && (
@@ -85,7 +85,9 @@ export function ConfirmDialog({
               </div>
             )}
             <div className="flex-1">
-              <Dialog.Title className="text-section text-text">{title}</Dialog.Title>
+              <Dialog.Title className="font-display text-[22px] font-semibold leading-7 tracking-tight text-text">
+                {title}
+              </Dialog.Title>
               <Dialog.Description className="mt-2 text-body text-text-muted">
                 {description}
               </Dialog.Description>

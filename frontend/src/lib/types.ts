@@ -452,4 +452,14 @@ export interface ModelTestResult {
 export interface AvailableModelsResponse {
   provider: string
   models: string[]
+  /** True when the provider's own list was reached; otherwise only LiteLLM's table is shown. */
+  live: boolean
+  warning: string | null
+  /** Input-token limit LiteLLM knows per model id. */
+  input_token_limits: Record<string, number>
+}
+
+export interface BulkModelsResponse {
+  added: number
+  skipped: number
 }

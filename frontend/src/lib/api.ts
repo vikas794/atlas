@@ -1,6 +1,7 @@
 import type {
   ActionResponse,
   AvailableModelsResponse,
+  BulkModelsResponse,
   DiagnosticsResponse,
   DriveActionResponse,
   DriveStatusResponse,
@@ -255,6 +256,14 @@ export function getLlmModels() {
 
 export function createLlmModel(model: NewLlmModel) {
   return request<LlmModel>(`${LLM}/models`, { method: 'POST', body: JSON.stringify(model) })
+}
+
+/** Adds every id disabled at the end of the chain; ids already registered are skipped. */
+export function createLlmModelsBulk(provider: string, modelIds: string[], apiBase?: string | null) {
+  return request<BulkModelsResponse>(`${LLM}/models/bulk`, {
+    method: 'POST',
+    body: JSON.stringify({ provider, model_ids: modelIds, api_base: apiBase ?? null }),
+  })
 }
 
 export function updateLlmModel(id: number, patch: LlmModelPatch) {

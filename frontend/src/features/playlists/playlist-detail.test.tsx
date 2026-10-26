@@ -306,7 +306,9 @@ describe('PlaylistDetail actions', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Retry all failed (2)' }))
 
-    await waitFor(() => expect(api.callsTo('POST', '/api/playlists/1/retry-failed')).toHaveLength(1))
+    await waitFor(() =>
+      expect(api.callsTo('POST', '/api/playlists/1/retry-failed')).toHaveLength(1),
+    )
     expect(await screen.findByText('Queued 2 failed videos for retry.')).toBeInTheDocument()
   })
 

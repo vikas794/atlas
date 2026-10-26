@@ -41,7 +41,7 @@ export function ActionMenu({ label, actions, className }: ActionMenuProps) {
           aria-label={label}
           onClick={(event) => event.stopPropagation()}
           className={cn(
-            'inline-flex h-control w-8 items-center justify-center rounded border border-transparent',
+            'inline-flex size-9 items-center justify-center rounded-pill border border-transparent',
             'text-text-muted transition hover:bg-surface-muted hover:text-text',
             className,
           )}
@@ -62,7 +62,7 @@ export function ActionMenu({ label, actions, className }: ActionMenuProps) {
           // React events bubble through portals; keep clicks and keys from reaching a clickable row.
           onClick={(event) => event.stopPropagation()}
           onKeyDown={(event) => event.stopPropagation()}
-          className="z-50 min-w-48 rounded border border-border bg-surface p-1 shadow-popover"
+          className="glass z-50 min-w-52 rounded-lg p-1 shadow-popover"
         >
           {actions.map((action) => {
             const Icon = action.icon
@@ -76,7 +76,7 @@ export function ActionMenu({ label, actions, className }: ActionMenuProps) {
                 }}
                 title={action.disabled ? action.disabledReason : undefined}
                 className={cn(
-                  'flex min-h-control cursor-pointer select-none items-center gap-2 rounded px-3 text-body outline-none',
+                  'flex min-h-control cursor-pointer select-none items-center gap-2 rounded-lg px-3 text-body outline-none',
                   'data-[highlighted]:bg-surface-muted data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50',
                   action.danger ? 'text-st-error-fg' : 'text-text',
                 )}

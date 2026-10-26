@@ -329,9 +329,18 @@ def test_check_all_returns_every_enabled_key(
 
 
 def test_available_models_need_a_key(client: TestClient) -> None:
-    response = client.get("/api/llm/providers/gemini/available-models")
+    # NVIDIA is not in LiteLLM's bundled table, so without a key there is nothing to list.
+    response = client.get("/api/llm/providers/nvidia/available-models")
     assert response.status_code == 400
     assert response.json()["code"] == "CONFIG_MISSING"
+
+
+def test_available_models_fall_back_to_the_litellm_table_without_a_key(client: TestClient) -> None:
+    body = client.get("/api/llm/providers/gemini/available-models").json()
+    assert body["live"] is False
+    assert body["warning"] is None
+    assert len(body["models"]) > 5
+    assert set(body["input_token_limits"]) <= set(body["models"])
 
 
 def test_available_models_come_from_the_provider(
@@ -348,7 +357,8 @@ def test_available_models_come_from_the_provider(
     _add_key(client, "nvidia")
 
     body = client.get("/api/llm/providers/nvidia/available-models").json()
-    assert body == {"provider": "nvidia", "models": ["a-model", "b-model"]}
+    assert body["models"] == ["a-model", "b-model"]
+    assert body["live"] is True
     assert seen == [("nvidia", SECRET, "https://integrate.api.nvidia.com/v1")]
 
 
@@ -359,10 +369,40 @@ def test_a_provider_failure_is_a_502(client: TestClient, monkeypatch: pytest.Mon
         raise ProviderQueryError(401, "Provider answered 401.")
 
     monkeypatch.setattr(llm_router, "fetch_provider_models", failing)
-    _add_key(client)
-    response = client.get("/api/llm/providers/gemini/available-models")
+    _add_key(client, "nvidia")
+    response = client.get("/api/llm/providers/nvidia/available-models")
     assert response.status_code == 502
     assert response.json()["code"] == "PROVIDER_ERROR"
+
+
+def test_a_provider_failure_keeps_the_litellm_table(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.infrastructure.llm.registry.health import ProviderQueryError
+
+    async def failing(provider: str, key_value: str, api_base: str | None) -> list[str]:
+        raise ProviderQueryError("Provider answered 401.", 401)
+
+    monkeypatch.setattr(llm_router, "fetch_provider_models", failing)
+    _add_key(client)
+    body = client.get("/api/llm/providers/gemini/available-models").json()
+    assert body["live"] is False
+    assert body["warning"] == "Provider answered 401."
+    assert body["models"]
+
+
+def test_bulk_add_creates_disabled_models_and_skips_duplicates(client: TestClient) -> None:
+    _add_model(client, provider="nvidia", model_id="n1")
+    response = client.post(
+        "/api/llm/models/bulk",
+        json={"provider": "nvidia", "model_ids": ["n1", "n2", "n2", " n3 "]},
+    )
+    assert response.status_code == 201
+    assert response.json() == {"added": 2, "skipped": 1}
+    models = {m["model_id"]: m for m in client.get("/api/llm/models").json()["models"]}
+    assert models["n2"]["enabled"] is False
+    assert models["n3"]["enabled"] is False
+    assert models["n1"]["enabled"] is True
 
 
 # --- model test ----------------------------------------------------------------------------

@@ -7,7 +7,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, UploadFile
 
-from src.infrastructure.google.drive import GoogleDriveExporter
+from src.infrastructure.google.drive import (
+    STATE_AUTHORIZED,
+    STATE_NEEDS_CONSENT,
+    GoogleDriveAuthorizationRequired,
+    GoogleDriveExporter,
+)
 from src.shared.oauth_client import client_secrets_problem
 from src.shared.text import atomic_write
 from src.transport.http.fastapi.dependencies import get_drive_exporter
@@ -26,11 +31,20 @@ ExporterDep = Annotated[GoogleDriveExporter, Depends(get_drive_exporter)]
 async def get_drive_status(exporter: ExporterDep) -> DriveStatusResponse:
     """Report Drive readiness: ``credentials_missing`` | ``needs_consent`` | ``authorized``.
 
-    Never triggers an OAuth flow and makes no network call: it only inspects the credential
-    and token files. ``configured`` is true only when a valid or refreshable token exists.
+    Never triggers an OAuth flow. ``configured`` is true only when a valid or refreshable
+    token exists. An expired token that *looks* refreshable is verified with Google (the same
+    check as ``/api/diagnostics``), since a revoked one would otherwise read as "connected".
+    A network failure there is not a verdict: the state stays ``authorized``.
     """
     state, message = exporter.auth_state()
-    return DriveStatusResponse(configured=state == "authorized", message=message, state=state)
+    if state == STATE_AUTHORIZED:
+        try:
+            await asyncio.to_thread(exporter.ensure_authorized)
+        except GoogleDriveAuthorizationRequired as exc:
+            state, message = STATE_NEEDS_CONSENT, str(exc)
+        except Exception:  # network down, Google 5xx: unknown, not revoked
+            message = f"{message} Could not reach Google to verify it just now."
+    return DriveStatusResponse(configured=state == STATE_AUTHORIZED, message=message, state=state)
 
 
 #: A Google OAuth client file is well under 1 KiB; anything this large is not one.

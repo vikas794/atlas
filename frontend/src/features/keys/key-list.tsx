@@ -1,7 +1,8 @@
-import { Eraser, Eye, Pencil, RefreshCw, Trash2 } from 'lucide-react'
+import { Eraser, Eye, Pencil, RefreshCw, Timer, Trash2 } from 'lucide-react'
 
 import { ActionMenu } from '../../components/shared/action-menu'
 import { KeyRowBadge } from '../../components/shared/key-status-badge'
+import { ProviderMark } from '../../components/shared/provider-mark'
 import { RelativeTime } from '../../components/shared/relative-time'
 import { Switch } from '../../components/ui/switch'
 import { formatCountdown } from '../../lib/format'
@@ -37,7 +38,7 @@ export function KeyList({
   checkingIds,
 }: KeyListProps) {
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {groups.map((group) => {
         const ids = group.keys.map((key) => key.id)
         const anyEnabled = group.keys.some((key) => key.enabled)
@@ -46,20 +47,26 @@ export function KeyList({
           <section
             key={group.provider}
             aria-label={group.label}
-            className="overflow-hidden rounded border border-border bg-surface"
+            data-reveal
+            className="panel overflow-hidden"
           >
-            <header className="flex h-row items-center justify-between gap-3 border-b border-border bg-surface-muted px-3">
+            <header className="flex items-center justify-between gap-3 border-b border-card-border bg-surface-muted/60 px-5 py-3">
               <div className="flex items-center gap-3">
                 <input
                   type="checkbox"
+                  className="size-4 cursor-pointer accent-accent"
                   aria-label={`Select all ${group.label} keys`}
                   checked={allSelected}
                   onChange={(event) => onToggleSelected(ids, event.target.checked)}
                 />
-                <h2 className="text-body font-medium text-text">{group.label}</h2>
-                <span className="text-label text-text-muted">
-                  {group.keys.length} {group.keys.length === 1 ? 'key' : 'keys'}
-                </span>
+                <ProviderMark name={group.provider} />
+                <div>
+                  <h2 className="text-section text-text">{group.label}</h2>
+                  <p className="text-label text-text-muted">
+                    {group.keys.length} {group.keys.length === 1 ? 'key' : 'keys'}
+                  </p>
+                </div>
+                <HealthDots keys={group.keys} />
               </div>
               <Switch
                 checked={anyEnabled}
@@ -88,6 +95,28 @@ export function KeyList({
         )
       })}
     </div>
+  )
+}
+
+const DOT_TONE: Record<string, string> = {
+  healthy: 'bg-st-success-fg',
+  rate_limited: 'bg-st-warn-fg',
+  invalid: 'bg-st-error-fg',
+  error: 'bg-st-error-fg',
+  unknown: 'bg-st-neutral-fg/40',
+}
+
+/** One dot per key in the group; colour is a glance aid, the badge on each row carries the label. */
+function HealthDots({ keys }: { keys: LlmKey[] }) {
+  return (
+    <span aria-hidden="true" className="ml-2 hidden items-center gap-1 sm:inline-flex">
+      {keys.map((key) => (
+        <span
+          key={key.id}
+          className={cn('size-2 rounded-pill', DOT_TONE[key.status] ?? DOT_TONE.unknown)}
+        />
+      ))}
+    </span>
   )
 }
 
@@ -128,30 +157,32 @@ function KeyRow({
   return (
     <li
       className={cn(
-        'flex min-h-row flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-3 py-2 last:border-b-0 hover:bg-surface-muted',
-        selected && 'bg-accent-soft',
-        !keyRow.enabled && 'text-text-muted',
+        'flex min-h-row flex-wrap items-center gap-x-5 gap-y-2 border-b border-card-border px-5 py-3 transition-colors last:border-b-0 hover:bg-surface-muted/60',
+        selected && 'bg-accent-soft hover:bg-accent-soft',
       )}
     >
       <input
         type="checkbox"
+        className="size-4 cursor-pointer accent-accent"
         aria-label={`Select ${keyRow.label}`}
         checked={selected}
         onChange={(event) => onToggleSelected(event.target.checked)}
       />
 
-      <div className="min-w-0 flex-1 basis-56">
+      <div className={cn('min-w-0 flex-1 basis-56', !keyRow.enabled && 'opacity-60')}>
         <div className="flex flex-wrap items-center gap-2">
           <span className="truncate text-body font-medium text-text">{keyRow.label}</span>
-          <code className="font-mono text-code text-text-muted">{keyRow.masked_key}</code>
+          <code className="rounded-lg bg-surface-muted px-2 py-px font-mono text-code text-text-muted">
+            {keyRow.masked_key}
+          </code>
         </div>
         {detail ? (
-          <p className="text-label text-st-error-fg" title={detail}>
+          <p className="mt-1 text-label text-st-error-fg" title={detail}>
             {detail}
           </p>
         ) : null}
         {requestCap || tokenCap ? (
-          <p className="text-label text-text-muted">
+          <p className="mt-1 text-label text-text-muted">
             Monthly cap:{' '}
             {[requestCap && `${requestCap} requests`, tokenCap && `${tokenCap} tokens`]
               .filter(Boolean)
@@ -163,13 +194,14 @@ function KeyRow({
       <div className="flex items-center gap-2">
         <KeyRowBadge keyRow={keyRow} />
         {cooldown ? (
-          <span className="tabular text-label text-text-muted">
+          <span className="tabular inline-flex items-center gap-1 text-label text-st-warn-fg">
+            <Timer aria-hidden="true" className="size-icon" />
             {formatCountdown(new Date(cooldown.expires_at * 1000).toISOString())} left
           </span>
         ) : null}
       </div>
 
-      <span className="w-24 text-label text-text-muted">
+      <span className="w-28 text-label text-text-muted">
         <RelativeTime iso={keyRow.last_checked_at} prefix="Checked" fallback="Never checked" />
       </span>
 

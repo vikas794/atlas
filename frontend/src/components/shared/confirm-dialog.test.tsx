@@ -79,12 +79,12 @@ describe('ConfirmDialog', () => {
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
   })
 
-  it('does not use glass or no-op classes and uses the modal tokens', () => {
+  it('uses the modal tokens and no no-op animation classes', () => {
     render(<Harness onConfirm={vi.fn()} />)
     const dialog = screen.getByRole('dialog')
     expect(dialog.className).toContain('rounded-modal')
     expect(dialog.className).toContain('max-w-modal')
     expect(dialog.className).toContain('shadow-modal')
-    expect(document.body.innerHTML).not.toMatch(/backdrop-blur|animate-in/)
+    expect(document.body.innerHTML).not.toMatch(/animate-in/)
   })
 })

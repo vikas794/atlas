@@ -17,20 +17,19 @@ export function StagedBar({ count, onDiscard, onSave, isSaving = false }: Staged
     <div
       role="region"
       aria-label="Unsaved changes"
-      className="sticky bottom-0 z-30 -mx-5 mt-5 border-t border-border bg-surface px-5 py-3"
+      className="glass fixed bottom-5 left-1/2 z-40 flex w-[min(34rem,calc(100vw-2rem))] -translate-x-1/2 items-center justify-between gap-3 rounded-pill py-2 pl-5 pr-2 shadow-float"
     >
-      <div className="mx-auto flex max-w-page items-center justify-between gap-3">
-        <span role="status" className="text-body text-text">
-          Unsaved changes{count ? ` (${count})` : ''}
-        </span>
-        <div className="flex gap-3">
-          <Button variant="secondary" onClick={onDiscard} disabled={isSaving}>
-            Discard
-          </Button>
-          <Button onClick={onSave} disabled={isSaving}>
-            {isSaving ? 'Saving…' : 'Save'}
-          </Button>
-        </div>
+      <span role="status" className="flex items-center gap-2 text-body font-medium text-text">
+        <span aria-hidden="true" className="size-2 rounded-pill bg-st-review-fg" />
+        Unsaved changes{count ? ` (${count})` : ''}
+      </span>
+      <div className="flex gap-2">
+        <Button variant="secondary" onClick={onDiscard} disabled={isSaving}>
+          Discard
+        </Button>
+        <Button onClick={onSave} disabled={isSaving}>
+          {isSaving ? 'Saving…' : 'Save'}
+        </Button>
       </div>
     </div>
   )

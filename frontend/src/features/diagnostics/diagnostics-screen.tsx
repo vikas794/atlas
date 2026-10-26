@@ -201,7 +201,9 @@ export function DiagnosticsScreen() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-page text-text">Diagnostics</h1>
+        <h1 className="text-page text-text">
+          <span className="text-gradient">Diagnostics</span>
+        </h1>
         <div className="flex items-center gap-2">
           <Button variant="secondary" onClick={() => void copyReport()} disabled={!data}>
             {copyState === 'copied' ? (
@@ -269,11 +271,7 @@ export function DiagnosticsScreen() {
                 />
               </span>
             </button>
-            <div
-              id={checksPanelId}
-              hidden={!checksOpen}
-              className="rounded border border-border bg-surface"
-            >
+            <div id={checksPanelId} hidden={!checksOpen} className="panel">
               {!data ? (
                 <SkeletonListRows rows={4} />
               ) : data.checks.length === 0 ? (
@@ -310,7 +308,7 @@ export function DiagnosticsScreen() {
                         aria-pressed={selected}
                         onClick={() => setFilter(item.value)}
                         className={cn(
-                          'rounded border border-border px-3 py-1 text-label transition',
+                          'rounded-lg border border-border px-3 py-1 text-label transition',
                           selected
                             ? 'bg-surface-muted text-text ring-2 ring-accent'
                             : 'hover:bg-surface-muted',
@@ -342,7 +340,7 @@ export function DiagnosticsScreen() {
             ) : data && visibleEntries.length === 0 ? (
               <EmptyState title="No log records match this filter." />
             ) : (
-              <div className="overflow-x-auto rounded border border-border bg-surface">
+              <div className="overflow-x-auto panel">
                 <table className="w-full text-left text-body">
                   <thead className="border-b border-border bg-surface-muted text-label text-text">
                     <tr className="h-row">

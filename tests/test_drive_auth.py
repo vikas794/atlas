@@ -127,6 +127,39 @@ async def test_publish_request_with_a_revoked_token_is_rejected_up_front(
     assert "Re-authorize Drive" in str(excinfo.value)
 
 
+# ------------------------------------------------------------ status endpoint
+
+
+async def test_drive_status_verifies_an_expired_token_with_google(
+    token_files: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.transport.http.fastapi.routers.drive_auth import get_drive_status
+
+    creds, token = token_files
+    monkeypatch.setattr(Credentials, "refresh", lambda self, request: (_ for _ in ()).throw(INVALID_GRANT))
+    exporter = GoogleDriveExporter(creds_path=creds, token_path=token)
+
+    status = await get_drive_status(exporter)
+
+    assert status.configured is False and status.state == "needs_consent"
+    assert "Re-authorize Drive" in status.message
+
+
+async def test_drive_status_stays_authorized_when_google_is_unreachable(
+    token_files: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.transport.http.fastapi.routers.drive_auth import get_drive_status
+
+    creds, token = token_files
+    monkeypatch.setattr(Credentials, "refresh", lambda self, request: (_ for _ in ()).throw(TransportError("reset")))
+    exporter = GoogleDriveExporter(creds_path=creds, token_path=token)
+
+    status = await get_drive_status(exporter)
+
+    assert status.configured is True and status.state == "authorized"
+    assert "Could not reach Google" in status.message
+
+
 # ------------------------------------------------- refresh failing mid-publish
 
 

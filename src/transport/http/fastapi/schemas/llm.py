@@ -159,6 +159,25 @@ class ClearedResponse(BaseModel):
 class AvailableModelsResponse(BaseModel):
     provider: str
     models: list[str]
+    #: True when the provider's own list was reached (otherwise only LiteLLM's table is shown).
+    live: bool = False
+    #: Why the live list is missing, when a key exists but the provider could not be queried.
+    warning: str | None = None
+    #: Input-token limit LiteLLM knows per model id, used to prefill the form.
+    input_token_limits: dict[str, int] = Field(default_factory=dict)
+
+
+class ModelBulkCreate(_Strict):
+    """Add many models of one provider at once, switched off so the chain is unchanged."""
+
+    provider: str = Field(min_length=1, max_length=40, pattern=_SLUG)
+    model_ids: list[str] = Field(min_length=1, max_length=500)
+    api_base: str | None = Field(default=None, max_length=500)
+
+
+class ModelBulkResponse(BaseModel):
+    added: int
+    skipped: int
 
 
 class RateLimitUsageResponse(BaseModel):
@@ -177,6 +196,8 @@ __all__ = [
     "KeyOut",
     "KeyReveal",
     "KeyUpdate",
+    "ModelBulkCreate",
+    "ModelBulkResponse",
     "KeysResponse",
     "ModelCreate",
     "ModelOut",

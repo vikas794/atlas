@@ -142,7 +142,7 @@ export function PlaylistsHome() {
     0,
   )
 
-  const handleAddSubmit =(event: FormEvent) => {
+  const handleAddSubmit = (event: FormEvent) => {
     event.preventDefault()
     const message = validatePlaylistUrl(url)
     if (message) {
@@ -158,10 +158,12 @@ export function PlaylistsHome() {
 
   return (
     <div className="space-y-5">
-      <h1 className="text-page text-text">Playlists</h1>
+      <h1 className="text-page text-text">
+        <span className="text-gradient">Playlists</span>
+      </h1>
 
       {/* 6.1 Top: ingestion form */}
-      <section className="rounded border border-border bg-surface p-4">
+      <section className="panel p-4">
         <h2 className="text-section text-text">Add YouTube playlist</h2>
         <p className="mt-1 text-body text-text-muted">
           Paste a YouTube playlist link to fetch its videos and generate study notes.
@@ -236,7 +238,7 @@ export function PlaylistsHome() {
             Paste a YouTube playlist link above to start generating notes.
           </EmptyState>
         ) : (
-          <div className="overflow-x-auto rounded border border-border bg-surface">
+          <div className="overflow-x-auto panel">
             <table className="w-full text-left text-body">
               <thead className="border-b border-border bg-surface-muted text-label text-text">
                 <tr className="h-row">

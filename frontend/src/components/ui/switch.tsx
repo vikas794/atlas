@@ -1,3 +1,5 @@
+import { Check } from 'lucide-react'
+
 import { cn } from '../../lib/utils'
 
 interface SwitchProps {
@@ -9,7 +11,10 @@ interface SwitchProps {
   className?: string
 }
 
-/** On/off toggle (design.md 6.4, 6.5): a real button with `role="switch"`, keyboard operable. */
+/**
+ * On/off control drawn as a circle: filled accent with a check when on, an empty ring when off.
+ * A real button with `role="switch"`, keyboard operable (design.md 6.4, 6.5).
+ */
 export function Switch({ checked, onCheckedChange, label, disabled, className }: SwitchProps) {
   return (
     <button
@@ -23,19 +28,15 @@ export function Switch({ checked, onCheckedChange, label, disabled, className }:
         onCheckedChange(!checked)
       }}
       className={cn(
-        'relative inline-flex h-5 w-8 shrink-0 items-center rounded-pill border transition',
+        'inline-flex size-7 shrink-0 items-center justify-center rounded-pill border-2 transition',
         'disabled:cursor-not-allowed disabled:opacity-50',
-        checked ? 'border-transparent bg-accent' : 'border-border bg-surface-muted',
+        checked
+          ? 'border-transparent bg-accent text-on-accent shadow-card hover:brightness-110'
+          : 'border-border bg-transparent text-transparent hover:border-text-muted',
         className,
       )}
     >
-      <span
-        aria-hidden="true"
-        className={cn(
-          'inline-block size-3 rounded-pill bg-surface shadow-popover transition-transform',
-          checked ? 'translate-x-4' : 'translate-x-1',
-        )}
-      />
+      <Check aria-hidden="true" strokeWidth={3} className="size-icon" />
     </button>
   )
 }

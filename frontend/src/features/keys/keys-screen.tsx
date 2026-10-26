@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, RefreshCw } from 'lucide-react'
+import { AlertTriangle, KeyRound, Layers, Plus, RefreshCw, ShieldCheck, Timer } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { ConfirmDialog } from '../../components/shared/confirm-dialog'
+import { PageHeader } from '../../components/shared/page-header'
+import { StatCard } from '../../components/shared/stat-card'
 import { EmptyState, ErrorState, SkeletonBar } from '../../components/shared/state-panels'
 import { useToast } from '../../components/shared/toast'
 import { Button } from '../../components/ui/button'
@@ -20,7 +22,10 @@ import {
 import { errorMessage, failureMessage } from '../../lib/errors'
 import { pluralize } from '../../lib/format'
 import { groupKeys } from '../../lib/key-groups'
+import { activeCooldowns } from '../../lib/key-status-badge'
 import { queryKeys } from '../../lib/query-keys'
+import { cn } from '../../lib/utils'
+import { useReveal } from '../../lib/use-reveal'
 import type { LlmKey } from '../../lib/types'
 import { KeyFormDialog, RevealKeyDialog } from './key-dialogs'
 import { KeyList } from './key-list'
@@ -58,6 +63,20 @@ export function KeysScreen() {
   const groups = useMemo(() => groupKeys(keys, labels), [keys, labels])
   // Drop selections for keys that no longer exist (deleted elsewhere or after a refetch).
   const selectedKeys = useMemo(() => keys.filter((key) => selected.has(key.id)), [keys, selected])
+
+  const stats = useMemo(
+    () => ({
+      total: keys.length,
+      enabled: keys.filter((key) => key.enabled).length,
+      healthy: keys.filter((key) => key.status === 'healthy').length,
+      cooling: keys.filter((key) => activeCooldowns(key.cooldowns).length > 0).length,
+      attention: keys.filter(
+        (key) => key.status === 'invalid' || key.status === 'error' || key.auto_disabled,
+      ).length,
+    }),
+    [keys],
+  )
+  const scope = useReveal<HTMLDivElement>([keys.length > 0, groups.length])
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.llmKeys })
@@ -157,44 +176,77 @@ export function KeysScreen() {
   const batchIds = selectedKeys.map((key) => key.id)
 
   return (
-    <div>
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-page text-text">Keys</h1>
-          <p className="mt-1 text-body text-text-muted">
-            API keys for the providers behind your models. Keys rotate when one is rate-limited or
-            rejected.
-          </p>
+    <div ref={scope}>
+      <PageHeader
+        title="Keys"
+        description="API keys for the providers behind your models. Keys rotate when one is rate-limited or rejected."
+        actions={
+          <>
+            <Link to="/models" className={buttonClasses({ variant: 'secondary' })}>
+              <Layers aria-hidden="true" className="size-icon" />
+              Models
+            </Link>
+            <Button
+              variant="secondary"
+              onClick={() => checkAll.mutate()}
+              disabled={checkAll.isPending || keys.length === 0}
+            >
+              <RefreshCw
+                aria-hidden="true"
+                className={cn('size-icon', checkAll.isPending && 'atlas-spin')}
+              />
+              {checkAll.isPending ? 'Checking…' : 'Check all'}
+            </Button>
+            <Button onClick={openAdd}>
+              <Plus aria-hidden="true" className="size-icon" />
+              Add key
+            </Button>
+          </>
+        }
+      />
+
+      {keys.length > 0 ? (
+        <div className="mt-6 grid grid-flow-dense grid-cols-2 gap-4 lg:grid-cols-4">
+          <StatCard
+            label="Total keys"
+            value={stats.total}
+            hint={`${stats.enabled} enabled`}
+            icon={KeyRound}
+          />
+          <StatCard
+            label="Healthy"
+            value={stats.healthy}
+            hint="Passing their last check"
+            icon={ShieldCheck}
+            tone="success"
+          />
+          <StatCard
+            label="On cooldown"
+            value={stats.cooling}
+            hint="Skipped until the timer ends"
+            icon={Timer}
+            tone="warn"
+          />
+          <StatCard
+            label="Needs attention"
+            value={stats.attention}
+            hint="Invalid, errored or auto-disabled"
+            icon={AlertTriangle}
+            tone={stats.attention > 0 ? 'error' : 'neutral'}
+          />
         </div>
-        <div className="flex items-center gap-3">
-          <Link to="/models" className={buttonClasses({ variant: 'secondary' })}>
-            Models
-          </Link>
-          <Button
-            variant="secondary"
-            onClick={() => checkAll.mutate()}
-            disabled={checkAll.isPending || keys.length === 0}
-          >
-            <RefreshCw aria-hidden="true" className="size-icon" />
-            {checkAll.isPending ? 'Checking…' : 'Check all'}
-          </Button>
-          <Button onClick={openAdd}>
-            <Plus aria-hidden="true" className="size-icon" />
-            Add key
-          </Button>
-        </div>
-      </div>
+      ) : null}
 
       {selectedKeys.length > 0 ? (
         <div
           role="region"
           aria-label="Selected keys"
-          className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded border border-border bg-accent-soft px-3 py-2"
+          className="glass fixed bottom-5 left-1/2 z-40 flex w-[min(40rem,calc(100vw-2rem))] -translate-x-1/2 flex-wrap items-center justify-between gap-3 rounded-pill py-2 pl-5 pr-2 shadow-float"
         >
-          <span role="status" className="text-body text-text">
+          <span role="status" className="text-body font-medium text-text">
             {selectedKeys.length} selected
           </span>
-          <div className="flex gap-3">
+          <div className="flex gap-2">
             <Button
               variant="secondary"
               onClick={() => setEnabled.mutate({ ids: batchIds, enabled: true })}
@@ -216,7 +268,7 @@ export function KeysScreen() {
         </div>
       ) : null}
 
-      <div className="mt-5">
+      <div className="mt-6">
         {keysQuery.isError ? (
           <ErrorState
             title="Could not load the keys"
@@ -224,7 +276,7 @@ export function KeysScreen() {
             onRetry={() => void keysQuery.refetch()}
           />
         ) : keysQuery.isPending ? (
-          <div aria-hidden="true" className="space-y-3 rounded border border-border bg-surface p-5">
+          <div aria-hidden="true" className="panel space-y-3 p-5">
             <SkeletonBar className="w-48" />
             <SkeletonBar className="w-full" />
             <SkeletonBar className="w-full" />

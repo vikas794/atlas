@@ -19,6 +19,8 @@ import { useState, type KeyboardEvent } from 'react'
 import { Link } from 'react-router-dom'
 
 import { ActionMenu } from '../../components/shared/action-menu'
+import { Meter } from '../../components/shared/meter'
+import { ProviderMark } from '../../components/shared/provider-mark'
 import { Badge } from '../../components/ui/badge'
 import { Switch } from '../../components/ui/switch'
 import {
@@ -26,6 +28,7 @@ import {
   clampRank,
   formatContext,
   moveEntry,
+  quotaFraction,
   quotaSummary,
 } from '../../lib/model-chain'
 import { formatPosition } from '../../lib/format'
@@ -66,62 +69,30 @@ export function ModelTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded border border-border bg-surface">
-      {/* DndContext renders hidden <div>s, which are invalid inside <table>: keep it outside. */}
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext
-          items={entries.map((entry) => entry.id)}
-          strategy={verticalListSortingStrategy}
-        >
-          <table className="w-full min-w-[56rem] border-collapse text-body">
-            <thead>
-              <tr className="sticky top-0 h-row border-b border-border bg-surface-muted text-left text-label text-text-muted">
-                <th scope="col" className="w-10 px-3">
-                  <span className="sr-only">Reorder</span>
-                </th>
-                <th scope="col" className="w-20 px-3">
-                  Rank
-                </th>
-                <th scope="col" className="px-3">
-                  Model
-                </th>
-                <th scope="col" className="px-3">
-                  Context
-                </th>
-                <th scope="col" className="px-3">
-                  Quota
-                </th>
-                <th scope="col" className="px-3">
-                  Keys
-                </th>
-                <th scope="col" className="px-3">
-                  Enabled
-                </th>
-                <th scope="col" className="w-12 px-3">
-                  <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((entry, index) => (
-                <ModelRow
-                  key={entry.id}
-                  entry={entry}
-                  index={index}
-                  total={entries.length}
-                  rate={rates.get(entry.id)}
-                  onRank={(rank) => onReorder(moveEntry(entries, index, rank - 1))}
-                  onToggle={onToggle}
-                  onEdit={onEdit}
-                  onTest={onTest}
-                  onDelete={onDelete}
-                />
-              ))}
-            </tbody>
-          </table>
-        </SortableContext>
-      </DndContext>
-    </div>
+    // DndContext renders hidden <div>s: keep it outside the list element.
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <SortableContext
+        items={entries.map((entry) => entry.id)}
+        strategy={verticalListSortingStrategy}
+      >
+        <ol className="space-y-3">
+          {entries.map((entry, index) => (
+            <ModelRow
+              key={entry.id}
+              entry={entry}
+              index={index}
+              total={entries.length}
+              rate={rates.get(entry.id)}
+              onRank={(rank) => onReorder(moveEntry(entries, index, rank - 1))}
+              onToggle={onToggle}
+              onEdit={onEdit}
+              onTest={onTest}
+              onDelete={onDelete}
+            />
+          ))}
+        </ol>
+      </SortableContext>
+    </DndContext>
   )
 }
 
@@ -163,76 +134,108 @@ function ModelRow({
   // A model nothing can serve right now stays in the chain but reads as muted.
   const muted = !entry.enabled || entry.usable_key_count === 0
 
+  const fraction = quotaFraction(rate)
+
   return (
-    <tr
+    <li
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
+      data-reveal
       className={cn(
-        'h-row border-b border-border last:border-b-0 hover:bg-surface-muted',
-        isDragging && 'relative z-10 bg-surface-muted shadow-popover',
+        'panel card-lift relative flex flex-wrap items-center gap-x-5 gap-y-3 py-4 pl-3 pr-4',
+        index === 0 && 'border-accent/40',
+        isDragging && 'z-10 scale-[1.01] shadow-float',
       )}
     >
-      <td className="px-3">
-        <button
-          type="button"
-          ref={setActivatorNodeRef}
-          aria-label={`Reorder ${name}. Press Space to lift, arrow keys to move, Space to drop.`}
-          className="inline-flex cursor-grab touch-none rounded p-1 text-text-muted hover:text-text active:cursor-grabbing"
-          {...attributes}
-          {...listeners}
-        >
-          <GripVertical aria-hidden="true" className="size-icon" />
-        </button>
-      </td>
-      <td className="px-3">
+      <button
+        type="button"
+        ref={setActivatorNodeRef}
+        aria-label={`Reorder ${name}. Press Space to lift, arrow keys to move, Space to drop.`}
+        className="inline-flex cursor-grab touch-none rounded-lg p-2 text-text-muted hover:bg-surface-muted hover:text-text active:cursor-grabbing"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical aria-hidden="true" className="size-icon-lg" />
+      </button>
+
+      <div className="flex flex-col items-center">
         <RankInput name={name} rank={index + 1} total={total} onCommit={onRank} />
-      </td>
-      <td className={cn('px-3 py-2', muted && 'opacity-60')}>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium text-text">{name}</span>
-          <Badge tone="neutral">{entry.provider}</Badge>
-        </div>
-        <div className="text-label text-text-muted">{entry.model_id}</div>
-      </td>
-      <td className={cn('px-3 text-text-muted', muted && 'opacity-60')}>
-        {formatContext(entry.input_token_limit)}
-      </td>
-      <td className="px-3">
-        {quota.label ? (
-          <Badge
-            tone={
-              quota.level === 'exhausted' ? 'error' : quota.level === 'high' ? 'warn' : 'neutral'
-            }
-          >
-            {quota.label}
-          </Badge>
-        ) : (
-          <span className="text-label text-text-muted">No limits</span>
-        )}
-      </td>
-      <td className="px-3">
-        {entry.key_count === 0 ? (
-          <Link to="/keys" className="inline-flex">
-            <Badge tone="error">No keys</Badge>
-          </Link>
-        ) : blocked ? (
-          <Badge tone="warn" title={`${entry.usable_key_count} of ${entry.key_count} keys usable`}>
-            {blocked}
-          </Badge>
-        ) : (
-          <span className="text-label text-text-muted">
-            {entry.usable_key_count} of {entry.key_count}
+        {index === 0 ? (
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-accent">
+            Primary
           </span>
-        )}
-      </td>
-      <td className="px-3">
+        ) : null}
+      </div>
+
+      <div className={cn('flex min-w-0 flex-1 basis-64 items-center gap-3', muted && 'opacity-60')}>
+        <ProviderMark name={entry.provider} size="lg" />
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="truncate text-section text-text">{name}</span>
+            <Badge tone="neutral">{entry.provider}</Badge>
+          </div>
+          <code className="block truncate font-mono text-code text-text-muted">
+            {entry.model_id}
+          </code>
+        </div>
+      </div>
+
+      <div className="ml-auto flex flex-wrap items-center justify-end gap-x-5 gap-y-3">
+        <div className={cn('w-16 text-center', muted && 'opacity-60')}>
+          <p className="font-display text-section text-text">
+            {formatContext(entry.input_token_limit)}
+          </p>
+          <p className="text-label text-text-muted">context</p>
+        </div>
+
+        <div className="w-44">
+          {quota.label ? (
+            <>
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <Badge
+                  tone={
+                    quota.level === 'exhausted'
+                      ? 'error'
+                      : quota.level === 'high'
+                        ? 'warn'
+                        : 'neutral'
+                  }
+                >
+                  {quota.label}
+                </Badge>
+              </div>
+              <Meter fraction={fraction} level={quota.level} />
+            </>
+          ) : (
+            <span className="text-label text-text-muted">No limits</span>
+          )}
+        </div>
+
+        <div className="w-28">
+          {entry.key_count === 0 ? (
+            <Link to="/keys" className="inline-flex">
+              <Badge tone="error">No keys</Badge>
+            </Link>
+          ) : blocked ? (
+            <Badge
+              tone="warn"
+              title={`${entry.usable_key_count} of ${entry.key_count} keys usable`}
+            >
+              {blocked}
+            </Badge>
+          ) : (
+            <span className="text-label text-text-muted">
+              {entry.usable_key_count} of {entry.key_count}
+            </span>
+          )}
+        </div>
+
         <Switch
           checked={entry.enabled}
           onCheckedChange={(next) => onToggle(entry.id, next)}
           label={`${entry.enabled ? 'Disable' : 'Enable'} ${name}`}
         />
-      </td>
-      <td className="px-3">
+
         <ActionMenu
           label={`Actions for ${name}`}
           actions={[
@@ -247,8 +250,8 @@ function ModelRow({
             },
           ]}
         />
-      </td>
-    </tr>
+      </div>
+    </li>
   )
 }
 
@@ -290,7 +293,7 @@ function RankInput({
       inputMode="numeric"
       aria-label={`Rank of ${name}`}
       title="Type a number to move this model to that rank"
-      className="tabular h-control w-12 rounded border border-transparent bg-transparent px-1 text-center text-text hover:border-border focus:border-border"
+      className="tabular h-10 w-14 rounded-lg border border-transparent bg-transparent px-1 text-center font-display text-[24px] font-semibold text-text hover:border-border focus:border-accent"
       value={draft ?? formatPosition(rank, 2)}
       onFocus={(event) => event.currentTarget.select()}
       onChange={(event) => setDraft(event.target.value.replace(/[^0-9]/g, ''))}

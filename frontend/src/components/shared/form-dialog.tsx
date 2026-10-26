@@ -55,18 +55,20 @@ export function FormDialog({
       onOpenChange={(next) => (isSubmitting && !next ? null : onOpenChange(next))}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-text/40" />
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-text/40 backdrop-blur-sm" />
         <Dialog.Content
           onEscapeKeyDown={guard}
           onPointerDownOutside={guard}
           onInteractOutside={guard}
           {...(description ? {} : { 'aria-describedby': undefined })}
-          className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[calc(100vw-2rem)] max-w-modal -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-modal border border-border bg-surface p-5 shadow-modal"
+          className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[calc(100vw-2rem)] max-w-modal -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-modal border border-card-border bg-surface p-6 shadow-modal"
         >
           <form onSubmit={handleSubmit} noValidate>
             <div className="flex items-start gap-4">
               <div className="flex-1">
-                <Dialog.Title className="text-section text-text">{title}</Dialog.Title>
+                <Dialog.Title className="font-display text-[22px] font-semibold leading-7 tracking-tight text-text">
+                  {title}
+                </Dialog.Title>
                 {description ? (
                   <Dialog.Description className="mt-1 text-body text-text-muted">
                     {description}
@@ -77,7 +79,7 @@ export function FormDialog({
                 <button
                   type="button"
                   disabled={isSubmitting}
-                  className="rounded text-text-muted transition hover:text-text disabled:opacity-50"
+                  className="rounded-pill p-2 text-text-muted transition hover:bg-surface-muted hover:text-text disabled:opacity-50"
                   aria-label="Close dialog"
                 >
                   <X aria-hidden="true" className="size-icon" />
@@ -85,7 +87,7 @@ export function FormDialog({
               </Dialog.Close>
             </div>
 
-            <div className="mt-4 space-y-3">{children}</div>
+            <div className="mt-5 space-y-4">{children}</div>
 
             {error ? (
               <p role="alert" className="mt-3 text-label text-st-error-fg">
@@ -131,7 +133,7 @@ export function Field({
 }) {
   return (
     <div className="space-y-1">
-      <label htmlFor={id} className="text-body font-medium text-text">
+      <label htmlFor={id} className="text-label font-medium text-text">
         {label}
       </label>
       {children}

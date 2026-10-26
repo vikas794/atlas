@@ -261,8 +261,8 @@ export function RevealKeyDialog({
   return (
     <Dialog.Root open={keyRow !== null} onOpenChange={(open) => (open ? null : onClose())}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-text/40" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-modal -translate-x-1/2 -translate-y-1/2 rounded-modal border border-border bg-surface p-5 shadow-modal">
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-text/40 backdrop-blur-sm" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-modal -translate-x-1/2 -translate-y-1/2 rounded-modal border border-card-border bg-surface p-6 shadow-modal">
           {keyRow ? <RevealBody key={keyRow.id} keyRow={keyRow} onClose={onClose} /> : null}
         </Dialog.Content>
       </Dialog.Portal>
@@ -296,7 +296,9 @@ function RevealBody({ keyRow, onClose }: { keyRow: LlmKey; onClose: () => void }
     <>
       <div className="flex items-start gap-4">
         <div className="flex-1">
-          <Dialog.Title className="text-section text-text">Reveal key</Dialog.Title>
+          <Dialog.Title className="font-display text-[22px] font-semibold leading-7 tracking-tight text-text">
+            Reveal key
+          </Dialog.Title>
           <Dialog.Description className="mt-1 text-body text-text-muted">
             {keyRow.label} ({keyRow.provider})
           </Dialog.Description>

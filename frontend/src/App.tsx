@@ -7,11 +7,11 @@ import { ToastProvider } from './components/shared/toast'
 function App() {
   return (
     <ToastProvider>
-      <div className="min-h-screen bg-bg text-text">
+      <div className="min-h-screen w-full max-w-full overflow-x-hidden text-text">
         <TopBar />
 
         {/* Section 5: 1280px max width, centered, 24px side padding. */}
-        <main className="mx-auto w-full max-w-page px-5 py-5">
+        <main className="mx-auto w-full max-w-page px-5 pb-32 pt-6">
           <Outlet />
         </main>
       </div>

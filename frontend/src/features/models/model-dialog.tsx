@@ -7,6 +7,7 @@ import { useToast } from '../../components/shared/toast'
 import { Button } from '../../components/ui/button'
 import {
   createLlmModel,
+  createLlmModelsBulk,
   getAvailableModels,
   getLlmProviders,
   testLlmModel,
@@ -52,10 +53,10 @@ const EMPTY: Form = {
 const NUMBER_FIELDS = [
   ['input_token_limit', 'Input token limit', 'Largest transcript (in tokens) sent to this model.'],
   ['request_timeout_seconds', 'Request timeout (seconds)', 'Leave empty for the default.'],
-  ['rpm_limit', 'Requests per minute', 'Leave empty for no limit.'],
-  ['rpd_limit', 'Requests per day', 'Leave empty for no limit.'],
-  ['tpm_limit', 'Tokens per minute', 'Leave empty for no limit.'],
-  ['tpd_limit', 'Tokens per day', 'Leave empty for no limit.'],
+  ['rpm_limit', 'Requests per minute', ''],
+  ['rpd_limit', 'Requests per day', ''],
+  ['tpm_limit', 'Tokens per minute', ''],
+  ['tpd_limit', 'Tokens per day', ''],
 ] as const
 
 function formFrom(model: FallbackEntry | null | undefined): Form {
@@ -123,18 +124,25 @@ export function ModelDialog({ open, onOpenChange, model }: ModelDialogProps) {
   const providerList = providers.data?.providers ?? []
   const provider = form.provider || providerList[0]?.name || ''
   const providerInfo = providerList.find((item) => item.name === provider)
-  const canFetch = Boolean(provider) && (providerInfo?.usable_key_count ?? 0) > 0
+  const hasKey = (providerInfo?.usable_key_count ?? 0) > 0
 
   const available = useQuery({
     queryKey: queryKeys.llmAvailableModels(provider),
     queryFn: () => getAvailableModels(provider),
-    enabled: open && !editing && canFetch,
+    enabled: open && !editing && Boolean(provider),
     retry: false,
     staleTime: 5 * 60_000,
   })
+  const modelIds = available.data?.models ?? []
 
   const set = (name: keyof Form, value: string) => {
-    setForm((current) => ({ ...current, [name]: value }))
+    setForm((current) => {
+      const next = { ...current, [name]: value }
+      // A model LiteLLM knows prefills its context limit (never over one the user typed).
+      const known = name === 'model_id' ? available.data?.input_token_limits?.[value] : undefined
+      if (known && !current.input_token_limit) next.input_token_limit = String(known)
+      return next
+    })
     setErrors((current) => {
       const { [name]: _dropped, ...rest } = current
       return rest
@@ -187,6 +195,24 @@ export function ModelDialog({ open, onOpenChange, model }: ModelDialogProps) {
     },
   })
 
+  const importAll = useMutation({
+    mutationFn: () => createLlmModelsBulk(provider, modelIds, form.api_base.trim() || null),
+    onSuccess: ({ added, skipped }) => {
+      toast(
+        `Added ${added} model${added === 1 ? '' : 's'}, switched off${skipped ? ` (${skipped} already in the chain)` : ''}.`,
+      )
+      void queryClient.invalidateQueries({ queryKey: queryKeys.llmFallback })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.llmModels })
+      onOpenChange(false)
+    },
+    onError: (error) => toast(failureMessage('Could not add the models', error), 'error'),
+  })
+
+  const confirmImportAll = () => {
+    const message = `Add all ${modelIds.length} ${providerInfo?.label ?? provider} models to the chain? They are added switched off, so nothing changes until you enable them.`
+    if (modelIds.length <= 25 || window.confirm(message)) importAll.mutate()
+  }
+
   const test = useMutation({
     mutationFn: () => testLlmModel(model!.id),
     onSuccess: (result) =>
@@ -196,7 +222,6 @@ export function ModelDialog({ open, onOpenChange, model }: ModelDialogProps) {
     onError: (error) => toast(failureMessage('Could not test the model', error), 'error'),
   })
 
-  const modelIds = available.data?.models ?? []
   const generalError =
     save.isError && Object.keys(errors).length === 0 ? errorMessage(save.error) : null
 
@@ -244,11 +269,17 @@ export function ModelDialog({ open, onOpenChange, model }: ModelDialogProps) {
             label="Model id"
             error={errors.model_id}
             hint={
-              canFetch
-                ? available.isError
-                  ? `Could not load the provider's models: ${errorMessage(available.error)}`
-                  : `${modelIds.length} models available from this provider.`
-                : 'Add a key for this provider to list its models.'
+              available.isError
+                ? `Could not load models: ${errorMessage(available.error)}`
+                : available.data
+                  ? `${modelIds.length} models available${available.data.live ? ' from this provider' : ' from LiteLLM'}.${
+                      available.data.warning
+                        ? ` The provider could not be reached (${available.data.warning}).`
+                        : !available.data.live && !hasKey
+                          ? ' Add a key to also list its live models.'
+                          : ''
+                    }`
+                  : 'Loading models…'
             }
           >
             <div className="flex gap-2">
@@ -270,13 +301,27 @@ export function ModelDialog({ open, onOpenChange, model }: ModelDialogProps) {
               <Button
                 variant="secondary"
                 onClick={() => void available.refetch()}
-                disabled={!canFetch || available.isFetching}
+                disabled={available.isFetching}
               >
                 <RefreshCw aria-hidden="true" className="size-icon" />
                 {available.isFetching ? 'Loading…' : 'Fetch models'}
               </Button>
             </div>
           </Field>
+          {modelIds.length > 1 ? (
+            <div className="-mt-2 flex items-center gap-3">
+              <Button
+                variant="secondary"
+                onClick={confirmImportAll}
+                disabled={importAll.isPending}
+              >
+                {importAll.isPending ? 'Adding…' : `Add all ${modelIds.length} switched off`}
+              </Button>
+              <span className="text-label text-text-muted">
+                Adds every listed model to the chain, disabled.
+              </span>
+            </div>
+          ) : null}
         </>
       ) : null}
 
@@ -308,20 +353,30 @@ export function ModelDialog({ open, onOpenChange, model }: ModelDialogProps) {
         />
       </Field>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        {NUMBER_FIELDS.map(([name, label, hint]) => (
-          <Field key={name} id={fid(name)} label={label} hint={hint} error={errors[name]}>
-            <input
+      <div className="rounded-lg border border-card-border bg-surface-muted/60 p-4">
+        <p className="text-label font-medium text-text">Limits</p>
+        <p className="mb-3 text-label text-text-muted">Leave a field empty for no limit.</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {NUMBER_FIELDS.map(([name, label, hint]) => (
+            <Field
+              key={name}
               id={fid(name)}
-              className="input"
-              type="text"
-              inputMode="numeric"
-              value={form[name]}
-              aria-invalid={errors[name] ? true : undefined}
-              onChange={(event) => set(name, event.target.value)}
-            />
-          </Field>
-        ))}
+              label={label}
+              hint={hint || undefined}
+              error={errors[name]}
+            >
+              <input
+                id={fid(name)}
+                className="input"
+                type="text"
+                inputMode="numeric"
+                value={form[name]}
+                aria-invalid={errors[name] ? true : undefined}
+                onChange={(event) => set(name, event.target.value)}
+              />
+            </Field>
+          ))}
+        </div>
       </div>
     </FormDialog>
   )

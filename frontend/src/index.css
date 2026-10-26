@@ -31,6 +31,25 @@
     color: var(--text);
   }
 
+  /* Ambient mesh behind everything: three soft radial washes, fixed so they do not scroll. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(60rem 36rem at 8% -10%, var(--mesh-1), transparent 70%),
+      radial-gradient(48rem 32rem at 100% 0%, var(--mesh-2), transparent 70%),
+      radial-gradient(52rem 34rem at 50% 110%, var(--mesh-3), transparent 70%);
+  }
+
+  h1,
+  h2 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+
   * {
     box-sizing: border-box;
   }
@@ -88,6 +107,10 @@
     width: 100%;
     border: var(--border-width) solid var(--border);
     border-radius: var(--radius);
+    box-shadow: inset 0 1px 2px rgb(15 23 42 / 0.04);
+    transition:
+      border-color var(--transition-duration),
+      box-shadow var(--transition-duration);
     background-color: var(--surface);
     color: var(--text);
     padding: 0 var(--space-3);
@@ -99,9 +122,57 @@
     color: var(--text-muted);
   }
 
+  .input:hover {
+    border-color: var(--text-muted);
+  }
+
+  .input:focus-visible {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 3px var(--glow);
+  }
+
   .input:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+}
+
+@layer components {
+  /* Frosted bar for the nav pill, the batch bar and the staged bar. */
+  .glass {
+    background-color: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+    backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  }
+
+  /* Raised content card: hairline border, layered shadow, lifts on hover. */
+  .panel {
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-lg);
+    background-color: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .card-lift {
+    transition:
+      transform 500ms var(--ease-out),
+      box-shadow 500ms var(--ease-out),
+      border-color 500ms var(--ease-out);
+  }
+
+  .card-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-card-hover);
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--card-border));
+  }
+
+  .text-gradient {
+    background: linear-gradient(100deg, var(--accent), var(--accent-2) 60%, var(--accent-3));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
 }
 

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from src.infrastructure.llm.catalog import catalog_models
 from src.infrastructure.llm.registry.health import ProviderQueryError, fetch_provider_models
 from src.infrastructure.llm.registry.providers import (
     PROVIDERS,
@@ -35,6 +36,8 @@ from src.transport.http.fastapi.schemas.llm import (
     KeyReveal,
     KeysResponse,
     KeyUpdate,
+    ModelBulkCreate,
+    ModelBulkResponse,
     ModelCreate,
     ModelOut,
     ModelsResponse,
@@ -160,28 +163,46 @@ def list_providers() -> ProvidersResponse:
 
 @router.get("/providers/{provider}/available-models", response_model=AvailableModelsResponse)
 async def available_models(provider: str) -> AvailableModelsResponse:
-    """The model ids the provider offers, listed with one of its keys (for the add-model picker)."""
+    """Model ids for the add-model picker: LiteLLM's table merged with the provider's live list.
+
+    The live list needs one of the provider's keys. Without a key, or when the provider cannot be
+    reached, the LiteLLM table alone is returned; only when that is empty too does this fail.
+    """
     registry = _registry()
     name = provider.strip().lower()
+    known = catalog_models(name)
     keys = [k for k in registry.repo.list_keys(name) if k.enabled]
     key = next((k for k in keys if _usable(k)), keys[0] if keys else None)
+
+    live: list[str] = []
+    warning: str | None = None
     if key is None:
-        raise HTTPError(
-            status_code=400,
-            detail=f"No enabled {provider_info(name).label} key. Add one on the Keys page to list models.",
-            error_code="CONFIG_MISSING",
+        if not known:
+            raise HTTPError(
+                status_code=400,
+                detail=f"No enabled {provider_info(name).label} key. Add one on the Keys page to list models.",
+                error_code="CONFIG_MISSING",
+            )
+    else:
+        api_base = next(
+            (m.api_base for m in registry.repo.list_models() if m.provider == name and m.api_base),
+            None,
         )
-    api_base = next(
-        (m.api_base for m in registry.repo.list_models() if m.provider == name and m.api_base),
-        None,
+        try:
+            live = await fetch_provider_models(name, key.key_value, api_base)
+        except ProviderQueryError as exc:
+            if not known:
+                raise HTTPError(
+                    status_code=502, detail=exc.message, error_code="PROVIDER_ERROR"
+                ) from exc
+            warning = exc.message
+    return AvailableModelsResponse(
+        provider=name,
+        models=sorted({*known, *live}),
+        live=bool(live),
+        warning=warning,
+        input_token_limits={m: limit for m, limit in known.items() if limit},
     )
-    try:
-        models = await fetch_provider_models(name, key.key_value, api_base)
-    except ProviderQueryError as exc:
-        raise HTTPError(
-            status_code=502, detail=exc.message, error_code="PROVIDER_ERROR"
-        ) from exc
-    return AvailableModelsResponse(provider=name, models=sorted(set(models)))
 
 
 # --- models ------------------------------------------------------------------------------
@@ -220,6 +241,33 @@ def create_model(body: ModelCreate) -> ModelOut:
             error_code="CONFLICT",
         ) from exc
     return _model_out(model)
+
+
+@router.post("/models/bulk", response_model=ModelBulkResponse, status_code=201)
+def create_models_bulk(body: ModelBulkCreate) -> ModelBulkResponse:
+    """Add many models of one provider, disabled; ids already registered are skipped."""
+    registry = _registry()
+    provider = body.provider.strip().lower()
+    info = provider_info(provider)
+    api_base = (body.api_base or "").strip() or info.default_api_base
+    limits = catalog_models(provider)
+    added = skipped = 0
+    for model_id in dict.fromkeys(m.strip() for m in body.model_ids if m.strip()):
+        try:
+            registry.repo.add_model(
+                provider=provider,
+                model_id=model_id,
+                display_name=model_id,
+                litellm_model=litellm_model_for(provider, model_id),
+                api_base=api_base,
+                input_token_limit=limits.get(model_id) or info.default_input_token_limit,
+                request_timeout_seconds=info.default_timeout_seconds,
+                enabled=False,
+            )
+            added += 1
+        except sqlite3.IntegrityError:
+            skipped += 1
+    return ModelBulkResponse(added=added, skipped=skipped)
 
 
 @router.patch("/models/{model_pk}", response_model=ModelOut)

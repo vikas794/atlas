@@ -34,9 +34,12 @@ export default {
       surface: color('surface'),
       'surface-muted': color('surface-muted'),
       border: color('border'),
+      'card-border': color('card-border'),
       text: color('text'),
       'text-muted': color('text-muted'),
       accent: color('accent'),
+      'accent-2': color('accent-2'),
+      'accent-3': color('accent-3'),
       'accent-soft': color('accent-soft'),
       'on-accent': color('on-accent'),
 
@@ -66,6 +69,7 @@ export default {
         ui: 'var(--font-ui)',
         notes: 'var(--font-notes)',
         mono: 'var(--font-mono)',
+        display: 'var(--font-display)',
       },
 
       fontSize: {
@@ -114,6 +118,8 @@ export default {
         // Section 2: 6px for controls and cards, 10px for modals.
         DEFAULT: 'var(--radius)',
         modal: 'var(--radius-modal)',
+        lg: 'var(--radius-lg)',
+        xl: 'var(--radius-xl)',
         pill: '9999px',
       },
 
@@ -133,6 +139,9 @@ export default {
         // Section 2: almost no shadows — popovers and modals only.
         popover: 'var(--shadow-popover)',
         modal: 'var(--shadow-modal)',
+        card: 'var(--shadow-card)',
+        'card-hover': 'var(--shadow-card-hover)',
+        float: 'var(--shadow-float)',
       },
 
       transitionDuration: {

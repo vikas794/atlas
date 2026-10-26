@@ -150,3 +150,14 @@ export function blockedReason(blocked: string | null): string | null {
       return 'Unavailable'
   }
 }
+
+/** Highest used share (0..1, capped) across a row's limited windows; 0 when none is limited. */
+export function quotaFraction(row: RateLimitRow | undefined): number {
+  if (!row) return 0
+  let best = 0
+  for (const [key] of WINDOW_LABELS) {
+    const fraction = windowFraction(row[key])
+    if (fraction !== null && fraction > best) best = fraction
+  }
+  return Math.min(best, 1)
+}

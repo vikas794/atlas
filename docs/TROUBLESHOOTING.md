@@ -231,9 +231,9 @@ Google Drive access has expired or was revoked. Re-authorize Drive: Open Setting
 Cause: refreshing the token failed with `invalid_grant`. Either access was revoked in the Google
 account, or the OAuth app is in **Testing** publishing status, where Google expires refresh
 tokens after 7 days. `/api/diagnostics` shows a `drive_token` warning with the same message
-(it verifies an expired token with Google instead of trusting the file). Once a refresh has
-failed, the Settings screen shows "Not connected" with that message (`/api/drive/status` itself
-makes no network call). Without any token the message starts with
+(it verifies an expired token with Google instead of trusting the file). The Settings screen
+does the same: `/api/drive/status` refreshes an expired token, so it shows "Not connected" with
+that message too (a network failure there leaves it "Connected"). Without any token the message starts with
 `No usable token found at '...token.json'.`
 
 Fix: Settings, Step 2 "Authenticate account". The consent opens a browser **on the machine that

@@ -50,7 +50,7 @@
   /* ---------------------------------------------------------------------
    * 4. Typography — three fonts, each with exactly one job.
    * ------------------------------------------------------------------ */
-  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-ui: 'Geist', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --font-notes: 'Lexend', 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
@@ -58,8 +58,8 @@
   --font-weight-label: 500;
   --font-weight-title: 600;
 
-  --size-page-title: 22px;
-  --leading-page-title: 28px;
+  --size-page-title: 32px;
+  --leading-page-title: 38px;
   --size-section-title: 16px;
   --leading-section-title: 24px;
   --size-body: 14px;
@@ -84,15 +84,17 @@
   --page-max-width: 1280px;
   --page-padding: 24px;
   --topbar-height: 56px;
-  --row-height: 40px;
-  --control-height: 32px;
-  --modal-width: 480px;
+  --row-height: 44px;
+  --control-height: 36px;
+  --modal-width: 560px;
   --icon-size: 16px;
   --icon-size-lg: 20px;
 
   /* Section 2: small rounded corners, thin 1px borders, almost no shadows. */
-  --radius: 6px;
-  --radius-modal: 10px;
+  --radius: 10px;
+  --radius-modal: 20px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
   --border-width: 1px;
   --progress-bar-height: 8px;
   --focus-ring-width: 2px;
@@ -100,8 +102,31 @@
   --transition-duration: 120ms;
 
   /* Section 2: shadows only on popovers and modals. */
-  --shadow-popover: 0 8px 24px rgb(15 23 42 / 0.12);
-  --shadow-modal: 0 16px 48px rgb(15 23 42 / 0.18);
+  --shadow-popover: 0 12px 32px rgb(15 23 42 / 0.16);
+  --shadow-modal: 0 24px 64px rgb(15 23 42 / 0.28);
+
+  /* ---------------------------------------------------------------------
+   * 6. Depth, glass and glow (redesign) — ambient mesh, translucent bars,
+   *    layered card shadows. Components read these tokens only.
+   * ------------------------------------------------------------------ */
+  --accent-2: light-dark(#0ea5e9, #38bdf8);
+  --accent-3: light-dark(#a855f7, #c084fc);
+  --glow: light-dark(rgb(79 70 229 / 0.16), rgb(129 140 248 / 0.22));
+  --mesh-1: light-dark(rgb(99 102 241 / 0.16), rgb(99 102 241 / 0.22));
+  --mesh-2: light-dark(rgb(14 165 233 / 0.12), rgb(14 165 233 / 0.16));
+  --mesh-3: light-dark(rgb(168 85 247 / 0.1), rgb(168 85 247 / 0.14));
+  --glass-bg: light-dark(rgb(255 255 255 / 0.72), rgb(30 41 59 / 0.72));
+  --glass-border: light-dark(rgb(255 255 255 / 0.9), rgb(148 163 184 / 0.18));
+  --glass-blur: 16px;
+  --card-border: light-dark(rgb(15 23 42 / 0.07), rgb(148 163 184 / 0.14));
+  --shadow-card: light-dark(0 1px 2px rgb(15 23 42 / 0.04), 0 8px 24px -12px rgb(15 23 42 / 0.12));
+  --shadow-card-hover: light-dark(
+    0 2px 4px rgb(15 23 42 / 0.05),
+    0 18px 40px -16px rgb(79 70 229 / 0.32)
+  );
+  --shadow-float: 0 20px 50px -12px rgb(15 23 42 / 0.35);
+  --font-display: 'Geist', 'Inter', system-ui, sans-serif;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /* Manual theme toggle (lib/theme.ts): pin one scheme; no attribute = follow the OS. */

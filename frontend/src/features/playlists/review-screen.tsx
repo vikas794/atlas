@@ -405,7 +405,7 @@ export function ReviewScreen() {
         {!focus && (
           <aside
             aria-label="Videos in this playlist"
-            className="hidden w-64 shrink-0 flex-col rounded border border-border bg-surface md:flex"
+            className="hidden w-64 shrink-0 flex-col panel md:flex"
           >
             <div className="border-b border-border p-3">
               <Link
@@ -463,7 +463,7 @@ export function ReviewScreen() {
         )}
 
         {/* 6.3 Right notes pane */}
-        <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded border border-border bg-surface">
+        <section className="flex min-w-0 flex-1 flex-col overflow-hidden panel">
           {focus ? (
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-2">
               <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -630,11 +630,7 @@ export function ReviewScreen() {
 
           {/* Preview / Edit switch and save bar */}
           <div className="flex items-center justify-between border-b border-border bg-surface-muted px-4 py-2">
-            <div
-              role="tablist"
-              aria-label="Notes view"
-              className="flex rounded border border-border bg-surface p-1"
-            >
+            <div role="tablist" aria-label="Notes view" className="flex panel p-1">
               {(['preview', 'edit'] as const).map((option) => (
                 <button
                   key={option}
@@ -813,7 +809,7 @@ export function ReviewScreen() {
               aria-label="Temporary prompt"
               disabled={notesPromptQuery.isPending}
               placeholder={notesPromptQuery.isPending ? 'Loading the current prompt…' : undefined}
-              className="h-56 w-full resize-y rounded border border-border bg-surface p-2 font-notes text-label text-text"
+              className="h-56 w-full resize-y panel p-2 font-notes text-label text-text"
               spellCheck={false}
             />
             <p className="mt-1 text-label text-text-muted">

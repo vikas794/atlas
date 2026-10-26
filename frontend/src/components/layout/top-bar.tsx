@@ -27,7 +27,7 @@ export function ThemeToggle() {
     <div
       role="radiogroup"
       aria-label="Theme"
-      className="inline-flex rounded border border-border bg-surface p-1"
+      className="inline-flex rounded-pill border border-border bg-surface p-1"
     >
       {THEME_PREFERENCES.map((option) => {
         const { label, Icon } = THEME_OPTIONS[option]
@@ -42,7 +42,7 @@ export function ThemeToggle() {
             title={label}
             onClick={() => setPreference(setThemePreference(option))}
             className={cn(
-              'inline-flex size-6 items-center justify-center rounded transition',
+              'inline-flex size-6 items-center justify-center rounded-pill transition',
               selected
                 ? 'bg-accent-soft text-accent'
                 : 'text-text-muted hover:bg-surface-muted hover:text-text',
@@ -64,14 +64,24 @@ const NAV_LINKS = [
 ] as const
 
 /**
- * Section 5: 56px top bar, app name on the left, theme toggle on the right,
- * sticky so it stays put on the long playlist and review screens.
+ * Floating glass pill: wordmark on the left, section links in the middle, theme toggle on the right.
+ * Sticky so it stays put on the long playlist and review screens.
  */
 export function TopBar() {
   return (
-    <header className="sticky top-0 z-40 h-topbar border-b border-border bg-surface">
-      <div className="mx-auto flex h-topbar w-full max-w-page items-center justify-between px-5">
-        <Link to="/" className="text-section text-text" aria-label="Atlas home">
+    <header className="sticky top-0 z-40 px-5 pt-3">
+      <div className="glass mx-auto flex h-topbar w-full max-w-page items-center justify-between gap-4 rounded-pill pl-5 pr-3 shadow-card">
+        <Link
+          to="/"
+          className="flex items-center gap-2 font-display text-section text-text"
+          aria-label="Atlas home"
+        >
+          <span
+            aria-hidden="true"
+            className="inline-flex size-6 items-center justify-center rounded-lg bg-gradient-to-br from-accent to-accent-3 text-label font-semibold text-on-accent"
+          >
+            A
+          </span>
           Atlas
         </Link>
 
@@ -83,8 +93,10 @@ export function TopBar() {
                 to={to}
                 className={({ isActive }) =>
                   cn(
-                    'rounded px-2 py-1 text-label transition hover:bg-surface-muted hover:text-text',
-                    isActive ? 'text-text' : 'text-text-muted',
+                    'rounded-pill px-4 py-1 text-body font-medium transition hover:text-text',
+                    isActive
+                      ? 'bg-accent-soft text-accent shadow-card'
+                      : 'text-text-muted hover:bg-surface-muted',
                   )
                 }
               >

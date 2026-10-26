@@ -251,12 +251,12 @@ export function PlaylistDetail() {
         <h1 className="sr-only">Playlist</h1>
         <SkeletonBar className="h-6 w-64" />
         <SkeletonBar className="w-96" />
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+        <div className="grid grid-flow-dense grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
           {STRIP_CARDS.map((card) => (
-            <div key={card.filter} className="h-row rounded border border-border bg-surface" />
+            <div key={card.filter} className="h-row panel" />
           ))}
         </div>
-        <div className="rounded border border-border bg-surface">
+        <div className="panel">
           <table className="w-full">
             <tbody>
               <SkeletonTableRows
@@ -297,10 +297,12 @@ export function PlaylistDetail() {
   return (
     <div className="space-y-5">
       {/* 6.2 Header */}
-      <div className="flex flex-col gap-4 border-b border-border pb-4 lg:flex-row lg:items-start lg:justify-between">
+      <div className="flex flex-col gap-4 pb-2 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <div className="flex items-center gap-3">
-            <h1 className="truncate text-page text-text">{playlist.title}</h1>
+            <h1 className="truncate text-page text-text">
+              <span className="text-gradient">{playlist.title}</span>
+            </h1>
             <a
               href={playlist.source_url}
               target="_blank"
@@ -414,8 +416,8 @@ export function PlaylistDetail() {
 
       {/* 6.2 Summary strip: every card counts the same stages its filter selects. */}
       <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-          {STRIP_CARDS.map((card) => {
+        <div className="grid grid-flow-dense grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+          {STRIP_CARDS.map((card, cardIndex) => {
             const selected = filter === card.filter
             return (
               <button
@@ -427,13 +429,14 @@ export function PlaylistDetail() {
                   setPage(1)
                 }}
                 className={cn(
-                  'flex flex-col items-start rounded border p-3 text-left transition',
+                  'card-lift flex flex-col items-start rounded-lg border p-4 text-left',
+                  cardIndex === 0 && 'col-span-2 lg:col-span-1',
                   card.tone,
                   selected ? 'ring-2 ring-accent' : 'hover:bg-surface-muted',
                 )}
               >
                 <span className="text-label">{card.label}</span>
-                <span className="mt-1 text-section tabular-nums">
+                <span className="mt-1 font-display text-[28px] font-semibold leading-8 tabular-nums">
                   {filterCount(counts, card.filter, playlist.video_count)}
                 </span>
               </button>
@@ -441,7 +444,7 @@ export function PlaylistDetail() {
           })}
         </div>
 
-        <div className="rounded border border-border bg-surface p-3">
+        <div className="panel p-3">
           <SegmentedProgressBar counts={counts} total={playlist.video_count} />
         </div>
       </div>
@@ -481,7 +484,7 @@ export function PlaylistDetail() {
       ) : (
         <div
           className={cn(
-            'max-h-[70vh] overflow-auto rounded border border-border bg-surface transition-opacity',
+            'max-h-[70vh] overflow-auto panel transition-opacity',
             videosQuery.isPlaceholderData && 'opacity-60',
           )}
         >

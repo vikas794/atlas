@@ -1,4 +1,4 @@
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, Sparkles } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 import { cn } from '../../lib/utils'
@@ -15,9 +15,15 @@ export function EmptyState({
   className?: string
 }) {
   return (
-    <div className={cn('rounded border border-border bg-surface p-5 text-center', className)}>
-      <p className="text-body text-text">{title}</p>
-      {children ? <p className="mt-1 text-label text-text-muted">{children}</p> : null}
+    <div className={cn('panel flex flex-col items-center p-6 py-10 text-center', className)}>
+      <span
+        aria-hidden="true"
+        className="mb-4 inline-flex size-12 items-center justify-center rounded-xl bg-gradient-to-br from-accent to-accent-3 text-on-accent shadow-card-hover"
+      >
+        <Sparkles className="size-icon-lg" />
+      </span>
+      <p className="text-section text-text">{title}</p>
+      {children ? <div className="mt-1 text-label text-text-muted">{children}</div> : null}
     </div>
   )
 }
@@ -40,7 +46,7 @@ export function ErrorState({
     <div
       role="alert"
       className={cn(
-        'flex flex-col items-center gap-3 rounded border border-st-error-fg/40 bg-st-error-bg p-5 text-center',
+        'flex flex-col items-center gap-3 rounded-lg border border-st-error-fg/40 bg-st-error-bg p-6 text-center',
         className,
       )}
     >

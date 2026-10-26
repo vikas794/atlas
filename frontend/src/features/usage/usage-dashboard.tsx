@@ -53,9 +53,11 @@ function Stat({
   description?: string
 }) {
   return (
-    <div className="rounded border border-border bg-surface p-4">
+    <div className="panel card-lift p-5">
       <p className="text-label text-text-muted">{title}</p>
-      <p className="mt-1 text-page tabular-nums text-text">{value}</p>
+      <p className="mt-2 font-display text-[32px] font-semibold leading-9 tabular-nums text-text">
+        {value}
+      </p>
       {description ? <p className="mt-1 text-label text-text-muted">{description}</p> : null}
     </div>
   )
@@ -63,14 +65,10 @@ function Stat({
 
 function TableShell({ empty, children }: { empty?: string; children?: React.ReactNode }) {
   if (empty) {
-    return (
-      <p className="rounded border border-border bg-surface p-4 text-center text-body text-text-muted">
-        {empty}
-      </p>
-    )
+    return <p className="panel p-4 text-center text-body text-text-muted">{empty}</p>
   }
   return (
-    <div className="overflow-x-auto rounded border border-border bg-surface">
+    <div className="overflow-x-auto panel">
       <table className="min-w-full text-left text-body">{children}</table>
     </div>
   )
@@ -212,7 +210,7 @@ export function UsageDashboard({ className }: UsageDashboardProps) {
       {isLoading ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4" aria-busy="true">
           {Array.from({ length: 4 }, (_, index) => (
-            <div key={index} className="space-y-2 rounded border border-border bg-surface p-4">
+            <div key={index} className="space-y-2 panel p-4">
               <SkeletonBar className="w-16" />
               <SkeletonBar className="h-6 w-24" />
             </div>

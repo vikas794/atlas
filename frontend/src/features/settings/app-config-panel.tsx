@@ -189,7 +189,7 @@ export function AppConfigPanel() {
               {data.restart_required ? (
                 <p
                   role="status"
-                  className="rounded border border-border bg-st-warning-bg px-3 py-2 text-body text-st-warning-fg"
+                  className="rounded-lg border border-border bg-st-warn-bg px-3 py-2 text-body text-st-warn-fg"
                 >
                   Restart required: some saved settings only take effect after Atlas restarts.
                 </p>
@@ -298,7 +298,7 @@ function Group({
 }) {
   const panelId = useId()
   return (
-    <div className="rounded border border-border">
+    <div className="rounded-lg border border-border">
       <button
         type="button"
         aria-expanded={open}
@@ -323,7 +323,7 @@ function Group({
 /** Where the AI provider, models and API keys are managed now. */
 function ModelsLinkCard() {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-border bg-surface-muted px-4 py-3">
+    <div className="flex flex-wrap items-center justify-between gap-3 panel-muted px-4 py-3">
       <p className="text-body text-text-muted">
         Which models write the notes, in what order, and their API keys are managed on the Models
         and Keys screens.
@@ -371,7 +371,7 @@ function RunMode({
           <label
             key={option.id}
             className={cn(
-              'flex cursor-pointer items-center gap-2 rounded border px-3 py-2 text-body',
+              'flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-body',
               option.active
                 ? 'border-accent bg-surface-muted text-text'
                 : 'border-border text-text-muted',
@@ -419,23 +419,23 @@ function Badges({ field }: { field: SettingField }) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-label">
       {field.apply === 'restart' ? (
-        <span className="rounded border border-border bg-st-neutral-bg px-2 py-0.5 text-st-neutral-fg">
+        <span className="rounded-lg border border-border bg-st-neutral-bg px-2 py-0.5 text-st-neutral-fg">
           Needs restart
         </span>
       ) : null}
       {field.locked ? (
-        <span className="flex items-center gap-1 rounded border border-border bg-st-neutral-bg px-2 py-0.5 text-st-neutral-fg">
+        <span className="flex items-center gap-1 rounded-lg border border-border bg-st-neutral-bg px-2 py-0.5 text-st-neutral-fg">
           <Lock className="size-icon" aria-hidden="true" />
           Set by an environment variable
         </span>
       ) : null}
       {!field.editable ? (
-        <span className="rounded border border-border bg-st-neutral-bg px-2 py-0.5 text-st-neutral-fg">
+        <span className="rounded-lg border border-border bg-st-neutral-bg px-2 py-0.5 text-st-neutral-fg">
           Set in config.yaml or the environment
         </span>
       ) : null}
       {field.source === 'db' ? (
-        <span className="rounded border border-border bg-st-success-bg px-2 py-0.5 text-st-success-fg">
+        <span className="rounded-lg border border-border bg-st-success-bg px-2 py-0.5 text-st-success-fg">
           Changed from {String(field.default)}
         </span>
       ) : null}
