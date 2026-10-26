@@ -309,7 +309,38 @@ async def test_model(model_pk: int) -> ModelTestResponse:
     usage = getattr(response, "usage", None)
     tokens = int(getattr(usage, "total_tokens", 0) or 0)
     registry.record_success(key, model, tokens)
+    await _record_test_usage(model, response, usage)
     return ModelTestResponse(success=True, latency_ms=latency, error=None)
+
+
+async def _record_test_usage(model: ModelRow, response: Any, usage: Any) -> None:
+    """Put the test ping's tokens and LiteLLM-priced cost in the usage ledger (never fails the test)."""
+    from datetime import UTC, datetime
+
+    from src.domain.interfaces.usage_ledger import UsageRecord
+    from src.infrastructure.llm.pricing import call_cost
+    from src.transport.http.fastapi.dependencies import get_usage_ledger
+
+    input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+    output_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+    try:
+        await get_usage_ledger().record_usage(
+            UsageRecord(
+                timestamp=datetime.now(UTC),
+                provider=model.provider,
+                operation="model_test",
+                model=model.model_id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=input_tokens + output_tokens,
+                cost_usd=call_cost(
+                    model.litellm_model, input_tokens, output_tokens, response=response
+                ),
+                cache_hit=False,
+            )
+        )
+    except Exception:  # a ledger failure must not fail the test
+        pass
 
 
 # --- fallback chain ----------------------------------------------------------------------

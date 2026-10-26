@@ -529,7 +529,7 @@ class TestSingleModel:
         assert record.input_tokens == 1200
         assert record.output_tokens == 345
         assert record.total_tokens == 1545
-        assert record.cost_usd > 0.0  # gemini-3.5-flash is priced in CostCalculator
+        assert record.cost_usd > 0.0  # gemini-3.5-flash is priced by LiteLLM
         assert record.cache_hit is False
 
     async def test_missing_token_counts_default_to_zero(
@@ -623,7 +623,7 @@ class TestOpenRouterModel:
         assert record.provider == "openrouter"
         assert record.operation == "generate_notes"
         assert (record.input_tokens, record.output_tokens, record.total_tokens) == (1100, 400, 1500)
-        # The default model is priced in CostCalculator, so cost is real.
+        # LiteLLM prices the default model, so cost is real.
         assert record.cost_usd > 0.0
 
     async def test_an_oversized_transcript_is_refused_before_the_call(

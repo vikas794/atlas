@@ -313,7 +313,7 @@ def test_normal_finish_reasons_pass(finish: Any) -> None:
 
 
 async def test_usage_is_recorded_with_provider_tokens_and_priced() -> None:
-    from src.infrastructure.llm.cost import CostCalculator
+    from src.infrastructure.llm.pricing import call_cost
 
     class Ledger:
         def __init__(self) -> None:
@@ -339,7 +339,10 @@ async def test_usage_is_recorded_with_provider_tokens_and_priced() -> None:
     (record,) = ledger.records
     assert record.output_tokens == 1000
     assert record.cost_usd > 0
-    assert CostCalculator.calculate_cost("gemini", "gemini-3.5-flash-lite", 10**6, 0) == 0.10
+    assert call_cost("gemini/gemini-2.5-flash", 10**6, 0) == 0.30
+    assert call_cost("openrouter/openai/gpt-4o", 10**6, 0) == 2.50  # prefix stripped
+    assert call_cost("openai/z-ai/glm-5.2", 10**6, 0) > 0  # reseller id priced by the model's name
+    assert call_cost("openai/totally-unknown-model", 10**6, 0) == 0.0  # unpriced, never guessed
 
 
 def test_a_placeholder_inside_the_title_is_not_substituted() -> None:

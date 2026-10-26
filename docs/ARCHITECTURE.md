@@ -617,8 +617,12 @@ edited on the Models and Keys pages, not configuration.
    add a `ProviderInfo` to `PROVIDERS` in `registry/providers.py` (LiteLLM prefix, default
    `api_base`, `health` kind `bearer-models`, `gemini` or `openrouter`, first-run env variable). A
    new `health` kind also needs a branch in `registry/health.py`.
-3. Optional: prices in `src/infrastructure/llm/cost.py`. LiteLLM's own price (when it knows the
-   model) is used first; unknown models then cost 0.0.
+3. Nothing for prices: `src/infrastructure/llm/pricing.py` asks LiteLLM (response cost, then
+   `cost_per_token` for the model, then with the provider prefix stripped, then the bare model name
+   matched against LiteLLM's table, so NVIDIA-hosted `deepseek-ai/...` or `z-ai/glm-...` are priced at
+   that model's published rate). Every notes
+   call and every model test ping is recorded in the usage ledger with that cost; a model LiteLLM
+   has never heard of records 0.0.
 
 The adapter reuses `notes_base` (prompt file and version, `render_prompt`, `check_input_size`,
 `classify_provider_exception`, `check_finish_reason`, `validate_notes`), so a new model gets the

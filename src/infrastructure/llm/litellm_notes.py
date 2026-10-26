@@ -25,7 +25,6 @@ from src.domain.interfaces.notes_generator import CUSTOM_PROMPT_VERSION, Generat
 from src.domain.interfaces.usage_ledger import UsageRecord
 from src.domain.models.playlist import FailureType, NotesGenerationError
 from src.infrastructure.llm.base import SettingsLoader
-from src.infrastructure.llm.cost import CostCalculator
 from src.infrastructure.llm.models import ModelSpec
 from src.infrastructure.llm.notes_base import (
     REGISTRY_KEY_PREFIX,
@@ -40,6 +39,7 @@ from src.infrastructure.llm.notes_base import (
     request_timeout_seconds,
     validate_notes,
 )
+from src.infrastructure.llm.pricing import call_cost, response_cost
 
 if TYPE_CHECKING:
     from src.domain.interfaces.usage_ledger import UsageLedgerPort
@@ -290,9 +290,7 @@ class LiteLLMNotesGenerator:
             cost = (
                 cost_usd
                 if cost_usd
-                else CostCalculator.calculate_cost(
-                    spec.provider, spec.model, input_tokens, output_tokens
-                )
+                else call_cost(spec.litellm_model, input_tokens, output_tokens)
             )
             await self._usage_ledger.record_usage(
                 UsageRecord(
@@ -357,17 +355,7 @@ def _parse_response(response: Any) -> tuple[str, int, int, object | None, float 
     usage = getattr(response, "usage", None)
     input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
     output_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
-    return content, input_tokens, output_tokens, finish, _response_cost(response)
-
-
-def _response_cost(response: Any) -> float | None:
-    """LiteLLM's own price for this call, when it knows one (``None`` otherwise)."""
-    hidden = getattr(response, "_hidden_params", None)
-    if isinstance(hidden, dict):
-        value = hidden.get("response_cost")
-        if isinstance(value, int | float) and value > 0:
-            return float(value)
-    return None
+    return content, input_tokens, output_tokens, finish, response_cost(response)
 
 
 def _most_useful(errors: list[Exception]) -> Exception:
