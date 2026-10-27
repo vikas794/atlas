@@ -654,3 +654,8 @@ changelog before bumping. The first start after migration `0007` imports the mod
 version had saved (`notes_provider` and the `*_model` rows in `app_settings`, read directly from
 the table because those settings no longer exist) and the `*_API_KEY` environment variables into
 the registry once (`registry/seed.py`).
+
+### Providers and the Models tab
+
+- Providers: the curated five (`gemini`, `openrouter`, `freellmapi`, `nvidia`, `openai`) are hand-written in `registry/providers.py` with their endpoint and health check. Every other provider LiteLLM lists as OpenAI-compatible and prices chat models for is added automatically (`known_providers()`), with LiteLLM's own base URL and key variable; OAuth or cloud-credential providers (`github_copilot`, `azure_ai`, `chatgpt`) are excluded. `GET /api/llm/providers` returns all of them.
+- `GET /api/llm/fallback` entries carry `enabled_key_count` (keys switched on in the Keys tab, whatever their health). The Models tab shows only models whose provider has at least one, grouped by provider in chain order; the rank is the place in the whole chain, hidden models included, and dragging reorders within a provider. Hidden models stay in the chain and are counted in the "Hidden, no key" card.

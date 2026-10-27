@@ -328,6 +328,8 @@ export interface LlmModel {
 /** A chain entry: the model plus how many keys can serve it right now. */
 export interface FallbackEntry extends LlmModel {
   key_count: number
+  /** Keys of the provider switched on in the Keys tab; models with none are hidden. */
+  enabled_key_count: number
   usable_key_count: number
   /** Why no key can serve it ("no_keys", "cooling_down", "rate_limited", "monthly_cap"). */
   blocked: string | null

@@ -503,3 +503,21 @@ def test_the_diagnostics_llm_check_reads_the_registry(client: TestClient) -> Non
 
     client.patch("/api/llm/models/1", json={"enabled": False})
     assert check_llm_key(settings).status == "error"
+
+
+def test_providers_include_those_litellm_can_serve(client: TestClient) -> None:
+    providers = {p["name"]: p for p in client.get("/api/llm/providers").json()["providers"]}
+    assert list(providers)[:5] == ["gemini", "openrouter", "freellmapi", "nvidia", "openai"]
+    assert providers["groq"]["default_api_base"].startswith("https://")
+    assert "github_copilot" not in providers
+
+
+def test_fallback_counts_only_enabled_keys_for_a_provider(client: TestClient) -> None:
+    _add_model(client, provider="nvidia", model_id="n1")
+    on = _add_key(client, "nvidia", key="k-aaaaaaaaaa")
+    off = _add_key(client, "nvidia", key="k-bbbbbbbbbb")
+    client.patch(f"/api/llm/keys/{off['id']}", json={"enabled": False})
+    entry = client.get("/api/llm/fallback").json()["entries"][0]
+    assert entry["key_count"] == 2
+    assert entry["enabled_key_count"] == 1
+    assert on["id"] != off["id"]

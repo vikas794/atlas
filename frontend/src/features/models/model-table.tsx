@@ -27,9 +27,11 @@ import {
   blockedReason,
   clampRank,
   formatContext,
+  groupByProvider,
   moveEntry,
   quotaFraction,
   quotaSummary,
+  withEnabledKey,
 } from '../../lib/model-chain'
 import { formatPosition } from '../../lib/format'
 import type { FallbackEntry, RateLimitRow } from '../../lib/types'
@@ -46,7 +48,11 @@ interface ModelTableProps {
   onDelete: (entry: FallbackEntry) => void
 }
 
-/** Chain table (design.md 6.4): drag handle, rank, model, context, quota, keys, enabled, menu. */
+/**
+ * Chain table (design.md 6.4), grouped by provider: drag handle, rank, model, context, quota,
+ * keys, enabled, menu. Only providers with a key switched on are listed; the rank is the model's
+ * place in the whole chain, hidden models included.
+ */
 export function ModelTable({
   entries,
   rates,
@@ -61,37 +67,57 @@ export function ModelTable({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
+  const groups = groupByProvider(withEnabledKey(entries))
+
   const handleDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) return
     const from = entries.findIndex((entry) => entry.id === active.id)
     const to = entries.findIndex((entry) => entry.id === over.id)
-    if (from >= 0 && to >= 0) onReorder(moveEntry(entries, from, to))
+    // Dragging reorders within a provider; the rank box moves a model anywhere in the chain.
+    if (from < 0 || to < 0 || entries[from].provider !== entries[to].provider) return
+    onReorder(moveEntry(entries, from, to))
   }
 
   return (
     // DndContext renders hidden <div>s: keep it outside the list element.
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-      <SortableContext
-        items={entries.map((entry) => entry.id)}
-        strategy={verticalListSortingStrategy}
-      >
-        <ol className="space-y-3">
-          {entries.map((entry, index) => (
-            <ModelRow
-              key={entry.id}
-              entry={entry}
-              index={index}
-              total={entries.length}
-              rate={rates.get(entry.id)}
-              onRank={(rank) => onReorder(moveEntry(entries, index, rank - 1))}
-              onToggle={onToggle}
-              onEdit={onEdit}
-              onTest={onTest}
-              onDelete={onDelete}
-            />
-          ))}
-        </ol>
-      </SortableContext>
+      <div className="space-y-6">
+        {groups.map((group) => (
+          <section key={group.provider} aria-label={`${group.provider} models`}>
+            <header className="mb-3 flex items-center gap-3">
+              <ProviderMark name={group.provider} size="lg" />
+              <h2 className="text-section capitalize text-text">{group.provider}</h2>
+              <Badge tone="neutral">
+                {group.entries.length} {group.entries.length === 1 ? 'model' : 'models'}
+              </Badge>
+            </header>
+            <SortableContext
+              items={group.entries.map((entry) => entry.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <ol className="space-y-3">
+                {group.entries.map((entry) => {
+                  const index = entries.findIndex((item) => item.id === entry.id)
+                  return (
+                    <ModelRow
+                      key={entry.id}
+                      entry={entry}
+                      index={index}
+                      total={entries.length}
+                      rate={rates.get(entry.id)}
+                      onRank={(rank) => onReorder(moveEntry(entries, index, rank - 1))}
+                      onToggle={onToggle}
+                      onEdit={onEdit}
+                      onTest={onTest}
+                      onDelete={onDelete}
+                    />
+                  )
+                })}
+              </ol>
+            </SortableContext>
+          </section>
+        ))}
+      </div>
     </DndContext>
   )
 }
@@ -172,7 +198,6 @@ function ModelRow({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate text-section text-text">{name}</span>
-            <Badge tone="neutral">{entry.provider}</Badge>
           </div>
           <code className="block truncate font-mono text-code text-text-muted">
             {entry.model_id}

@@ -12,6 +12,28 @@ export function moveEntry<T>(entries: readonly T[], from: number, to: number): T
   return next
 }
 
+/** A provider's models, in chain order. */
+export interface ProviderGroup {
+  provider: string
+  entries: FallbackEntry[]
+}
+
+/** Models whose provider has at least one key switched on in the Keys tab. */
+export function withEnabledKey(entries: readonly FallbackEntry[]): FallbackEntry[] {
+  return entries.filter((entry) => entry.enabled_key_count > 0)
+}
+
+/** Group by provider; groups and the models inside keep chain order (a group sits where its first model does). */
+export function groupByProvider(entries: readonly FallbackEntry[]): ProviderGroup[] {
+  const groups = new Map<string, FallbackEntry[]>()
+  for (const entry of entries) {
+    const list = groups.get(entry.provider)
+    if (list) list.push(entry)
+    else groups.set(entry.provider, [entry])
+  }
+  return [...groups].map(([provider, list]) => ({ provider, entries: list }))
+}
+
 /** Clamp a zero-based index into `0..length-1`. */
 export function clampRank(index: number, length: number): number {
   return Math.min(Math.max(Math.trunc(index), 0), Math.max(length - 1, 0))

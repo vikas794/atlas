@@ -9,20 +9,15 @@ from __future__ import annotations
 
 import os
 
-#: Our provider name -> LiteLLM's ``litellm_provider``.
+#: Our provider name -> LiteLLM's ``litellm_provider`` where they differ (others share the name).
 _LITELLM_PROVIDER = {
-    "gemini": "gemini",
-    "openai": "openai",
-    "openrouter": "openrouter",
     "nvidia": "nvidia_nim",
 }
 
 
 def catalog_models(provider: str) -> dict[str, int | None]:
     """``{model id: max input tokens}`` for ``provider``'s chat models, as LiteLLM names them."""
-    wanted = _LITELLM_PROVIDER.get(provider)
-    if wanted is None:
-        return {}
+    wanted = _LITELLM_PROVIDER.get(provider, provider)
 
     os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")  # never fetch prices online
     import litellm

@@ -26,6 +26,7 @@ import {
   toStaged,
   toUpdates,
   type StagedEntry,
+  withEnabledKey,
 } from '../../lib/model-chain'
 import { queryKeys } from '../../lib/query-keys'
 import { useReveal } from '../../lib/use-reveal'
@@ -66,22 +67,24 @@ export function ModelsScreen() {
     [usage.data],
   )
 
+  // Models of a provider with no enabled key are hidden (Keys tab), not counted or listed.
+  const visible = useMemo(() => withEnabledKey(entries), [entries])
   const stats = useMemo(
     () => ({
-      enabled: entries.filter((entry) => entry.enabled).length,
-      ready: entries.filter((entry) => entry.enabled && entry.usable_key_count > 0).length,
-      noKeys: entries.filter((entry) => entry.key_count === 0).length,
+      enabled: visible.filter((entry) => entry.enabled).length,
+      ready: visible.filter((entry) => entry.enabled && entry.usable_key_count > 0).length,
+      hidden: entries.length - visible.length,
     }),
-    [entries],
+    [entries, visible],
   )
   const servingOrder = useMemo(
     () =>
-      entries
+      visible
         .filter((entry) => entry.enabled && entry.usable_key_count > 0)
         .map((entry) => entry.display_name || entry.model_id),
-    [entries],
+    [visible],
   )
-  const scope = useReveal<HTMLDivElement>([entries.length])
+  const scope = useReveal<HTMLDivElement>([visible.length])
 
   const stage = (next: FallbackEntry[]) => setStaged(toStaged(next))
 
@@ -166,7 +169,7 @@ export function ModelsScreen() {
           <div className="mt-6 grid grid-flow-dense grid-cols-2 gap-4 lg:grid-cols-4">
             <StatCard
               label="In the chain"
-              value={entries.length}
+              value={visible.length}
               hint="Tried top to bottom"
               icon={Layers}
             />
@@ -185,11 +188,11 @@ export function ModelsScreen() {
               tone="progress"
             />
             <StatCard
-              label="Missing keys"
-              value={stats.noKeys}
-              hint="Add a key to bring them online"
+              label="Hidden, no key"
+              value={stats.hidden}
+              hint="Enable a provider key to show them"
               icon={KeyRound}
-              tone={stats.noKeys > 0 ? 'error' : 'neutral'}
+              tone={stats.hidden > 0 ? 'error' : 'neutral'}
             />
           </div>
 
@@ -241,6 +244,13 @@ export function ModelsScreen() {
               <Plus aria-hidden="true" className="size-icon" />
               Add model
             </Button>
+          </EmptyState>
+        ) : visible.length === 0 ? (
+          <EmptyState title="No models to show. Enable a key for a provider in the Keys tab to list its models.">
+            <Link to="/keys" className={buttonClasses({ variant: 'secondary' }) + ' mt-3'}>
+              <KeyRound aria-hidden="true" className="size-icon" />
+              Open Keys
+            </Link>
           </EmptyState>
         ) : (
           <ModelTable

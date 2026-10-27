@@ -18,6 +18,7 @@ from src.infrastructure.llm.catalog import catalog_models
 from src.infrastructure.llm.registry.health import ProviderQueryError, fetch_provider_models
 from src.infrastructure.llm.registry.providers import (
     PROVIDERS,
+    known_providers,
     litellm_model_for,
     mask_key,
     provider_info,
@@ -141,7 +142,7 @@ def list_providers() -> ProvidersResponse:
     """Every provider Atlas knows, plus any other provider that has a model or key."""
     registry = _registry()
     keys = registry.repo.list_keys()
-    names = list(PROVIDERS)
+    names = list(known_providers())
     for name in [m.provider for m in registry.repo.list_models()] + [k.provider for k in keys]:
         if name not in names:
             names.append(name)
@@ -404,6 +405,7 @@ def _fallback(registry: ModelRegistry) -> FallbackResponse:
             FallbackEntryOut(
                 **_model_out(model).model_dump(),
                 key_count=len(own),
+                enabled_key_count=sum(1 for k in own if k.enabled),
                 usable_key_count=len(usable),
                 blocked=None if usable else (blocked or "no_keys"),
             )

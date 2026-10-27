@@ -24,6 +24,7 @@ function entry(id: number, overrides: Partial<FallbackEntry> = {}): FallbackEntr
     priority: id,
     chain_enabled: true,
     key_count: 2,
+    enabled_key_count: 2,
     usable_key_count: 2,
     blocked: null,
     ...overrides,
@@ -74,6 +75,24 @@ describe('ModelsScreen', () => {
     expect(screen.getByRole('link', { name: 'No keys' })).toHaveAttribute('href', '/keys')
     expect(screen.getByText('1M')).toBeInTheDocument()
     expect(screen.getByText('2 of 2')).toBeInTheDocument()
+  })
+
+  it('groups models by provider and hides providers without an enabled key', async () => {
+    setup([
+      entry(1, { provider: 'gemini' }),
+      entry(2, { provider: 'nvidia' }),
+      entry(3, { provider: 'gemini' }),
+      entry(4, { provider: 'openai', key_count: 1, enabled_key_count: 0, usable_key_count: 0 }),
+    ])
+    renderRoute('/models')
+
+    await screen.findAllByText('Model 1')
+    expect(screen.getByRole('region', { name: 'gemini models' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'nvidia models' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'openai models' })).not.toBeInTheDocument()
+    expect(screen.queryAllByText('Model 4')).toHaveLength(0)
+    // Gemini's two models sit together even though nvidia is ranked between them.
+    expect(rowNames()).toEqual(['Model 1', 'Model 3', 'Model 2'])
   })
 
   it('shows an empty state with an Add model button', async () => {

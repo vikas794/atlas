@@ -50,6 +50,8 @@ class ModelsResponse(BaseModel):
 
 class FallbackEntryOut(ModelOut):
     key_count: int
+    #: Keys of this provider that are switched on in the Keys tab (whatever their health).
+    enabled_key_count: int
     usable_key_count: int
     #: Why no key can serve this model right now (``no_keys``, ``cooling_down``, ...), else None.
     blocked: str | None
