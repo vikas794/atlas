@@ -109,6 +109,31 @@ Stop the container before running Atlas locally on port 8000.
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md): symptoms, causes, fixes; logs; backups.
 - [Atlas_PRD.md](docs/Atlas_PRD.md) (requirements) and [design.md](docs/design.md) (UI).
 
+## Code Blueprint
+
+### Subdirectories & System Boundaries
+- backend: [backend/README.md](backend/README.md) - FastAPI app, lifespan (worker), SPA fallback, `python -m backend` entry.
+- src: [src/README.md](src/README.md) - layered pipeline code (domain, application, infrastructure, transport, config, shared).
+- frontend: [frontend/README.md](frontend/README.md) - React SPA (screens, shared components, API client).
+- scripts: [scripts/README.md](scripts/README.md) - setup, build, start, dev and test scripts (`.sh` and `.ps1`).
+- tests: `tests/` - pytest suite (no contract file; test-only directory).
+- docs: `docs/` - architecture, config, troubleshooting, PRD and design docs.
+
+### Global Invariants
+- Dependencies point inward: domain, then application, then infrastructure and transport.
+- Secrets (API keys, OAuth tokens) never appear in logs, API responses or diagnostics; everything goes through the shared redactor.
+- Pipeline stage changes go through the domain stage machine; `PUBLISHED` is the only terminal stage.
+- All API errors use the `{code, message, details}` envelope; unknown `/api/*` paths never return the SPA.
+- Colors in the UI come from the global token stylesheet only.
+
+### Global Side Effects
+- One SQLite file (`data/atlas.sqlite3`) plus transcript files, logs (`logs/`) and Drive credentials (`credentials.json`, `token.json`).
+- Network calls to the YouTube Data API, yt-dlp downloads, LLM providers and Google Drive/Docs.
+- A background worker runs inside the API process.
+
+### System Verification
+- Run: `./scripts/test.sh` (Windows: `.\scripts\test.ps1`); backend only: `uv run pytest -q`
+
 ## License
 
 MIT License. See [LICENSE](LICENSE).

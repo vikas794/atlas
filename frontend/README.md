@@ -1,4 +1,24 @@
-# React + TypeScript + Vite
+# Atlas Frontend Blueprint
+
+## System Overview
+Vite + React 19 + TypeScript single-page app for Atlas (TanStack Query, React Router data router, Tailwind with design tokens, Radix dialogs). It talks to the backend through `src/lib/api.ts` (`VITE_API_BASE_URL`, default same-origin; the Vite dev server proxies the API). UI rules live in `docs/design.md`; behavior in `docs/Atlas_PRD.md`.
+
+Scripts: `npm run dev`, `npm run build` (`tsc -b && vite build`), `npm run lint`, `npm run format`, `npm run format:check`, `npm test` (vitest), `npm run test:watch`, `npm run coverage`, `npm run preview`, `npm run e2e` (Playwright, not documented here).
+
+## Subdirectories & System Boundaries
+- src: [./src/README.md](./src/README.md) - app entry, routes, components, features, lib.
+
+## Global Invariants
+- Colors and spacing come from the single global stylesheet tokens, never hardcoded in components.
+- All backend access goes through `src/lib/api.ts`.
+
+## Global Side Effects
+- Network calls to the Atlas backend; theme and UI flags persisted in `localStorage`.
+
+## System Verification
+- Run: `npm test` (from `frontend/`)
+
+## Developer Notes (React + TypeScript + Vite template)
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
