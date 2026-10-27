@@ -14,7 +14,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { GripVertical, Pencil, PlayCircle, Trash2 } from 'lucide-react'
+import { ChevronDown, GripVertical, Pencil, PlayCircle, Trash2 } from 'lucide-react'
 import { useState, type KeyboardEvent } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -68,6 +68,13 @@ export function ModelTable({
   )
 
   const groups = groupByProvider(withEnabledKey(entries))
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  const toggleGroup = (provider: string) =>
+    setCollapsed((current) => {
+      const next = new Set(current)
+      if (!next.delete(provider)) next.add(provider)
+      return next
+    })
 
   const handleDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) return
@@ -82,41 +89,64 @@ export function ModelTable({
     // DndContext renders hidden <div>s: keep it outside the list element.
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <div className="space-y-6">
-        {groups.map((group) => (
-          <section key={group.provider} aria-label={`${group.provider} models`}>
-            <header className="mb-3 flex items-center gap-3">
-              <ProviderMark name={group.provider} size="lg" />
-              <h2 className="text-section capitalize text-text">{group.provider}</h2>
-              <Badge tone="neutral">
-                {group.entries.length} {group.entries.length === 1 ? 'model' : 'models'}
-              </Badge>
-            </header>
-            <SortableContext
-              items={group.entries.map((entry) => entry.id)}
-              strategy={verticalListSortingStrategy}
-            >
-              <ol className="space-y-3">
-                {group.entries.map((entry) => {
-                  const index = entries.findIndex((item) => item.id === entry.id)
-                  return (
-                    <ModelRow
-                      key={entry.id}
-                      entry={entry}
-                      index={index}
-                      total={entries.length}
-                      rate={rates.get(entry.id)}
-                      onRank={(rank) => onReorder(moveEntry(entries, index, rank - 1))}
-                      onToggle={onToggle}
-                      onEdit={onEdit}
-                      onTest={onTest}
-                      onDelete={onDelete}
-                    />
-                  )
-                })}
-              </ol>
-            </SortableContext>
-          </section>
-        ))}
+        {groups.map((group) => {
+          const open = !collapsed.has(group.provider)
+          const panelId = `models-${group.provider}`
+          return (
+            <section key={group.provider} aria-label={`${group.provider} models`}>
+              <h2 className={cn(open && 'mb-3')}>
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  aria-controls={panelId}
+                  onClick={() => toggleGroup(group.provider)}
+                  className="flex w-full items-center gap-3 rounded-lg p-1 text-left hover:bg-surface-muted"
+                >
+                  <ProviderMark name={group.provider} size="lg" />
+                  <span className="text-section capitalize text-text">{group.provider}</span>
+                  <Badge tone="neutral">
+                    {group.entries.length} {group.entries.length === 1 ? 'model' : 'models'}
+                  </Badge>
+                  <ChevronDown
+                    aria-hidden="true"
+                    className={cn(
+                      'ml-auto size-icon-lg text-text-muted transition-transform',
+                      !open && '-rotate-90',
+                    )}
+                  />
+                </button>
+              </h2>
+              <div id={panelId} hidden={!open}>
+                {open ? (
+                  <SortableContext
+                    items={group.entries.map((entry) => entry.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <ol className="space-y-3">
+                      {group.entries.map((entry) => {
+                        const index = entries.findIndex((item) => item.id === entry.id)
+                        return (
+                          <ModelRow
+                            key={entry.id}
+                            entry={entry}
+                            index={index}
+                            total={entries.length}
+                            rate={rates.get(entry.id)}
+                            onRank={(rank) => onReorder(moveEntry(entries, index, rank - 1))}
+                            onToggle={onToggle}
+                            onEdit={onEdit}
+                            onTest={onTest}
+                            onDelete={onDelete}
+                          />
+                        )
+                      })}
+                    </ol>
+                  </SortableContext>
+                ) : null}
+              </div>
+            </section>
+          )
+        })}
       </div>
     </DndContext>
   )

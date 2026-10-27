@@ -95,6 +95,20 @@ describe('ModelsScreen', () => {
     expect(rowNames()).toEqual(['Model 1', 'Model 3', 'Model 2'])
   })
 
+  it('collapses and expands a provider group', async () => {
+    setup([entry(1, { provider: 'gemini' }), entry(2, { provider: 'nvidia' })])
+    const user = userEvent.setup()
+    renderRoute('/models')
+
+    const toggle = await screen.findByRole('button', { name: /gemini/i })
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(rowNames()).toEqual(['Model 2'])
+    await user.click(toggle)
+    expect(rowNames()).toEqual(['Model 1', 'Model 2'])
+  })
+
   it('shows an empty state with an Add model button', async () => {
     setup([])
     renderRoute('/models')
