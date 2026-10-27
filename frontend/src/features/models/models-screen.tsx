@@ -258,6 +258,7 @@ export function ModelsScreen() {
             rates={rates}
             onReorder={stage}
             onToggle={(id, enabled) => stage(setEnabled(entries, id, enabled))}
+            onToggleMany={(ids, enabled) => stage(setEnabled(entries, ids, enabled))}
             onEdit={openEdit}
             onTest={(entry) => test.mutate(entry)}
             onDelete={setDeleteTarget}

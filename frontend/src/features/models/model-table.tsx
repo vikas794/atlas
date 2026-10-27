@@ -43,6 +43,8 @@ interface ModelTableProps {
   /** Called with the new order after a drag, keyboard move or rank edit. */
   onReorder: (next: FallbackEntry[]) => void
   onToggle: (id: number, enabled: boolean) => void
+  /** Enable or disable several models in one staged change (a provider's select/deselect all). */
+  onToggleMany: (ids: number[], enabled: boolean) => void
   onEdit: (entry: FallbackEntry) => void
   onTest: (entry: FallbackEntry) => void
   onDelete: (entry: FallbackEntry) => void
@@ -58,6 +60,7 @@ export function ModelTable({
   rates,
   onReorder,
   onToggle,
+  onToggleMany,
   onEdit,
   onTest,
   onDelete,
@@ -94,13 +97,13 @@ export function ModelTable({
           const panelId = `models-${group.provider}`
           return (
             <section key={group.provider} aria-label={`${group.provider} models`}>
-              <h2 className={cn(open && 'mb-3')}>
+              <h2 className={cn('flex items-center gap-2', open && 'mb-3')}>
                 <button
                   type="button"
                   aria-expanded={open}
                   aria-controls={panelId}
                   onClick={() => toggleGroup(group.provider)}
-                  className="flex w-full items-center gap-3 rounded-lg p-1 text-left hover:bg-surface-muted"
+                  className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1 text-left hover:bg-surface-muted"
                 >
                   <ProviderMark name={group.provider} size="lg" />
                   <span className="text-section capitalize text-text">{group.provider}</span>
@@ -114,6 +117,34 @@ export function ModelTable({
                       !open && '-rotate-90',
                     )}
                   />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Select all ${group.provider} models`}
+                  disabled={group.entries.every((entry) => entry.enabled)}
+                  onClick={() =>
+                    onToggleMany(
+                      group.entries.map((entry) => entry.id),
+                      true,
+                    )
+                  }
+                  className="rounded-lg px-2 py-1 text-label font-normal text-text-muted hover:bg-surface-muted hover:text-text disabled:opacity-40 disabled:hover:bg-transparent"
+                >
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Deselect all ${group.provider} models`}
+                  disabled={group.entries.every((entry) => !entry.enabled)}
+                  onClick={() =>
+                    onToggleMany(
+                      group.entries.map((entry) => entry.id),
+                      false,
+                    )
+                  }
+                  className="rounded-lg px-2 py-1 text-label font-normal text-text-muted hover:bg-surface-muted hover:text-text disabled:opacity-40 disabled:hover:bg-transparent"
+                >
+                  Deselect all
                 </button>
               </h2>
               <div id={panelId} hidden={!open}>

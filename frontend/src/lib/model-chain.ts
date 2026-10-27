@@ -42,11 +42,12 @@ export function clampRank(index: number, length: number): number {
 /** Set the enabled flag of one entry (by model id). */
 export function setEnabled(
   entries: readonly FallbackEntry[],
-  modelId: number,
+  modelIds: number | readonly number[],
   enabled: boolean,
 ): FallbackEntry[] {
+  const ids = new Set(typeof modelIds === 'number' ? [modelIds] : modelIds)
   return entries.map((entry) =>
-    entry.id === modelId ? { ...entry, enabled, chain_enabled: enabled } : entry,
+    ids.has(entry.id) ? { ...entry, enabled, chain_enabled: enabled } : entry,
   )
 }
 

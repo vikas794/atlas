@@ -100,13 +100,32 @@ describe('ModelsScreen', () => {
     const user = userEvent.setup()
     renderRoute('/models')
 
-    const toggle = await screen.findByRole('button', { name: /gemini/i })
+    const toggle = await screen.findByRole('button', { name: /gemini/i, expanded: true })
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     await user.click(toggle)
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(rowNames()).toEqual(['Model 2'])
     await user.click(toggle)
     expect(rowNames()).toEqual(['Model 1', 'Model 2'])
+  })
+
+  it('selects and deselects all models of one provider', async () => {
+    setup([
+      entry(1, { provider: 'gemini' }),
+      entry(2, { provider: 'gemini' }),
+      entry(3, { provider: 'nvidia' }),
+    ])
+    const user = userEvent.setup()
+    renderRoute('/models')
+
+    await user.click(await screen.findByRole('button', { name: 'Deselect all gemini models' }))
+    expect(screen.getByRole('switch', { name: 'Enable Model 1' })).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: 'Enable Model 2' })).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: 'Disable Model 3' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Select all gemini models' }))
+    expect(screen.getByRole('switch', { name: 'Disable Model 1' })).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: 'Disable Model 2' })).toBeInTheDocument()
   })
 
   it('shows an empty state with an Add model button', async () => {
