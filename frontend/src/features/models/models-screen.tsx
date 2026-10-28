@@ -57,6 +57,8 @@ export function ModelsScreen() {
   // Ticked rows for a bulk Hide / Delete, and whether hidden models are listed (to unhide them).
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set())
   const [showHidden, setShowHidden] = useState(false)
+  // Models of a provider with no enabled key are left out unless this is on.
+  const [showNoKey, setShowNoKey] = useState(false)
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
 
   const queryClient = useQueryClient()
@@ -81,7 +83,10 @@ export function ModelsScreen() {
 
   // Models of a provider with no enabled key are not listed (Keys tab); models the user hid are
   // left out too unless "Show hidden" is on. Neither kind is counted in the stats.
-  const visible = useMemo(() => listedEntries(entries, showHidden), [entries, showHidden])
+  const visible = useMemo(
+    () => listedEntries(entries, showHidden, showNoKey),
+    [entries, showHidden, showNoKey],
+  )
   const active = useMemo(() => listedEntries(entries, false), [entries])
   const hiddenCount = useMemo(() => entries.filter((entry) => entry.hidden).length, [entries])
   const stats = useMemo(
@@ -264,7 +269,7 @@ export function ModelsScreen() {
             <StatCard
               label="Hidden, no key"
               value={stats.noKey}
-              hint="Enable a provider key to show them"
+              hint="Enable a provider key, or tick Show no-key models"
               icon={KeyRound}
               tone={stats.noKey > 0 ? 'error' : 'neutral'}
             />
@@ -328,6 +333,11 @@ export function ModelsScreen() {
             }
           >
             <div className="mt-3 flex flex-wrap justify-center gap-2">
+              {stats.noKey > 0 ? (
+                <Button variant="secondary" onClick={() => setShowNoKey(true)}>
+                  Show no-key models
+                </Button>
+              ) : null}
               {hiddenCount > 0 ? (
                 <Button variant="secondary" onClick={() => setShowHidden(true)}>
                   Show hidden
@@ -366,6 +376,17 @@ export function ModelsScreen() {
                 />
               </div>
               <div className="flex flex-wrap items-center gap-4">
+                {stats.noKey > 0 || showNoKey ? (
+                  <label className="flex items-center gap-2 text-label text-text">
+                    <input
+                      type="checkbox"
+                      className="size-4 cursor-pointer accent-accent"
+                      checked={showNoKey}
+                      onChange={(event) => setShowNoKey(event.target.checked)}
+                    />
+                    Show no-key models ({stats.noKey})
+                  </label>
+                ) : null}
                 {hiddenCount > 0 || showHidden ? (
                   <label className="flex items-center gap-2 text-label text-text">
                     <input
@@ -395,6 +416,7 @@ export function ModelsScreen() {
               onDelete={setDeleteTarget}
               onHide={(entry, hidden) => hide.mutate({ ids: [entry.id], hidden })}
               showHidden={showHidden}
+              showNoKey={showNoKey}
               selected={selected}
               onSelect={tick}
               query={query}

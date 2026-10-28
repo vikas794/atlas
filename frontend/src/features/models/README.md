@@ -12,7 +12,7 @@ Model catalog and fallback-chain editor (route `/models`).
 
 ## Invariants
 - Chain ordering, staging and provider grouping logic lives in `lib/model-chain`; the UI must not duplicate it.
-- Providers are filtered to those with an enabled key (`withEnabledKey`).
+- Providers are filtered to those with an enabled key (`listedEntries`), unless "Show no-key models" is on; those rows show dimmed with a "No keys" badge and are excluded from the stat cards either way.
 - A toggle (single, or a provider's select/deselect all) moves only the models whose state changed: disabled to the end of the whole chain, enabled right after the last enabled entry (hidden models count). Old chains, drag and the rank box are not corrected.
 - "Primary" is the first enabled entry in the whole chain (`primaryIndex`); it can be a hidden model, in which case no row shows it.
 - Search (`filterEntries`) is view-only state in `ModelsScreen`: it never enters the staged chain, ranks stay whole-chain positions, matching groups open, group headers, drag and the rank box are off, and select/deselect all act on the matches only.

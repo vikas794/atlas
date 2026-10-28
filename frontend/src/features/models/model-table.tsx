@@ -55,6 +55,8 @@ interface ModelTableProps {
   /** Hide or unhide one model (hidden models are off and only listed when `showHidden`). */
   onHide: (entry: FallbackEntry, hidden: boolean) => void
   showHidden: boolean
+  /** List models whose provider has no key switched on (dimmed, with a "No keys" badge). */
+  showNoKey: boolean
   /** Ids ticked for a bulk Hide or Delete. */
   selected: ReadonlySet<number>
   onSelect: (ids: number[], checked: boolean) => void
@@ -81,6 +83,7 @@ export function ModelTable({
   onDelete,
   onHide,
   showHidden,
+  showNoKey,
   selected,
   onSelect,
   query,
@@ -92,7 +95,7 @@ export function ModelTable({
   )
 
   const searching = query.trim() !== ''
-  const listed = listedEntries(entries, showHidden)
+  const listed = listedEntries(entries, showHidden, showNoKey)
   const groups = groupByProvider(filterEntries(listed, query))
   const totals = new Map<string, number>()
   for (const entry of listed) totals.set(entry.provider, (totals.get(entry.provider) ?? 0) + 1)

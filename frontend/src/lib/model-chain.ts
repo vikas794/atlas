@@ -23,12 +23,19 @@ export function withEnabledKey(entries: readonly FallbackEntry[]): FallbackEntry
   return entries.filter((entry) => entry.enabled_key_count > 0)
 }
 
-/** The models the table lists: a key is switched on for the provider, and hidden ones only on request. */
+/**
+ * The models the table lists: a key is switched on for the provider and the model is not hidden,
+ * unless the user asked to see hidden models (`showHidden`) or those without a key (`showNoKey`).
+ */
 export function listedEntries(
   entries: readonly FallbackEntry[],
   showHidden: boolean,
+  showNoKey = false,
 ): FallbackEntry[] {
-  return withEnabledKey(entries).filter((entry) => showHidden || !entry.hidden)
+  return entries.filter(
+    (entry) =>
+      (showHidden || !entry.hidden) && (showNoKey || entry.enabled_key_count > 0),
+  )
 }
 
 /** Entries whose name, model id or provider contains the query (trimmed, case-insensitive). */

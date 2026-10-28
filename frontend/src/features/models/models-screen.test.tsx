@@ -97,6 +97,26 @@ describe('ModelsScreen', () => {
     expect(rowNames()).toEqual(['Model 1', 'Model 3', 'Model 2'])
   })
 
+  it('lists models without a key only after Show no-key models', async () => {
+    setup([
+      entry(1, { provider: 'gemini' }),
+      entry(4, { provider: 'openai', key_count: 0, enabled_key_count: 0, usable_key_count: 0 }),
+    ])
+    const user = userEvent.setup()
+    renderRoute('/models')
+
+    await screen.findAllByText('Model 1')
+    expect(screen.queryByRole('region', { name: 'openai models' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('checkbox', { name: 'Show no-key models (1)' }))
+    expect(await screen.findByRole('region', { name: 'openai models' })).toBeInTheDocument()
+    expect(screen.getByText('Model 4')).toBeInTheDocument()
+    expect(screen.getByText('No keys')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('checkbox', { name: 'Show no-key models (1)' }))
+    expect(screen.queryByRole('region', { name: 'openai models' })).not.toBeInTheDocument()
+  })
+
   it('collapses and expands a provider group', async () => {
     setup([entry(1, { provider: 'gemini' }), entry(2, { provider: 'nvidia' })])
     const user = userEvent.setup()
