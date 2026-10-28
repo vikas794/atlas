@@ -1,26 +1,25 @@
 import { useQuery } from '@tanstack/react-query'
 import { RefreshCw } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { ErrorState, SkeletonBar } from '../../components/shared/state-panels'
 import {
+  getLlmKeys,
+  getLlmProviders,
   getUsageAggregate,
   type UsageAggregateResponse,
   type UsageQueryParams,
 } from '../../lib/api'
+import { queryKeys } from '../../lib/query-keys'
 import { cn } from '../../lib/utils'
 
 interface UsageDashboardProps {
   className?: string
 }
 
-/** Providers and operations Atlas actually records (notes generation on Gemini or OpenAI). */
-const PROVIDER_OPTIONS = [
-  { value: 'gemini', label: 'Gemini' },
-  { value: 'openai', label: 'OpenAI' },
-]
+/** Operations Atlas actually records. Provider options come from the enabled keys. */
 const OPERATION_OPTIONS = [{ value: 'generate_notes', label: 'Generate notes' }]
 
 function formatNumber(value: number) {
@@ -150,6 +149,27 @@ export function UsageDashboard({ className }: UsageDashboardProps) {
     refetchInterval: 30000,
   })
 
+  const keysQuery = useQuery({ queryKey: queryKeys.llmKeys, queryFn: getLlmKeys })
+  const providersQuery = useQuery({ queryKey: queryKeys.llmProviders, queryFn: getLlmProviders })
+
+  const providerOptions = useMemo(() => {
+    const labels = new Map(providersQuery.data?.providers.map((p) => [p.name, p.label]))
+    const names = new Set(
+      (keysQuery.data?.keys ?? []).filter((k) => k.enabled).map((k) => k.provider),
+    )
+    return [...names]
+      .map((value) => ({ value, label: labels.get(value) ?? value }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [keysQuery.data, providersQuery.data])
+
+  // Drop a stale selection once its provider no longer has an enabled key.
+  useEffect(() => {
+    if (!keysQuery.data || !params.provider) return
+    if (!providerOptions.some((o) => o.value === params.provider)) {
+      setParams((prev) => ({ ...prev, provider: undefined }))
+    }
+  }, [keysQuery.data, providerOptions, params.provider])
+
   const cache = data?.cache_stats
 
   return (
@@ -170,7 +190,7 @@ export function UsageDashboard({ className }: UsageDashboardProps) {
               onChange={(e) => setParams({ ...params, provider: e.target.value || undefined })}
             >
               <option value="">All providers</option>
-              {PROVIDER_OPTIONS.map((option) => (
+              {providerOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
