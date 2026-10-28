@@ -31,6 +31,7 @@ from src.infrastructure.llm.notes_base import (
     REGISTRY_KEY_PREFIX,
     NotesGeneratorConfigError,
     NotesPromptSource,
+    PromptPart,
     _key_problem_of,
     check_finish_reason,
     check_input_size,
@@ -40,6 +41,7 @@ from src.infrastructure.llm.notes_base import (
     render_prompt,
     request_timeout_seconds,
     validate_notes,
+    validate_part,
 )
 from src.infrastructure.llm.pricing import call_cost, response_cost
 
@@ -124,12 +126,40 @@ class LiteLLMNotesGenerator:
         the summary is then tagged ``custom`` instead of the file's version.
         """
         custom = bool(prompt_template and prompt_template.strip())
+        parts = () if custom else self._prompt.parts()
+        if parts:
+            return await self._generate_in_parts(parts, title=title, transcript=transcript)
+
         template = prompt_template if custom and prompt_template else self._prompt.template()
         prompt_text = render_prompt(template, title=title, transcript=transcript)
 
         return await self._generate_from_registry(
             transcript=transcript, prompt_text=prompt_text, custom=custom
         )
+
+    async def _generate_in_parts(
+        self, parts: tuple[PromptPart, ...], *, title: str, transcript: str
+    ) -> GeneratedNotes:
+        """One AI call per part of the prompt file, joined in file order.
+
+        A single call that has to write everything compresses each section; one focused call
+        per section keeps them complete. Calls run one after another so a free-tier key is
+        not hit by several requests at once. Each part is validated on its own and walks the
+        whole fallback chain, so any part that cannot be produced fails the video as a whole
+        (and ``ProcessVideoUseCase`` retries it); a half-written document is never saved.
+        """
+        sections: list[str] = []
+        first: GeneratedNotes | None = None
+        for part in parts:
+            prompt_text = render_prompt(part.template, title=title, transcript=transcript)
+            result = await self._generate_from_registry(
+                transcript=transcript, prompt_text=prompt_text, custom=False, heading=part.heading
+            )
+            logger.info("Generated the %s part (%d characters)", part.name, len(result.content))
+            sections.append(result.content)
+            first = first or result
+        assert first is not None  # parts() is non-empty here
+        return dataclasses.replace(first, content="\n\n".join(sections))
 
     async def _finish(
         self,
@@ -141,10 +171,15 @@ class LiteLLMNotesGenerator:
         cost: float | None,
         *,
         custom: bool,
+        heading: str | None = None,
     ) -> GeneratedNotes:
-        """Validate one model's answer, write the usage row and build the result."""
+        """Validate one model's answer, write the usage row and build the result.
+
+        ``heading`` marks one part of a multi-call prompt: the answer is then checked for
+        that section alone instead of for the whole document layout.
+        """
         check_finish_reason(finish, provider_label=spec.label)
-        content = validate_notes(text)
+        content = validate_part(text, heading) if heading else validate_notes(text)
         await self._emit_usage(
             spec,
             input_tokens=input_tokens,
@@ -160,7 +195,7 @@ class LiteLLMNotesGenerator:
         )
 
     async def _generate_from_registry(
-        self, *, transcript: str, prompt_text: str, custom: bool
+        self, *, transcript: str, prompt_text: str, custom: bool, heading: str | None = None
     ) -> GeneratedNotes:
         """Walk the registry's fallback chain; the registry decides which keys are usable."""
         registry = self._registry
@@ -191,7 +226,7 @@ class LiteLLMNotesGenerator:
                 continue
 
             return await self._finish(
-                spec, text, input_tokens, output_tokens, finish, cost, custom=custom
+                spec, text, input_tokens, output_tokens, finish, cost, custom=custom, heading=heading
             )
 
         raise _most_useful(errors)

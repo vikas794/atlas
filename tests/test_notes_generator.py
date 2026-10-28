@@ -43,6 +43,7 @@ from src.infrastructure.llm.notes_base import (
     estimate_tokens,
     render_prompt,
     validate_notes,
+    validate_part,
 )
 from src.infrastructure.llm.registry.providers import litellm_model_for
 from src.infrastructure.llm.registry.repo import RegistryRepo
@@ -967,3 +968,18 @@ def test_notes_generator_module_is_importable_without_a_key() -> None:
     assert MIN_NOTES_CHARS > 0
     assert Path(notes_base.__file__).name == "notes_base.py"
     assert len(GOOD_NOTES) > MIN_NOTES_CHARS
+
+
+class TestValidatePart:
+    def test_accepts_a_part_with_its_heading(self) -> None:
+        body = "History\n- 2010: the first release of the topic arrived."
+        assert validate_part(body, "History") == body
+
+    def test_rejects_a_part_without_its_heading(self) -> None:
+        with pytest.raises(NotesGenerationError) as excinfo:
+            validate_part("Notes\n" + "Some notes line here. " * 4, "History")
+        assert excinfo.value.failure_type is FailureType.OUTPUT_MALFORMED
+
+    def test_rejects_a_too_short_part(self) -> None:
+        with pytest.raises(NotesGenerationError):
+            validate_part("History\n- x", "History")

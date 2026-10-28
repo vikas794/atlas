@@ -30,6 +30,7 @@ once per generator instance and validates the two placeholders up front.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import logging
 import math
@@ -66,6 +67,10 @@ _PLACEHOLDER_PATTERN = re.compile(
 #: section and an Instruction section with several bullets each, so anything
 #: under this is a truncation, a refusal or an error string wearing a trench coat.
 MIN_NOTES_CHARS = 80
+
+#: Shortest output accepted for one part of a multi-call generation (a History part may
+#: legitimately be a couple of sentences).
+MIN_PART_CHARS = 40
 
 #: The content sections the prompts ask for (PRD section 18): ``notes_v1_3`` writes
 #: Questions and Answers / Notes / History, earlier prompts Notes / Key Points /
@@ -176,27 +181,11 @@ def check_input_size(transcript: str, model_limit: int) -> None:
     )
 
 
-def validate_notes(content: str) -> str:
-    """Clean and check raw model output; return the usable Markdown.
-
-    Repairs, in order:
-
-    * an outer ```` ```markdown ```` fence wrapping the whole response is
-      unwrapped -- inner fences (the code examples the prompt demands) are kept
-      untouched, because Drive renders them as shaded boxes;
-    * a leading ``# Title`` line is dropped (the Doc heading supplies the title);
-    * surrounding whitespace is trimmed.
-
-    Rejects, as ``OUTPUT_MALFORMED``: an empty or whitespace-only response, an
-    implausibly short one, and one that lacks the expected sections. The section
-    check is deliberately loose -- at least :data:`MIN_SECTIONS_FOUND` of
-    :data:`EXPECTED_SECTIONS` must appear as a heading or bold
-    line -- so it catches refusals and error text without failing a valid answer
-    over formatting. PRD section 18 calls a malformed response a
-    transient failure, so these are retryable rather than fatal on first sight.
+def _clean_output(content: object) -> str:
+    """Trim model output, unwrap an outer code fence and drop a leading ``# Title`` line.
 
     Raises:
-        NotesGenerationError: ``OUTPUT_MALFORMED`` when nothing usable came back.
+        NotesGenerationError: ``OUTPUT_MALFORMED`` for an empty or whitespace-only response.
     """
     text = content if isinstance(content, str) else "" if content is None else str(content)
     cleaned = text.strip()
@@ -219,6 +208,62 @@ def validate_notes(content: str) -> str:
     first_line, _, remainder = cleaned.partition("\n")
     if _H1_LINE.match(first_line) and remainder.strip():
         cleaned = remainder.strip()
+    return cleaned
+
+
+def validate_part(content: str, heading: str) -> str:
+    """Clean and check the output of one part of a multi-call generation.
+
+    Like :func:`validate_notes` but for a single section: the response must carry the
+    part's own ``heading`` at the start of a line (plain, bold or Markdown-heading form)
+    and be long enough to be real content, so a refusal or an off-topic answer is caught
+    per part instead of being shipped inside an otherwise good document.
+
+    Raises:
+        NotesGenerationError: ``OUTPUT_MALFORMED`` (transient, retried) when unusable.
+    """
+    cleaned = _clean_output(content)
+    if len(cleaned) < MIN_PART_CHARS:
+        raise NotesGenerationError(
+            FailureType.OUTPUT_MALFORMED,
+            f"The model returned only {len(cleaned)} characters for the {heading} section, "
+            "which is too short to be usable.",
+        )
+    wanted = re.compile(
+        r"^[ \t]*(?:#{1,6}[ \t]*)?(?:\*\*|__)?[ \t]*" + re.escape(heading) + r"\b",
+        re.IGNORECASE | re.MULTILINE,
+    )
+    if wanted.search(cleaned) is None:
+        raise NotesGenerationError(
+            FailureType.OUTPUT_MALFORMED,
+            f"The model's response is missing the {heading} section.",
+        )
+    return cleaned
+
+
+def validate_notes(content: str) -> str:
+    """Clean and check raw model output; return the usable Markdown.
+
+    Repairs, in order:
+
+    * an outer ```` ```markdown ```` fence wrapping the whole response is
+      unwrapped -- inner fences (the code examples the prompt demands) are kept
+      untouched, because Drive renders them as shaded boxes;
+    * a leading ``# Title`` line is dropped (the Doc heading supplies the title);
+    * surrounding whitespace is trimmed.
+
+    Rejects, as ``OUTPUT_MALFORMED``: an empty or whitespace-only response, an
+    implausibly short one, and one that lacks the expected sections. The section
+    check is deliberately loose -- at least :data:`MIN_SECTIONS_FOUND` of
+    :data:`EXPECTED_SECTIONS` must appear as a heading or bold
+    line -- so it catches refusals and error text without failing a valid answer
+    over formatting. PRD section 18 calls a malformed response a
+    transient failure, so these are retryable rather than fatal on first sight.
+
+    Raises:
+        NotesGenerationError: ``OUTPUT_MALFORMED`` when nothing usable came back.
+    """
+    cleaned = _clean_output(content)
 
     if len(cleaned) < MIN_NOTES_CHARS:
         raise NotesGenerationError(
@@ -464,6 +509,15 @@ def redact_secrets(text: str, *secrets: str | None) -> str:
     return redact_text(text or "", *secrets)
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class PromptPart:
+    """One AI call of a multi-call prompt file: its name, required heading and template."""
+
+    name: str
+    heading: str
+    template: str
+
+
 class NotesPromptSource:
     """Loads and caches the versioned notes prompt for one generator instance."""
 
@@ -506,7 +560,9 @@ class NotesPromptSource:
         except yaml.YAMLError as exc:
             raise NotesGeneratorConfigError(f"Notes prompt file {path} is not valid YAML.") from exc
 
-        if not isinstance(data, dict) or not str(data.get("prompt") or "").strip():
+        if not isinstance(data, dict) or not (
+            str(data.get("prompt") or "").strip() or data.get("parts")
+        ):
             raise NotesGeneratorConfigError(
                 f"Notes prompt file {path} has no non-empty 'prompt' key."
             )
@@ -518,6 +574,36 @@ class NotesPromptSource:
         """The prompt text, placeholders intact."""
         return str(self.load()["prompt"])
 
+    def parts(self) -> tuple[PromptPart, ...]:
+        """The per-call prompts of a multi-call file; empty when the file is single-call.
+
+        Each entry of the file's ``parts`` list needs a ``name``, the ``heading`` its output
+        must carry and a ``prompt`` holding both placeholders.
+
+        Raises:
+            NotesGeneratorConfigError: A malformed entry.
+        """
+        raw = self.load().get("parts") or []
+        parts: list[PromptPart] = []
+        for index, entry in enumerate(raw, start=1):
+            fields = entry if isinstance(entry, dict) else {}
+            name = str(fields.get("name") or "").strip()
+            heading = str(fields.get("heading") or "").strip()
+            template = str(fields.get("prompt") or "")
+            if not (name and heading and template.strip()):
+                raise NotesGeneratorConfigError(
+                    f"Notes prompt file {self.path}: part {index} needs 'name', 'heading' "
+                    "and 'prompt'."
+                )
+            for placeholder in (TITLE_PLACEHOLDER, TRANSCRIPT_PLACEHOLDER):
+                if placeholder not in template:
+                    raise NotesGeneratorConfigError(
+                        f"Notes prompt file {self.path}: part '{name}' is missing the "
+                        f"{placeholder} placeholder."
+                    )
+            parts.append(PromptPart(name=name, heading=heading, template=template))
+        return tuple(parts)
+
     def version(self) -> str:
         """The version recorded on every generated summary (PRD section 18).
 
@@ -528,7 +614,8 @@ class NotesPromptSource:
         from_file = str(self.load().get("version") or "").strip()
         if from_file:
             return from_file
-        return hashlib.sha256(self.template().encode("utf-8")).hexdigest()[:8]
+        basis = "\n".join(part.template for part in self.parts()) or self.template()
+        return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:8]
 
 
 __all__ = [
@@ -540,9 +627,11 @@ __all__ = [
     "check_finish_reason",
     "classify_provider_exception",
     "NotesPromptSource",
+    "PromptPart",
     "check_input_size",
     "estimate_tokens",
     "redact_secrets",
     "render_prompt",
     "validate_notes",
+    "validate_part",
 ]

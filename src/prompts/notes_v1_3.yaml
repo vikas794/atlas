@@ -7,7 +7,10 @@ description: >
   title), puts a Basic / Intermediate / Advanced question-and-answer set first, keeps the
   full structured Notes, and ends with the history of the topic (how it changed across
   versions and over time). It replaces the Key Points, Important Details and Takeaways
-  sections of v1.2.
+  sections of v1.2. The default pipeline makes one AI call per entry of `parts` (Summary with
+  the Questions and Answers, then Notes, then History) and joins the results in that order,
+  so no section is squeezed by the others. `prompt` is the same document as a single call; it
+  is the editable template the review screen offers for a one-off regenerate.
 prompt: |
   Please create a revision document based on the following YouTube video:
 
@@ -43,3 +46,78 @@ prompt: |
   - **Avoid Extra Formatting** – Do not use emojis, horizontal lines, tables, HTML or heading tags (no lines starting with #). Besides the four plain section headings and the three plain level lines, use simple numbered or bullet lists and minimal text formatting.
   - **No Title Line** – Do not repeat the video title or add a top-level title heading; start directly with the Summary section.
   - **Neutral Tone** – Stay neutral, informative and focused on clarity, accuracy and educational value. The final document should be well organized and directly usable for revision, self-assessment and interview preparation.
+parts:
+  - name: questions
+    heading: Questions and Answers
+    prompt: |
+      Please create the Summary and the Questions and Answers for a revision document based on the following YouTube video:
+
+      **Title**: "{{Title}}"
+      **Transcript**: "{{Transcript}}"
+
+      Write exactly two sections, in this order, each introduced by a plain heading line on its own, written exactly as "Summary" and "Questions and Answers" (no # characters, no bold markers, no numbering). Another request writes the Notes and the History, so do not write them here; spend the whole answer on complete, high quality questions.
+
+      - **Summary** – One or two plain sentences (at most about 250 characters, as a single paragraph with no bullets, no code and no line breaks) that say what happens in the video and what the viewer learns from it. It is shown as the video's description in a course index, so it must make sense on its own.
+      - **Questions and Answers** – A comprehensive set of questions and answers for active recall and revision of what the video teaches. Cover every concept, term, example and code sample the video presents; do not stop at a handful of questions.
+
+      Question rules:
+
+      - **Purpose** – The questions are mainly an active recall tool that reinforces the key concepts, terms and examples taught in the video, and they let the viewer test themselves and retrieve information efficiently. Interview-relevant questions that match real-world use of the topic are welcome but secondary to recall.
+      - **Levels** – Split the questions into three groups, each introduced by a plain line on its own reading "Basic", "Intermediate" and "Advanced". Basic recalls definitions and facts, Intermediate covers concepts and application, Advanced covers analysis, trade-offs, code and scenario-driven problems. Order the questions inside each group from fundamental to more complex, so learning builds progressively.
+      - **Variety** – Mix factual recall, conceptual understanding, application-based, analytical, code-example and scenario-driven questions. When the video involves code, include questions with short code snippets or scenarios that test practical use.
+      - **Answers** – Give a concise, accurate answer straight after each question, with a brief justification only where it helps understanding. Check each answer against the standard documentation, accepted best practices and common interview expectations of the field; if an answer would not meet that standard, correct it so it is clear, right and relevant.
+      - **Format** – Number each group's questions starting from 1 and use exactly this layout, with the answer on the line right after its question:
+
+        1. This is the example question?
+           *Answer:* This is the example answer.
+
+      Rules:
+
+      - Use beginner-friendly language and avoid jargon unless it is the subject of the question itself.
+      - Put every code example inside a fenced code block that names its language, for example ```java or ```python. Never use a fence without a language tag. Do not add code when the topic has none.
+      - Do not use emojis, horizontal lines, tables, HTML or heading tags (no lines starting with #).
+      - Do not repeat the video title or add a top-level title; start directly with the Summary section.
+      - Stay neutral and informative.
+
+  - name: notes
+    heading: Notes
+    prompt: |
+      Please create detailed notes based on the following YouTube video:
+
+      **Title**: "{{Title}}"
+      **Transcript**: "{{Transcript}}"
+
+      Write one section, introduced by a plain heading line on its own reading exactly "Notes" (no # characters, no bold markers). Other requests write the Summary, the Questions and Answers and the History, so do not write them here; spend the whole answer on complete notes.
+
+      - Include everything mentioned in the video in a structured format. This is the main reference the viewer will use to revise all the topics discussed, so capture every detail, concept, term, example, number and step in a way that is easy to follow. Do not condense or skip material to save space.
+      - Organize the notes by topic in the order the video covers them, with a clear step-by-step breakdown for each concept.
+      - When the video explains a concept with code, include the relevant code example immediately after the explanation where the concept is introduced, so the code fits naturally with the concept. Do not add code when the topic has none.
+
+      Rules:
+
+      - Use beginner-friendly language and avoid jargon.
+      - Put every code example inside a fenced code block that names its language, for example ```java or ```python. Never use a fence without a language tag, and never put code in plain paragraphs.
+      - Do not use emojis, horizontal lines, tables, HTML or heading tags (no lines starting with #). Use simple bullet points, numbered lists and minimal text formatting.
+      - Do not repeat the video title or add a top-level title.
+
+  - name: history
+    heading: History
+    prompt: |
+      Please write the history of the topic taught in the following YouTube video:
+
+      **Title**: "{{Title}}"
+      **Transcript**: "{{Transcript}}"
+
+      Write one section, introduced by a plain heading line on its own reading exactly "History" (no # characters, no bold markers). Other requests write the Summary, the Questions and Answers and the Notes, so do not write them here.
+
+      - Explain how the topic started, how it changed across its many versions, releases or eras, what each important change added, removed or replaced, and why it changed. Cover the whole history of the topic, not only what the video mentions.
+      - Use the video for anything it says about versions or history and add well-established facts you are confident about.
+      - Present it in chronological order with short bullet points, naming the version or year for each change.
+      - Never invent versions, dates or features. If the topic has no meaningful version history, say so in one sentence and describe only how the idea or practice developed.
+
+      Rules:
+
+      - Use beginner-friendly language and avoid jargon.
+      - If you show code to compare versions, put it in a fenced code block that names its language, for example ```java or ```python.
+      - Do not use emojis, horizontal lines, tables, HTML or heading tags (no lines starting with #).
+      - Do not repeat the video title or add a top-level title.
