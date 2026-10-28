@@ -172,7 +172,7 @@ def test_removed_legacy_fields_are_gone() -> None:
 
 def test_new_pipeline_fields_have_expected_defaults() -> None:
     expected = {
-        "notes_prompt_name": "notes_v1_2.yaml",
+        "notes_prompt_name": "notes_v1_3.yaml",
         "max_concurrent_videos": 2,
         "max_auto_retries": 4,
         "backoff_base_seconds": 5.0,

@@ -77,3 +77,11 @@ def test_a_body_line_that_merely_starts_with_notes_is_not_a_heading() -> None:
     notes = "Notes about loops are below.\n\n## Key Points\n\n- a"
 
     assert extract_short_summary(notes) is None
+
+
+def test_summary_stops_at_the_questions_and_answers_heading() -> None:
+    markdown = (
+        "Summary\nA short overview of the video.\nQuestions and Answers\nBasic\n"
+        "1. What is it?\n   *Answer:* A thing.\n\nNotes\n- A note."
+    )
+    assert extract_short_summary(markdown) == "A short overview of the video."

@@ -40,7 +40,7 @@ ytdlp_cookies_from_browser: ""  # or a browser name: chrome | firefox | edge ...
 
 # --- Notes generation ----------------------------------------------------------
 # Which LLM models and keys are used is managed on the Models and Keys pages.
-notes_prompt_name: "notes_v1_2.yaml"  # the recorded prompt version is this file's own `version`
+notes_prompt_name: "notes_v1_3.yaml"  # the recorded prompt version is this file's own `version`
 notes_request_timeout_seconds: 300.0  # one LLM call; a timeout is retried like a network error
 
 # --- Pipeline concurrency & retries --------------------------------------------

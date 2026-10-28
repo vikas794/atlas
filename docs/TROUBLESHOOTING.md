@@ -200,7 +200,7 @@ The notes phase has its own retry budget, separate from the transcript phase.
 
 ### Malformed notes (`output_malformed`)
 
-Empty or very short output, missing sections (Notes, Key Points, Important Details,
+Empty or very short output, missing sections (Questions and Answers, Notes, History, or the older Key Points, Important Details,
 Takeaways), output cut off at the model's limit, or a content-filter block. Transient: retried
 automatically, then Retry or Regenerate.
 

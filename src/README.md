@@ -11,7 +11,7 @@ The Atlas pipeline code, organized in layers: `domain` (entities, ports, pure ru
 - shared: [./shared/README.md](./shared/README.md) - key rotation, redaction, logging, file and text helpers.
 - transport: [./transport/README.md](./transport/README.md) - FastAPI routers, schemas, error envelope, middleware.
 - configs: `./configs/config.yaml` - default settings (no code).
-- prompts: `./prompts/notes_v1.yaml`, `notes_v1_1.yaml`, `notes_v1_2.yaml` - versioned note-generation prompts (no code).
+- prompts: `./prompts/notes_v1.yaml`, `notes_v1_1.yaml`, `notes_v1_2.yaml`, `notes_v1_3.yaml` (Summary, Questions and Answers, Notes, History) - versioned note-generation prompts (no code).
 
 ## Local Interface & Invariants
 - `src/__init__.py` is a package marker only.

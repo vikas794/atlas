@@ -33,10 +33,10 @@ def clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 
 def test_the_prompt_name_has_a_documented_short_env_name(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NOTES_PROMPT_NAME", "notes_v1_2.yaml")
+    monkeypatch.setenv("NOTES_PROMPT_NAME", "notes_v1_3.yaml")
 
-    assert load_settings().notes_prompt_name == "notes_v1_2.yaml"
-    assert load_settings().to_loader()("notes_prompt_name") == "notes_v1_2.yaml"
+    assert load_settings().notes_prompt_name == "notes_v1_3.yaml"
+    assert load_settings().to_loader()("notes_prompt_name") == "notes_v1_3.yaml"
 
 
 def test_llm_provider_and_model_settings_no_longer_exist() -> None:
@@ -101,7 +101,7 @@ def test_the_settings_loader_reads_the_environment_at_call_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     loader = load_settings().to_loader()
-    assert loader("notes_prompt_name") == "notes_v1_2.yaml"
+    assert loader("notes_prompt_name") == "notes_v1_3.yaml"
 
     monkeypatch.setenv("NOTES_PROMPT_NAME", "other.yaml")
 
@@ -270,16 +270,16 @@ def test_there_is_no_separate_prompt_version_setting_to_drift_from_the_file(
 ) -> None:
     monkeypatch.setenv("ATLAS_NOTES_PROMPT_VERSION", "something_else")
 
-    assert NotesPromptSource(load_settings().to_loader()).version() == "notes_v1.2"
+    assert NotesPromptSource(load_settings().to_loader()).version() == "notes_v1.3"
 
 
 def test_the_shipped_prompt_requires_tagged_code_blocks_and_no_title_line() -> None:
     source = NotesPromptSource(load_settings().to_loader())
     template = source.template()
 
-    assert source.path.name == "notes_v1_2.yaml"
+    assert source.path.name == "notes_v1_3.yaml"
     assert "{{Title}}" in template and "{{Transcript}}" in template
     assert "language" in template and "fenced code block" in template.lower()
     assert "title" in template.lower() and "Do not repeat the video title" in template
-    for section in ("Summary", "Notes", "Key Points", "Important Details", "Takeaways"):
+    for section in ("Summary", "Questions and Answers", "Notes", "History"):
         assert section in template

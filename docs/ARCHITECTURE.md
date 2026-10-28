@@ -489,7 +489,7 @@ Idempotency and resume:
   that is missing or trashed is re-created. The stored index Doc is not state-checked.
 - **Index Doc.** A numbered list; each entry is the video title (bold, linking to its Doc once it
   has one) and a short description: `notes_summary.extract_short_summary` reads the notes'
-  `Summary` section (the `notes_v1_2` prompt asks for it, so no extra AI call), falling back to
+  `Summary` section (the `notes_v1_2` and later prompts asks for it, so no extra AI call), falling back to
   the first sentences of `Notes`. The index body is written **after** the video Docs so every
   title can link to a Doc that exists; `index_digest` hashes title, description and whether the
   title is linked, so editing a Summary or publishing a video rewrites the index in place.

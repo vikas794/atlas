@@ -67,14 +67,23 @@ _PLACEHOLDER_PATTERN = re.compile(
 #: under this is a truncation, a refusal or an error string wearing a trench coat.
 MIN_NOTES_CHARS = 80
 
-#: The four content sections the prompt asks for (PRD section 18). A response must
-#: contain at least ``MIN_SECTIONS_FOUND`` of them, each at the start of a line
-#: optionally wrapped in heading/bold/list markers.
-EXPECTED_SECTIONS = ("Notes", "Key Points", "Important Details", "Takeaways")
+#: The content sections the prompts ask for (PRD section 18): ``notes_v1_3`` writes
+#: Questions and Answers / Notes / History, earlier prompts Notes / Key Points /
+#: Important Details / Takeaways. A response must contain at least
+#: ``MIN_SECTIONS_FOUND`` of them, each at the start of a line optionally wrapped in
+#: heading/bold/list markers.
+EXPECTED_SECTIONS = (
+    "Questions and Answers",
+    "Notes",
+    "History",
+    "Key Points",
+    "Important Details",
+    "Takeaways",
+)
 MIN_SECTIONS_FOUND = 2
 _SECTION_LINE = re.compile(
     r"^[ \t]*(?:#{1,6}[ \t]*)?(?:[-*][ \t]+)?(?:\*\*|__)?[ \t]*(?:\d+[.)][ \t]*)?"
-    r"(?P<name>Key Points|Important Details|Takeaways|Notes)\b",
+    r"(?P<name>Questions and Answers|Key Points|Important Details|Takeaways|Notes|History)\b",
     re.IGNORECASE | re.MULTILINE,
 )
 _H1_LINE = re.compile(r"^#[ \t]+\S")
@@ -180,8 +189,8 @@ def validate_notes(content: str) -> str:
 
     Rejects, as ``OUTPUT_MALFORMED``: an empty or whitespace-only response, an
     implausibly short one, and one that lacks the expected sections. The section
-    check is deliberately loose -- at least :data:`MIN_SECTIONS_FOUND` of Notes /
-    Key Points / Important Details / Takeaways must appear as a heading or bold
+    check is deliberately loose -- at least :data:`MIN_SECTIONS_FOUND` of
+    :data:`EXPECTED_SECTIONS` must appear as a heading or bold
     line -- so it catches refusals and error text without failing a valid answer
     over formatting. PRD section 18 calls a malformed response a
     transient failure, so these are retryable rather than fatal on first sight.
@@ -223,7 +232,7 @@ def validate_notes(content: str) -> str:
         raise NotesGenerationError(
             FailureType.OUTPUT_MALFORMED,
             "The model's notes are missing the expected sections "
-            "(Notes, Key Points, Important Details, Takeaways).",
+            "(Questions and Answers, Notes, History).",
         )
 
     return cleaned

@@ -1,6 +1,6 @@
 """Short per-video description pulled out of the generated notes Markdown.
 
-The notes prompt (``notes_v1_2``) asks the model for a ``Summary`` section at the top:
+The notes prompt (``notes_v1_2`` and later) asks the model for a ``Summary`` section at the top:
 one or two plain sentences saying what the video covers. The Drive index Doc shows that
 text next to each video's title and link, so it is read from the stored notes at publish
 time (an edit to the Summary therefore reaches the index on the next publish, and no extra
@@ -24,7 +24,7 @@ _FALLBACK_SENTENCES = 2
 #: A section heading line on its own (``## Summary``, ``**Summary**``, ``Summary:``).
 _SECTION_HEADING = re.compile(
     r"^[ \t]*(?:#{1,6}[ \t]*)?(?:[-*][ \t]+)?(?:\*\*|__)?[ \t]*"
-    r"(?P<name>Summary|Notes|Key Points|Important Details|Takeaways)"
+    r"(?P<name>Summary|Questions and Answers|Notes|History|Key Points|Important Details|Takeaways)"
     r"[ \t]*:?[ \t]*(?:\*\*|__)?[ \t]*:?[ \t]*$",
     re.IGNORECASE,
 )

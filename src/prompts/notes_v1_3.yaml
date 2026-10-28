@@ -1,0 +1,45 @@
+name: AtlasNotes
+version: notes_v1.3
+description: >
+  Per-video learning notes generated from a YouTube transcript, built for active recall.
+  Produces structured Markdown in this order: Summary, Questions and Answers, Notes, History.
+  v1.3 keeps the Summary of notes_v1.2 (the Drive index Doc shows it next to the video's
+  title), puts a Basic / Intermediate / Advanced question-and-answer set first, keeps the
+  full structured Notes, and ends with the history of the topic (how it changed across
+  versions and over time). It replaces the Key Points, Important Details and Takeaways
+  sections of v1.2.
+prompt: |
+  Please create a revision document based on the following YouTube video:
+
+  **Title**: "{{Title}}"
+  **Transcript**: "{{Transcript}}"
+
+  The document must contain these four sections, in this order. Introduce each one with a plain section heading line on its own, written exactly as "Summary", "Questions and Answers", "Notes" and "History" (no # characters, no bold markers, no numbering):
+
+  ### **Content**
+
+  - **Summary** – One or two plain sentences (at most about 250 characters, as a single paragraph with no bullets, no code and no line breaks) that say what happens in the video and what the viewer learns from it. It is shown as the video's description in a course index, so it must make sense on its own.
+  - **Questions and Answers** – A comprehensive set of questions and answers for active recall and revision of what the video teaches. See the question rules below.
+  - **Notes** – Include everything mentioned in the video in a structured format. This is the main reference the viewer will use to revise all the topics discussed in the video. Ensure that every detail is captured in a way that is easy to follow.
+  - **History** – The history of the topic the video teaches: how it started, how it changed across its many versions, releases or eras, what each important change added, removed or replaced, and why it changed. Use the video for anything it says about versions or history and add well-established facts you are confident about. Present it in chronological order with short bullet points, naming the version or year for each change. Never invent versions, dates or features: if the topic has no meaningful version history, say so in one sentence and describe only how the idea or practice developed.
+
+  ### **Question rules**
+
+  - **Purpose** – The questions are mainly an active recall tool that reinforces the key concepts, terms and examples taught in the video, and they let the viewer test themselves and retrieve information efficiently. Interview-relevant questions that match real-world use of the topic are welcome but secondary to recall.
+  - **Levels** – Split the questions into three groups, each introduced by a plain line on its own reading "Basic", "Intermediate" and "Advanced". Basic recalls definitions and facts, Intermediate covers concepts and application, Advanced covers analysis, trade-offs, code and scenario-driven problems. Order the questions inside each group from fundamental to more complex, so learning builds progressively.
+  - **Variety** – Mix factual recall, conceptual understanding, application-based, analytical, code-example and scenario-driven questions. Target the key information the video actually presents. When the video involves code, include questions with short code snippets or scenarios that test practical use.
+  - **Answers** – Give a concise, accurate answer straight after each question, with a brief justification only where it helps understanding. Check each answer against the standard documentation, accepted best practices and common interview expectations of the field; if an answer would not meet that standard, correct it so it is clear, right and relevant.
+  - **Format** – Number each group's questions starting from 1 and use exactly this layout, with the answer on the line right after its question:
+
+    1. This is the example question?
+       *Answer:* This is the example answer.
+
+  ### **Instruction**
+
+  - **Simple Language** – Use beginner-friendly terms so anyone can understand the content easily, regardless of their level of knowledge. Avoid jargon unless it is the subject of the question or note itself.
+  - **Explain with Code** – When the video explains a concept with code, include the relevant **code example immediately after** the explanation where the concept is introduced, in the Notes and wherever it helps in the answers. Make sure the code is easy to follow and fits naturally with the concept. Do not add code when the topic has none.
+  - **Fenced Code Blocks** – Put every code example inside a fenced code block that names its language, for example ```java or ```python. Never use a fence without a language tag, and never put code in plain paragraphs.
+  - **Clarity** – Keep explanations straightforward, with a clear step-by-step breakdown for each concept in the Notes.
+  - **Avoid Extra Formatting** – Do not use emojis, horizontal lines, tables, HTML or heading tags (no lines starting with #). Besides the four plain section headings and the three plain level lines, use simple numbered or bullet lists and minimal text formatting.
+  - **No Title Line** – Do not repeat the video title or add a top-level title heading; start directly with the Summary section.
+  - **Neutral Tone** – Stay neutral, informative and focused on clarity, accuracy and educational value. The final document should be well organized and directly usable for revision, self-assessment and interview preparation.

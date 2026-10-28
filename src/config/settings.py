@@ -108,7 +108,7 @@ class AtlasSettings:
 
     # --- Notes generation (playlist -> per-video Markdown notes) ----------
     #: Which LLM models and keys are used is managed in the model registry (Models and Keys pages).
-    notes_prompt_name: str = "notes_v1_2.yaml"  # the prompt file's own `version` is recorded
+    notes_prompt_name: str = "notes_v1_3.yaml"  # the prompt file's own `version` is recorded
     notes_request_timeout_seconds: float = 300.0  # a hung LLM call must not hold a slot forever
 
     # --- Pipeline concurrency & retries ----------------------------------

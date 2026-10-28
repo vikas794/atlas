@@ -213,4 +213,4 @@ def test_the_notes_prompt_endpoint_returns_the_current_prompt_file(client: TestC
     body = client.get("/api/settings/notes-prompt").json()
 
     assert "{{Title}}" in body["prompt"] and "{{Transcript}}" in body["prompt"]
-    assert body["version"] == "notes_v1.2"
+    assert body["version"] == "notes_v1.3"

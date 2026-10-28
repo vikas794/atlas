@@ -311,6 +311,19 @@ class TestValidateNotes:
         # PRD 18: a malformed response is retried, so it must be transient.
         assert excinfo.value.failure_kind is FailureKind.TRANSIENT
 
+    def test_v1_3_layout_is_accepted(self) -> None:
+        body = (
+            "Summary\nA short overview of the video and what it teaches the viewer.\n\n"
+            "Questions and Answers\nBasic\n1. What is it?\n   *Answer:* A thing.\n\n"
+            "Notes\n- Point one explained in plain words.\n\n"
+            "History\n- 2010: first release of the thing."
+        )
+        assert validate_notes(body) == body
+
+    def test_v1_3_sections_alone_are_enough(self) -> None:
+        body = "Questions and Answers\n1. Why?\n   *Answer:* Because of reasons.\n\nHistory\n- Began in 1999 with the first public version."
+        assert validate_notes(body) == body
+
     def test_implausibly_short_output_is_malformed(self) -> None:
         with pytest.raises(NotesGenerationError) as excinfo:
             validate_notes("too short")
