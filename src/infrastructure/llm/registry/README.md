@@ -16,6 +16,7 @@ Database-backed model registry: models, API keys, one ordered fallback chain, pe
 - Key values are masked when exposed.
 - `known_providers()` / `provider_info()` also cover every OpenAI-compatible LiteLLM provider except `github_copilot`, `azure_ai`, `chatgpt`. The slug check for model ids lives in `schemas/llm.py`; `providers.py` has a private `_SLUG` for discovery.
 - Seeding runs once (guarded by a meta flag).
+- `delete_model`, `delete_models` and `set_hidden` renumber the chain (`_renumber_chain`): dense priorities 1..N, hidden models last, so deleting or hiding never leaves a rank gap.
 - A hidden model (`llm_models.hidden`, migration 0008) is a registered row, so bulk import skips it; hiding switches it off, and `update_model` / `replace_chain` never switch a hidden model on.
 
 ## Side Effects

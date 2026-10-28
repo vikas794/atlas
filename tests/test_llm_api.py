@@ -419,6 +419,22 @@ def test_bulk_delete_removes_models_and_chain_entries(client: TestClient) -> Non
     assert [e["id"] for e in client.get("/api/llm/fallback").json()["entries"]] == [c["id"]]
 
 
+def test_deleting_reranks_the_chain_without_gaps(client: TestClient) -> None:
+    a, b, c, d, e = (_add_model(client, model_id=m) for m in "abcde")
+    client.post("/api/llm/models/bulk-hide", json={"ids": [e["id"]], "hidden": True})
+
+    assert client.delete(f"/api/llm/models/{b['id']}").status_code == 204
+    entries = client.get("/api/llm/fallback").json()["entries"]
+    assert [x["model_id"] for x in entries] == ["a", "c", "d", "e"]
+    assert [x["priority"] for x in entries] == [1, 2, 3, 4]
+
+    client.post("/api/llm/models/bulk-delete", json={"ids": [a["id"], d["id"]]})
+    entries = client.get("/api/llm/fallback").json()["entries"]
+    assert [x["model_id"] for x in entries] == ["c", "e"]
+    assert [x["priority"] for x in entries] == [1, 2]
+    assert c["id"] != e["id"]
+
+
 def test_deleted_models_come_back_with_bulk_add(client: TestClient) -> None:
     gone = _add_model(client, provider="nvidia", model_id="n1")
     client.post("/api/llm/models/bulk-delete", json={"ids": [gone["id"]]})

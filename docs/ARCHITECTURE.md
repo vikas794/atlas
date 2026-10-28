@@ -72,7 +72,8 @@ status, enabled, consecutive failures, health timestamps and error, monthly requ
 model scope, `*` = the whole key; expiry and source), `llm_rate_usage` (sliding-window request and
 token ledger per key and model), `llm_key_monthly_usage` (requests and tokens per key and UTC
 month) and `llm_meta` (the `seeded` marker). Cooldown, usage and monthly rows cascade when their
-key is deleted; the chain row cascades with its model. `RegistryRepo`
+key is deleted; the chain row cascades with its model. Deleting or hiding models renumbers the
+chain to dense priorities 1..N (hidden models last), so ranks never have gaps. `RegistryRepo`
 (`llm/registry/repo.py`) opens one short-lived connection per call, like the other repositories.
 
 Final schema (verified by migrating an empty database):

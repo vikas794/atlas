@@ -279,19 +279,24 @@ class RegistryRepo:
     def delete_model(self, model_pk: int) -> bool:
         conn = self._conn()
         try:
-            cur = conn.execute("DELETE FROM llm_models WHERE id = ?", (model_pk,))
+            with transaction(conn):
+                cur = conn.execute("DELETE FROM llm_models WHERE id = ?", (model_pk,))
+                if cur.rowcount > 0:
+                    _renumber_chain(conn)
         finally:
             conn.close()
         return cur.rowcount > 0
 
     def delete_models(self, model_pks: list[int]) -> int:
-        """Delete every listed model (the chain rows cascade); unknown ids are ignored."""
+        """Delete every listed model (the chain rows cascade) and re-rank the rest; unknown ids are ignored."""
         conn = self._conn()
         try:
             with transaction(conn):
                 count = 0
                 for pk in dict.fromkeys(model_pks):
                     count += conn.execute("DELETE FROM llm_models WHERE id = ?", (pk,)).rowcount
+                if count:
+                    _renumber_chain(conn)
         finally:
             conn.close()
         return count
