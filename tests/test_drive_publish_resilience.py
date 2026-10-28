@@ -45,7 +45,12 @@ def docs(stub: StubGoogle) -> list[dict]:
 
 
 def folders(stub: StubGoogle) -> list[dict]:
-    return [c for c in stub.live() if c["mimeType"] == FOLDER_MIME_TYPE]
+    """Playlist folders (the shared top-level Atlas folder is not one)."""
+    return [
+        c
+        for c in stub.live()
+        if c["mimeType"] == FOLDER_MIME_TYPE and c.get("appProperties", {}).get("atlasKind") != "root"
+    ]
 
 
 def last_body_text(stub: StubGoogle, doc_id: str) -> str:
@@ -65,6 +70,7 @@ async def test_first_publish_creates_folder_then_index_then_docs_in_playlist_ord
 
     kinds = [(c["mimeType"].rsplit(".", 1)[-1], c["name"]) for c in stub.created]
     assert kinds == [
+        ("folder", "Atlas"),
         ("folder", "Course 101"),
         ("document", "00 - Index - Course 101"),
         ("document", "1 - Alpha"),
@@ -298,13 +304,15 @@ async def test_a_folder_deleted_in_drive_is_recreated_with_every_published_doc(
     stored = await repo.get_playlist(playlist.id)
     assert stored.drive_folder_id not in (None, old_folder)
     assert [c["name"] for c in stub.live()] == [
+        "Atlas",  # the trashed root is re-created too
         "Course 101",
         "00 - Index - Course 101",
         "1 - Alpha",
         "2 - Beta",
         "3 - Late",
     ]
-    assert all(c["parents"] == [stored.drive_folder_id] for c in stub.live()[1:])
+    assert stub.live()[1]["parents"] == [stub.live()[0]["id"]]
+    assert all(c["parents"] == [stored.drive_folder_id] for c in stub.live()[2:])
     assert result.created == 3
     for video in await repo.list_videos(playlist.id):
         assert video.stage == Stage.PUBLISHED and video.drive_doc_id not in gone

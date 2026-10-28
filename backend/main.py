@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -9,8 +10,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.services.diagnostics import diagnostics_report
 from backend.spa import SpaFallback, default_dist_dir
 from src.config import load_settings
+from src.infrastructure.google.drive import STATE_AUTHORIZED
+from src.infrastructure.google.publisher import GoogleDrivePublisher
 from src.shared.logging_setup import RECENT_ERRORS, configure_logging
 from src.transport.http.fastapi.dependencies import (
+    get_drive_exporter,
+    get_drive_publisher,
     get_model_registry,
     get_usage_ledger,
     get_worker,
@@ -37,6 +42,24 @@ configure_logging(_settings)
 remember_boot_settings(_settings)
 
 
+async def _check_drive_root_folder() -> None:
+    """Find or create the Drive "Atlas" folder at startup; never blocks or fails startup.
+
+    Skipped when Drive is not authorized yet (the folder is then resolved at first publish).
+    """
+    try:
+        if get_drive_exporter().auth_state()[0] != STATE_AUTHORIZED:
+            return
+        publisher = get_drive_publisher()
+        if isinstance(publisher, GoogleDrivePublisher):
+            await publisher.ensure_root_folder()
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "Drive startup check failed (%s); the Atlas folder is resolved at first publish",
+            type(exc).__name__,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan - run migrations and start the background worker.
@@ -47,6 +70,7 @@ async def lifespan(app: FastAPI):
     # Initialize usage ledger
     get_usage_ledger()
     get_model_registry()  # migrate and seed the model registry now, not at the first note
+    await _check_drive_root_folder()
     worker = get_worker()
     await worker.start()
     yield

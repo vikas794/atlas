@@ -35,6 +35,10 @@ _REAUTH_HINT = (
 
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 
+#: Top-level Drive folder that holds every playlist folder.
+ROOT_FOLDER_NAME = "Atlas"
+_ROOT_FOLDER_TAG = {"atlasKind": "root"}
+
 #: :meth:`GoogleDriveExporter.file_state` results.
 FILE_OK = "ok"
 FILE_TRASHED = "trashed"
@@ -111,6 +115,8 @@ class GoogleDriveExporter:
         self._credentials: Credentials | None = None
         self._creds_lock = threading.Lock()
         self._consent_lock = threading.Lock()
+        self._root_lock = threading.Lock()
+        self._root_folder_id: str | None = None
         #: (token file mtime, message) of a refresh that failed permanently. While the
         #: token file is unchanged, the token is known to be dead even though it *looks*
         #: refreshable, so the status endpoint must not claim "authorized".
@@ -358,9 +364,12 @@ class GoogleDriveExporter:
     # ------------------------------------------------------------------
 
     def create_folder(
-        self, folder_name: str, app_properties: dict[str, str] | None = None
+        self,
+        folder_name: str,
+        app_properties: dict[str, str] | None = None,
+        parent_id: str | None = None,
     ) -> str:
-        """Create a folder in Google Drive and return its ID.
+        """Create a folder (inside ``parent_id``, or the Drive root) and return its ID.
 
         ``app_properties`` are private key/values (visible only to this OAuth client) that
         :meth:`find_tagged_file` can search for, so a create whose response was lost can be
@@ -370,10 +379,28 @@ class GoogleDriveExporter:
             "name": folder_name,
             "mimeType": FOLDER_MIME_TYPE,
         }
+        if parent_id:
+            file_metadata["parents"] = [parent_id]
         if app_properties:
             file_metadata["appProperties"] = dict(app_properties)
         file = self.drive_service.files().create(body=file_metadata, fields="id").execute()
         return file.get("id")
+
+    def ensure_root_folder(self, name: str = ROOT_FOLDER_NAME) -> str:
+        """Return the id of the top-level Atlas folder, creating it only if absent.
+
+        Found by a private ``appProperties`` tag (``drive.file`` scope cannot see a folder
+        the user made by hand), so it survives restarts. The id is cached; a cached folder
+        the user trashed or deleted in Drive is looked up / re-created.
+        """
+        with self._root_lock:
+            cached = self._root_folder_id
+            if cached and self.file_state(cached) == FILE_OK:
+                return cached
+            self._root_folder_id = None
+            found = self.find_tagged_file(_ROOT_FOLDER_TAG, mime_type=FOLDER_MIME_TYPE)
+            self._root_folder_id = found or self.create_folder(name, _ROOT_FOLDER_TAG)
+            return self._root_folder_id
 
     def create_empty_doc(
         self,
@@ -541,6 +568,7 @@ __all__ = [
     "CONSENT_TIMEOUT_SECONDS",
     "DOC_MIME_TYPE",
     "FOLDER_MIME_TYPE",
+    "ROOT_FOLDER_NAME",
     "SCOPES",
     "STATE_AUTHORIZED",
     "STATE_CREDENTIALS_MISSING",

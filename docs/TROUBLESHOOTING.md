@@ -254,6 +254,8 @@ without duplicating anything. 409 `CONFLICT` means a publish for that playlist i
 
 ### Folder or Doc deleted (or trashed) in Drive
 
+All playlist folders live inside one `Atlas` folder. If that folder is trashed or deleted, the next publish re-creates it for new playlist folders (existing playlist folders keep their stored ids). Playlists published before the `Atlas` folder existed remain at the Drive root.
+
 A deleted or trashed playlist folder makes the next publish start over in a new folder, with
 every approved or published video re-created from its stored notes. A deleted or trashed video
 Doc is re-created on the next publish that includes it; a deleted or trashed index Doc is

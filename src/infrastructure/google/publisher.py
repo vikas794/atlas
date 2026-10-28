@@ -136,6 +136,10 @@ class GoogleDrivePublisher(DrivePublisherPort):
                 type(exc).__name__,
             )
 
+    async def ensure_root_folder(self) -> str:
+        """Find or create the top-level Atlas folder (also used by the startup check)."""
+        return await self._retry_call(self.exporter.ensure_root_folder)
+
     async def _retry_call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Run a blocking Google API call in a thread, retrying transient failures."""
         attempt = 1
@@ -260,8 +264,9 @@ class GoogleDrivePublisher(DrivePublisherPort):
             folder_tag = {"atlasKind": "playlist-folder", "atlasPlaylist": str(playlist_pk)}
             # Only retries search: a first-time search could adopt the folder of an older,
             # deleted playlist that happened to have the same database id.
+            root_id = await self._retry_call(self.exporter.ensure_root_folder)
             folder_id = await self._create_once(
-                lambda: self.exporter.create_folder(folder_name, folder_tag),
+                lambda: self.exporter.create_folder(folder_name, folder_tag, root_id),
                 lambda: self.exporter.find_tagged_file(folder_tag, mime_type=FOLDER_MIME_TYPE),
                 find_first=False,
             )

@@ -815,10 +815,15 @@ async def test_real_publisher_builds_folder_index_and_headed_docs(
     result = await uc.execute(playlist.id)
 
     assert result.created == 2
-    folder = stub.created[0]
+    # Everything lives under one top-level "Atlas" folder, created first.
+    root = stub.created[0]
+    assert root["name"] == "Atlas" and root["mimeType"] == "application/vnd.google-apps.folder"
+    assert "parents" not in root
+    folder = stub.created[1]
     assert folder["mimeType"] == "application/vnd.google-apps.folder"
     assert folder["name"] == playlist_folder_name("Course 101")
-    index = stub.created[1]
+    assert folder["parents"] == [root["id"]]
+    index = stub.created[2]
     assert index["name"] == "00 - Index - Course 101" and index["parents"] == [result.folder_id]
     # Index is the first Doc in the folder; its text is the 12 titles in order, each published
     # video's title followed by its short description (here the Notes fallback).
@@ -828,7 +833,7 @@ async def test_real_publisher_builds_folder_index_and_headed_docs(
         for i in range(1, 13)
     )
     # The published videos' titles link to their Docs (written after the Docs exist).
-    published_ids = {c["id"] for c in stub.created[2:]}
+    published_ids = {c["id"] for c in stub.created[3:]}
     links = {
         r["updateTextStyle"]["textStyle"]["link"]["url"]
         for doc, reqs in stub.batches
@@ -838,11 +843,11 @@ async def test_real_publisher_builds_folder_index_and_headed_docs(
     }
     assert links == {f"https://docs.google.com/document/d/{doc_id}/edit" for doc_id in published_ids}
     # Doc names: 1-based, zero-padded to the width of the largest position (12 -> 2 digits).
-    names = [c["name"] for c in stub.created[2:]]
+    names = [c["name"] for c in stub.created[3:]]
     assert names == ["01 - Topic 1", "12 - Topic 12"]
-    assert all(c["parents"] == [result.folder_id] for c in stub.created[1:])
+    assert all(c["parents"] == [result.folder_id] for c in stub.created[2:])
     # Each Doc starts with its heading (number + title) followed by the notes.
-    twelve = stub.created[3]["id"]
+    twelve = stub.created[4]["id"]
     text = stub.inserted_text(twelve)
     assert text.startswith("12 - Topic 12\n")
     assert "Notes of Topic 12" in text
@@ -931,9 +936,9 @@ async def test_transient_drive_errors_are_retried_and_then_succeed(
         index_titles=[], update_index=False,
     )
 
-    assert result.folder_id == "id1"
+    assert result.folder_id == "id2"  # id1 is the Atlas root folder
     folders = [c for c in stub.created if c["mimeType"].endswith("folder")]
-    assert len(folders) == 1  # failed twice, created once
+    assert len(folders) == 2  # Atlas root + playlist folder: failed twice, created once
 
 
 @pytest.mark.parametrize(
@@ -1075,3 +1080,39 @@ def test_drive_auth_state_distinguishes_missing_credentials_from_needing_consent
     token.write_text("not a token")  # an unusable token is not authorization either
     assert exporter.auth_state()[0] == "needs_consent"
     assert exporter.auth_status()[0] is False
+
+
+async def test_playlist_folders_share_one_atlas_root_folder(
+    repo: PlaylistRepository, stub: StubGoogle
+) -> None:
+    publisher, _ = real_publisher(stub)
+
+    async def publish(pk: int) -> str:
+        result = await publisher.publish_playlist(
+            playlist_pk=pk, playlist_title=f"P{pk}", pad_width=1, entries=[],
+            index_titles=[], update_index=False,
+        )
+        return result.folder_id
+
+    first, second = await publish(1), await publish(2)
+
+    roots = [c for c in stub.created if c["name"] == "Atlas"]
+    assert len(roots) == 1
+    folders = {c["id"]: c for c in stub.created if c["id"] in (first, second)}
+    assert all(f["parents"] == [roots[0]["id"]] for f in folders.values())
+
+
+async def test_an_existing_atlas_root_is_adopted_after_a_restart_and_recreated_if_trashed(
+    stub: StubGoogle,
+) -> None:
+    first, _ = real_publisher(stub)
+    root_id = await first.ensure_root_folder()
+
+    restarted, _ = real_publisher(stub)  # new process: nothing cached
+    assert await restarted.ensure_root_folder() == root_id
+    assert len([c for c in stub.created if c["name"] == "Atlas"]) == 1
+
+    stub.trashed.add(root_id)
+    new_root = await restarted.ensure_root_folder()
+    assert new_root != root_id
+    assert len([c for c in stub.created if c["name"] == "Atlas"]) == 2

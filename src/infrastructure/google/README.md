@@ -5,7 +5,7 @@ Google Drive and Docs integration: OAuth authorization, low-level Drive/Docs ope
 
 ## Interface
 - `google/__init__.py` exports only `GoogleDriveExporter`; the rest below is imported from `drive.py` / `publisher.py`.
-- `GoogleDriveExporter` (`drive.py`, re-exported by `__init__`): `auth_state()`, `auth_status()`, `ensure_authorized()`, `authenticate()`, `mark_token_revoked(exc)`, `drive_service()`, `docs_service()`, `create_folder`, `create_empty_doc`, `file_state(file_id)`, `find_tagged_file`, `apply_requests`, `rename_doc`, `document_body_end_index`, `replace_doc_body`.
+- `GoogleDriveExporter` (`drive.py`, re-exported by `__init__`): `auth_state()`, `auth_status()`, `ensure_authorized()`, `authenticate()`, `mark_token_revoked(exc)`, `drive_service()`, `docs_service()`, `create_folder(name, tags, parent_id)`, `ensure_root_folder()`, `create_empty_doc`, `file_state(file_id)`, `find_tagged_file`, `apply_requests`, `rename_doc`, `document_body_end_index`, `replace_doc_body`.
 - `GoogleDriveAuthorizationRequired`, `is_permanent_refresh_error(exc)`, `reauthorize_message(exc)`.
 - Constants: `SCOPES`, `STATE_CREDENTIALS_MISSING`, `STATE_NEEDS_CONSENT`, `STATE_AUTHORIZED`, `FILE_OK`, `FILE_TRASHED`, `FILE_MISSING` (the three `FILE_*` are not in `drive.py` `__all__`), `FOLDER_MIME_TYPE`, `DOC_MIME_TYPE`, `CONSENT_TIMEOUT_SECONDS`.
 - `GoogleDrivePublisher` (`publisher.py`, implements `DrivePublisherPort`): `ensure_authorized()`, `publish_playlist(...)`; `is_transient_http_error(exc)`. Constructor retry knobs `max_retries=3`, `backoff_base=1.0`, `backoff_cap=10.0`.
@@ -15,6 +15,7 @@ Google Drive and Docs integration: OAuth authorization, low-level Drive/Docs ope
 - Rate-limit and network errors are classed transient; others are permanent.
 - `publish_playlist` raises `DriveFolderMissing` when the stored folder is trashed or missing; a trashed or missing stored index doc is silently re-created and rewritten.
 - `ensure_authorized` swallows refresh and network errors; only `GoogleDriveAuthorizationRequired` becomes `DriveAuthorizationRequired`.
+- Every playlist folder is created inside one top-level `Atlas` folder (`ensure_root_folder`: found by the private tag `atlasKind=root`, else created; checked at app start when Drive is authorized, and again before a new playlist folder). Folders published before this change stay at the Drive root. `drive.file` scope only sees folders Atlas created, so a hand-made "Atlas" folder is not reused.
 - Publishing is resumable: progress callbacks record created folder/doc ids so reruns reuse them; files are located by tag before creating new ones.
 
 ## Side Effects
