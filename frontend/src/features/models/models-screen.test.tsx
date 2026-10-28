@@ -449,6 +449,17 @@ describe('ModelsScreen', () => {
     })
   })
 
+  it('locks the Serving order strip while there are unsaved table edits', async () => {
+    setup()
+    const user = userEvent.setup()
+    renderRoute('/models')
+
+    await screen.findByRole('switch', { name: 'Disable Model 2' })
+    expect(screen.queryByText(/Save or discard changes to reorder here/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('switch', { name: 'Disable Model 2' }))
+    expect(screen.getByText(/Save or discard changes to reorder here/)).toBeInTheDocument()
+  })
+
   it('exposes a keyboard-operable drag handle per row', async () => {
     setup()
     renderRoute('/models')

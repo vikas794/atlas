@@ -88,6 +88,38 @@ export function setEnabled(
   return [...rest.slice(0, lastEnabled + 1), ...moved, ...rest.slice(lastEnabled + 1)]
 }
 
+/** A model the chain can serve right now: switched on and with a usable key (the Serving order strip). */
+export function isServing(entry: FallbackEntry): boolean {
+  return entry.enabled && entry.usable_key_count > 0
+}
+
+/**
+ * Move one serving model onto another's place in the Serving order strip. The serving models are
+ * reordered among the slots they already occupy; every other entry (disabled, no key, hidden) keeps
+ * its exact position, so it returns to the same slot when it can serve again. Returns a new array.
+ */
+export function reorderServing(
+  entries: readonly FallbackEntry[],
+  activeId: number,
+  overId: number,
+): FallbackEntry[] {
+  const slots: number[] = []
+  const serving: FallbackEntry[] = []
+  entries.forEach((entry, index) => {
+    if (!isServing(entry)) return
+    slots.push(index)
+    serving.push(entry)
+  })
+  const from = serving.findIndex((entry) => entry.id === activeId)
+  const to = serving.findIndex((entry) => entry.id === overId)
+  if (from < 0 || to < 0 || from === to) return [...entries]
+  const next = [...entries]
+  moveEntry(serving, from, to).forEach((entry, i) => {
+    next[slots[i]] = entry
+  })
+  return next
+}
+
 /** Index of the first enabled entry in the whole chain (the model tried first), or -1. */
 export function primaryIndex(entries: readonly FallbackEntry[]): number {
   return entries.findIndex((entry) => entry.enabled)

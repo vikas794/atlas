@@ -6,6 +6,7 @@ Model catalog and fallback-chain editor (route `/models`).
 ## Interface
 - `ModelsScreen` - route component; stages ordering/enable changes and saves the fallback chain.
 - `ModelTable` - provider-grouped, collapsible table with select/deselect all (enable) per provider, row and group checkboxes for bulk actions, and a row Hide/Unhide action.
+- `ServingOrder` - the "Serving order" strip: draggable chips of the models that can serve now (`isServing`: enabled with a usable key).
 - `ModelDialog` - add/edit model and bulk import dialog.
 
 - `ModelsScreen` also calls `getRateLimitUsage` (quota display); `ModelDialog` calls `getAvailableModels` for the bulk-import picker.
@@ -19,6 +20,8 @@ Model catalog and fallback-chain editor (route `/models`).
 
 - Bulk Hide / Delete (ticked rows, a bar at the bottom like the Keys batch bar) are immediate server calls, not staged: they never touch the staged chain. Ticks only count while the row is listed.
 - A hidden model stays registered so "Add all" skips it (the `UNIQUE (provider, model_id)` check), but it is switched off and not listed (`listedEntries`) unless "Show hidden" is on; there it can be unhidden. `setEnabled` and `applyStaged` never switch a hidden model on. Hiding moves the model to the end of the chain and renumbers the rest (server `set_hidden`; `applyStaged` does the same for staged edits), so visible ranks have no gaps. Delete removes the row, so "Add all" can re-add it.
+
+- The Serving order strip reorders the whole chain across providers (`reorderServing`: the serving models swap among the slots they occupy; disabled, no-key and hidden entries keep their positions). A drop saves at once (`saveFallback`, optimistic, rolled back with an error toast on failure), unlike table edits. It is built from the whole chain, so search and the Show hidden / no-key boxes never change it, and it is locked (no drag) while staged table edits exist or a save is in flight. Pointer drag only, no keyboard reordering.
 
 ## Side Effects
 - Network calls: create (single/bulk), update, delete (single/bulk), hide/unhide (bulk), test models; `saveFallback`.

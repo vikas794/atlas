@@ -7,10 +7,12 @@ import {
   clampRank,
   filterEntries,
   formatContext,
+  isServing,
   listedEntries,
   moveEntry,
   primaryIndex,
   quotaSummary,
+  reorderServing,
   setEnabled,
   toggleMessage,
   toStaged,
@@ -299,5 +301,32 @@ describe('formatters', () => {
     expect(blockedReason('no_keys')).toBe('No keys')
     expect(blockedReason('cooling_down')).toBe('Keys cooling down')
     expect(blockedReason('something_new')).toBe('Unavailable')
+  })
+})
+
+describe('reorderServing', () => {
+  const chain = () => [
+    entry(1, { provider: 'nvidia' }),
+    entry(2, { provider: 'gemini' }),
+    entry(3, { provider: 'nvidia', enabled: false }),
+    entry(4, { provider: 'gemini', usable_key_count: 0 }),
+    entry(5, { provider: 'nvidia' }),
+  ]
+
+  it('treats only enabled models with a usable key as serving', () => {
+    expect(chain().filter(isServing).map((e) => e.id)).toEqual([1, 2, 5])
+  })
+
+  it('moves a model across providers and keeps every other entry in its slot', () => {
+    // serving 1,2,5 -> 5,1,2 in slots 0,1,4; disabled 3 and no-key 4 stay put
+    expect(ids(reorderServing(chain(), 5, 1))).toEqual([5, 1, 3, 4, 2])
+    expect(ids(reorderServing(chain(), 1, 5))).toEqual([2, 5, 3, 4, 1])
+  })
+
+  it('returns an unchanged copy for a no-op, a non-serving or an unknown id', () => {
+    const input = chain()
+    expect(ids(reorderServing(input, 2, 2))).toEqual([1, 2, 3, 4, 5])
+    expect(ids(reorderServing(input, 3, 1))).toEqual([1, 2, 3, 4, 5])
+    expect(ids(reorderServing(input, 99, 1))).toEqual([1, 2, 3, 4, 5])
   })
 })

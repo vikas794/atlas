@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRight, KeyRound, Layers, Plus, Power, Search, Zap } from 'lucide-react'
+import { KeyRound, Layers, Plus, Power, Search, Zap } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useBlocker } from 'react-router-dom'
 
@@ -25,7 +25,9 @@ import {
   applyStaged,
   chainChanged,
   filterEntries,
+  isServing,
   listedEntries,
+  reorderServing,
   setEnabled,
   toggleMessage,
   toStaged,
@@ -35,9 +37,10 @@ import {
 import { queryKeys } from '../../lib/query-keys'
 import { useReveal } from '../../lib/use-reveal'
 import { cn } from '../../lib/utils'
-import type { FallbackEntry, RateLimitRow } from '../../lib/types'
+import type { FallbackEntry, FallbackResponse, RateLimitRow } from '../../lib/types'
 import { ModelDialog } from './model-dialog'
 import { ModelTable } from './model-table'
+import { ServingOrder } from './serving-order'
 
 /** Polled so quota badges follow live usage while the page is open. */
 const USAGE_POLL_MS = 15_000
@@ -102,13 +105,8 @@ export function ModelsScreen() {
     () => visible.filter((entry) => selected.has(entry.id)),
     [visible, selected],
   )
-  const servingOrder = useMemo(
-    () =>
-      visible
-        .filter((entry) => entry.enabled && entry.usable_key_count > 0)
-        .map((entry) => entry.display_name || entry.model_id),
-    [visible],
-  )
+  // The whole chain, not `visible`: the Show hidden / no-key boxes and search never change the strip.
+  const servingOrder = useMemo(() => entries.filter(isServing), [entries])
   const scope = useReveal<HTMLDivElement>([visible.length])
 
   const matches = useMemo(() => filterEntries(visible, query).length, [visible, query])
@@ -132,6 +130,36 @@ export function ModelsScreen() {
     },
     onError: (error) => toast(failureMessage('Could not save the model chain', error), 'error'),
   })
+
+  // A strip drop saves at once. The strip is locked while staged edits exist, so `entries` is the
+  // saved chain here and nothing staged can be overwritten.
+  const saveOrder = useMutation({
+    mutationFn: (next: FallbackEntry[]) => saveFallback(toUpdates(next)),
+    onMutate: async (next) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.llmFallback })
+      const previous = queryClient.getQueryData<FallbackResponse>(queryKeys.llmFallback)
+      if (previous) queryClient.setQueryData(queryKeys.llmFallback, { ...previous, entries: next })
+      return { previous }
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(queryKeys.llmFallback, data)
+      void queryClient.invalidateQueries({ queryKey: queryKeys.llmRateUsage })
+    },
+    onError: (error, _next, context) => {
+      if (context?.previous) queryClient.setQueryData(queryKeys.llmFallback, context.previous)
+      toast(failureMessage('Could not save the model order', error), 'error')
+    },
+  })
+
+  const dropServing = (activeId: number, overId: number) => {
+    const next = reorderServing(entries, activeId, overId)
+    const moved = next.find((entry) => entry.id === activeId)
+    if (!moved || !chainChanged(entries, next)) return
+    setAnnouncement(
+      `${moved.display_name || moved.model_id} moved to position ${next.filter(isServing).findIndex((entry) => entry.id === activeId) + 1}`,
+    )
+    saveOrder.mutate(next)
+  }
 
   const test = useMutation({
     mutationFn: (entry: FallbackEntry) => testLlmModel(entry.id),
@@ -276,25 +304,12 @@ export function ModelsScreen() {
           </div>
 
           {servingOrder.length > 0 ? (
-            <div data-reveal className="panel mt-4 flex flex-wrap items-center gap-2 px-5 py-3">
-              <span className="mr-1 text-label text-text-muted">Serving order</span>
-              {servingOrder.map((name, index) => (
-                <span key={`${name}-${index}`} className="inline-flex items-center gap-2">
-                  {index > 0 ? (
-                    <ArrowRight aria-hidden="true" className="size-icon text-text-muted" />
-                  ) : null}
-                  <span
-                    className={
-                      index === 0
-                        ? 'rounded-pill bg-accent px-3 py-1 text-label text-on-accent'
-                        : 'rounded-pill bg-surface-muted px-3 py-1 text-label text-text'
-                    }
-                  >
-                    {name}
-                  </span>
-                </span>
-              ))}
-            </div>
+            <ServingOrder
+              entries={servingOrder}
+              locked={dirty || saveOrder.isPending}
+              lockedHint={dirty ? 'Save or discard changes to reorder here' : undefined}
+              onReorder={dropServing}
+            />
           ) : null}
         </>
       ) : null}
