@@ -9,6 +9,7 @@ Modules are imported directly by routers (`from ...schemas.llm import ...`).
 - `drive_auth.py`: `DriveStatusResponse`, `DriveActionResponse`.
 - `llm.py`: `_Strict` (base that rejects unknown fields), provider/model/key/fallback models (`ProviderOut`, `ProvidersResponse`, `ModelOut`, `ModelsResponse`, `ModelCreate`, `ModelUpdate`, `ModelBulkCreate`, `ModelBulkResponse`, `ModelTestResponse`, `FallbackEntryOut`, `FallbackResponse`, `ChainEntryIn`, `ChainUpdate`, `KeyOut`, `KeysResponse`, `KeyCreate`, `KeyUpdate`, `KeyReveal`, `CooldownOut`, `ClearedResponse`, `AvailableModelsResponse`, `RateLimitUsageResponse`).
 - `playlists.py`: `IngestPlaylistRequest`, `PlaylistResponse`, `PlaylistListResponse`, `VideoResponse` (with `from_domain`), `VideoListResponse`, `SummaryResponse` (also with `from_domain`), `SaveSummaryRequest`, `RegenerateRequest`, `NotesPromptResponse`, `ActionResponse`, `PublishResponse`.
+- `usage.py`: `UsageAggregateResponse` (with provider/operation/cache/time-range parts) and the per-key analytics models `KeyAnalyticsResponse`, `KeyAnalyticsRow`, `ModelCostRow`, `ErrorCategoryCount`.
 - `settings.py`: `SettingGroup`, `SettingField`, `SettingsResponse`, `SettingsUpdateRequest`.
 - `usage.py`: `UsageProviderAggregate`, `UsageOperationAggregate`, `UsageCacheAggregate`, `UsageTimeRange`, `UsageAggregateResponse`.
 - `__init__.py` re-exports only the `drive_auth` and `usage` submodules.

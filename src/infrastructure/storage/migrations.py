@@ -473,6 +473,32 @@ MIGRATIONS: list[tuple[str, list[str]]] = [
             "ALTER TABLE llm_models ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
         ],
     ),
+    (
+        "0009_llm_attempts",
+        [
+            # One row per provider call (success or failure) so analytics can split by key and
+            # model. No foreign key on key_id: rows outlive a deleted key, keeping key_label.
+            """
+            CREATE TABLE llm_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key_id INTEGER,
+                key_label TEXT NOT NULL DEFAULT '',
+                provider TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                success INTEGER NOT NULL,
+                error_category TEXT,
+                latency_ms INTEGER NOT NULL DEFAULT 0,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cost_usd REAL NOT NULL DEFAULT 0.0,
+                created_at TEXT NOT NULL
+            )
+            """,
+            "CREATE INDEX idx_llm_attempts_created ON llm_attempts(created_at)",
+            "CREATE INDEX idx_llm_attempts_key ON llm_attempts(key_id, created_at)",
+        ],
+    ),
 ]
 
 #: Migrations that must run with ``PRAGMA foreign_keys = OFF`` (the pragma is a

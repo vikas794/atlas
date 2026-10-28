@@ -385,6 +385,16 @@ def classify_provider_exception(
     )
 
 
+def error_category_of(error: BaseException) -> str:
+    """Short analytics label for a classified failure: key problem, failure type or ``error``."""
+    problem = _key_problem_of(error)
+    if problem:
+        return problem
+    if isinstance(error, NotesGenerationError):
+        return str(error.failure_type.value)
+    return "config_error" if isinstance(error, NotesGeneratorConfigError) else "error"
+
+
 def _key_problem_of(error: BaseException) -> str | None:
     """Whether a classified error is about the API key in use, not about the request.
 

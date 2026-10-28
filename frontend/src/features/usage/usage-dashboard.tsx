@@ -14,6 +14,9 @@ import {
 } from '../../lib/api'
 import { queryKeys } from '../../lib/query-keys'
 import { cn } from '../../lib/utils'
+import { KeyAnalytics } from './key-analytics'
+import { formatCost, formatNumber } from './usage-format'
+import { Head, Stat, TableShell } from './usage-ui'
 
 interface UsageDashboardProps {
   className?: string
@@ -21,71 +24,6 @@ interface UsageDashboardProps {
 
 /** Operations Atlas actually records. Provider options come from the enabled keys. */
 const OPERATION_OPTIONS = [{ value: 'generate_notes', label: 'Generate notes' }]
-
-function formatNumber(value: number) {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`
-  return String(value)
-}
-
-function formatCost(value: number) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 4,
-    maximumFractionDigits: 4,
-  }).format(value)
-}
-
-function formatPercent(value: number) {
-  return `${(value * 100).toFixed(1)}%`
-}
-
-/** Flat stat tile: label, value, optional detail. One level of border, no nested cards. */
-function Stat({
-  title,
-  value,
-  description,
-}: {
-  title: string
-  value: string
-  description?: string
-}) {
-  return (
-    <div className="panel card-lift p-5">
-      <p className="text-label text-text-muted">{title}</p>
-      <p className="mt-2 font-display text-[32px] font-semibold leading-9 tabular-nums text-text">
-        {value}
-      </p>
-      {description ? <p className="mt-1 text-label text-text-muted">{description}</p> : null}
-    </div>
-  )
-}
-
-function TableShell({ empty, children }: { empty?: string; children?: React.ReactNode }) {
-  if (empty) {
-    return <p className="panel p-4 text-center text-body text-text-muted">{empty}</p>
-  }
-  return (
-    <div className="overflow-x-auto panel">
-      <table className="min-w-full text-left text-body">{children}</table>
-    </div>
-  )
-}
-
-function Head({ columns }: { columns: string[] }) {
-  return (
-    <thead className="bg-surface-muted text-label text-text">
-      <tr className="h-row">
-        {columns.map((heading) => (
-          <th key={heading} scope="col" className="px-3">
-            {heading}
-          </th>
-        ))}
-      </tr>
-    </thead>
-  )
-}
 
 function ProviderTable({ providers }: { providers: UsageAggregateResponse['by_provider'] }) {
   if (!providers.length) return <TableShell empty="No provider data yet." />
@@ -170,15 +108,13 @@ export function UsageDashboard({ className }: UsageDashboardProps) {
     }
   }, [keysQuery.data, providerOptions, params.provider])
 
-  const cache = data?.cache_stats
-
   return (
     <section id="usage" className={cn('space-y-4', className)}>
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h2 className="text-section text-text">Usage and cost</h2>
           <p className="mt-1 text-body text-text-muted">
-            API requests, tokens, cache performance and estimated cost.
+            API requests, tokens and estimated cost.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -228,8 +164,8 @@ export function UsageDashboard({ className }: UsageDashboardProps) {
       ) : null}
 
       {isLoading ? (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4" aria-busy="true">
-          {Array.from({ length: 4 }, (_, index) => (
+        <div className="grid gap-4 md:grid-cols-3" aria-busy="true">
+          {Array.from({ length: 3 },(_, index) => (
             <div key={index} className="space-y-2 panel p-4">
               <SkeletonBar className="w-16" />
               <SkeletonBar className="h-6 w-24" />
@@ -240,7 +176,7 @@ export function UsageDashboard({ className }: UsageDashboardProps) {
 
       {data && (
         <>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-3">
             <Stat
               title="Total cost"
               value={formatCost(data.total_cost_usd)}
@@ -256,15 +192,6 @@ export function UsageDashboard({ className }: UsageDashboardProps) {
               value={formatCost(
                 data.total_requests ? data.total_cost_usd / data.total_requests : 0,
               )}
-            />
-            <Stat
-              title="Cache hit rate"
-              value={formatPercent(data.cache_hit_rate)}
-              description={
-                cache
-                  ? `${formatNumber(cache.total_hits)} hits, ${formatNumber(cache.total_misses)} misses`
-                  : undefined
-              }
             />
           </div>
 
@@ -284,6 +211,8 @@ export function UsageDashboard({ className }: UsageDashboardProps) {
           </p>
         </>
       )}
+
+      <KeyAnalytics />
     </section>
   )
 }

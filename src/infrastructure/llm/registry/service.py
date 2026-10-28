@@ -32,6 +32,14 @@ AUTO_DISABLE_AFTER = 3
 #: by itself (there is no background checker to flip the status back).
 USABLE_STATUSES = ("healthy", "unknown", "rate_limited")
 
+#: Analytics ranges in seconds; ``all`` has no lower bound.
+ATTEMPT_RANGES: dict[str, float | None] = {
+    "24h": 86400.0,
+    "7d": 7 * 86400.0,
+    "30d": 30 * 86400.0,
+    "all": None,
+}
+
 _MINUTE = 60.0
 _DAY = 86400.0
 #: Order in which a blocked reason is reported when keys are blocked for different reasons.
@@ -153,6 +161,48 @@ class ModelRegistry:
         self._repo.clear_cooldowns(key.id, scope)
         self._repo.set_key_health(key.id, status="healthy", error=None, consecutive_failures=0)
         self._repo.record_tokens(key.id, scope, max(0, int(tokens)), now, self._month(now))
+
+    def log_attempt(
+        self,
+        key: KeyRow,
+        model: ModelRow,
+        *,
+        operation: str,
+        success: bool,
+        latency_ms: int,
+        error_category: str | None = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cost_usd: float = 0.0,
+    ) -> None:
+        """Record one provider call for analytics; never fails the call itself."""
+        try:
+            self._repo.log_attempt(
+                key_pk=key.id,
+                key_label=key.label,
+                provider=model.provider,
+                model_id=model.model_id,
+                operation=operation,
+                success=success,
+                error_category=None if success else (error_category or "unknown"),
+                latency_ms=latency_ms,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_usd=cost_usd,
+                created_at=datetime.fromtimestamp(self._clock(), UTC).isoformat(timespec="seconds"),
+            )
+        except Exception:
+            logger.warning("Attempt log write failed for key %s", key.id, exc_info=False)
+
+    def attempt_stats(self, range_: str) -> dict[str, list[dict[str, Any]]]:
+        """Per-key, per-model and per-error attempt stats for ``24h``, ``7d``, ``30d`` or ``all``."""
+        seconds = ATTEMPT_RANGES.get(range_)
+        since = (
+            datetime.fromtimestamp(self._clock() - seconds, UTC).isoformat(timespec="seconds")
+            if seconds
+            else None
+        )
+        return self._repo.attempt_stats(since)
 
     def record_failure(
         self,

@@ -589,3 +589,86 @@ class RegistryRepo:
             conn.execute("DELETE FROM llm_rate_usage WHERE created_at < ?", (before,))
         finally:
             conn.close()
+
+    # --- attempt log (analytics) -----------------------------------------
+
+    def log_attempt(
+        self,
+        *,
+        key_pk: int | None,
+        key_label: str,
+        provider: str,
+        model_id: str,
+        operation: str,
+        success: bool,
+        error_category: str | None,
+        latency_ms: int,
+        input_tokens: int,
+        output_tokens: int,
+        cost_usd: float,
+        created_at: str,
+    ) -> None:
+        conn = self._conn()
+        try:
+            conn.execute(
+                "INSERT INTO llm_attempts (key_id, key_label, provider, model_id, operation, "
+                "success, error_category, latency_ms, input_tokens, output_tokens, cost_usd, "
+                "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    key_pk,
+                    key_label,
+                    provider,
+                    model_id,
+                    operation,
+                    1 if success else 0,
+                    error_category,
+                    max(0, latency_ms),
+                    max(0, input_tokens),
+                    max(0, output_tokens),
+                    max(0.0, cost_usd),
+                    created_at,
+                ),
+            )
+        finally:
+            conn.close()
+
+    def attempt_stats(self, since: str | None) -> dict[str, list[dict[str, Any]]]:
+        """Attempts since ``since`` (ISO UTC, or all) grouped per key, per model and per error."""
+        where = "WHERE a.created_at >= ?" if since else ""
+        args: tuple[Any, ...] = (since,) if since else ()
+        measures = (
+            "COUNT(*) AS requests, COALESCE(SUM(a.success), 0) AS successes, "
+            "COALESCE(AVG(a.latency_ms), 0) AS avg_latency_ms, "
+            "COALESCE(SUM(a.input_tokens), 0) AS input_tokens, "
+            "COALESCE(SUM(a.output_tokens), 0) AS output_tokens, "
+            "COALESCE(SUM(a.cost_usd), 0) AS cost_usd"
+        )
+        conn = self._conn()
+        try:
+            keys = conn.execute(
+                # The live key row wins for the label; the logged label covers deleted keys.
+                f"SELECT a.key_id AS key_id, COALESCE(k.label, MAX(a.key_label)) AS label, "
+                f"MAX(a.provider) AS provider, {measures} "
+                f"FROM llm_attempts a LEFT JOIN llm_api_keys k ON k.id = a.key_id "
+                f"{where} GROUP BY a.key_id ORDER BY requests DESC",
+                args,
+            ).fetchall()
+            models = conn.execute(
+                f"SELECT a.provider AS provider, a.model_id AS model, {measures} "
+                f"FROM llm_attempts a {where} GROUP BY a.provider, a.model_id "
+                f"ORDER BY cost_usd DESC, requests DESC",
+                args,
+            ).fetchall()
+            errors = conn.execute(
+                f"SELECT COALESCE(a.error_category, 'unknown') AS category, COUNT(*) AS count "
+                f"FROM llm_attempts a {where}{' AND' if where else 'WHERE'} a.success = 0 "
+                f"GROUP BY category ORDER BY count DESC",
+                args,
+            ).fetchall()
+        finally:
+            conn.close()
+        return {
+            "keys": [dict(row) for row in keys],
+            "models": [dict(row) for row in models],
+            "errors": [dict(row) for row in errors],
+        }

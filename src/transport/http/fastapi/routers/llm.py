@@ -349,7 +349,11 @@ async def test_model(model_pk: int) -> ModelTestResponse:
         return ModelTestResponse(success=False, latency_ms=None, error=reason)
     key = keys[0]
 
-    from src.infrastructure.llm.notes_base import _key_problem_of, classify_provider_exception
+    from src.infrastructure.llm.notes_base import (
+        _key_problem_of,
+        classify_provider_exception,
+        error_category_of,
+    )
 
     params: dict[str, Any] = {
         "model": model.litellm_model,
@@ -375,17 +379,38 @@ async def test_model(model_pk: int) -> ModelTestResponse:
             secrets=(key.key_value,),
         )
         registry.record_failure(key, model, _key_problem_of(error))
+        registry.log_attempt(
+            key,
+            model,
+            operation="model_test",
+            success=False,
+            latency_ms=int((time.monotonic() - started) * 1000),
+            error_category=error_category_of(error),
+        )
         return ModelTestResponse(success=False, latency_ms=None, error=str(error))
     latency = int((time.monotonic() - started) * 1000)
     usage = getattr(response, "usage", None)
     tokens = int(getattr(usage, "total_tokens", 0) or 0)
     registry.record_success(key, model, tokens)
-    await _record_test_usage(model, response, usage)
+    cost = await _record_test_usage(model, response, usage)
+    registry.log_attempt(
+        key,
+        model,
+        operation="model_test",
+        success=True,
+        latency_ms=latency,
+        input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+        output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+        cost_usd=cost,
+    )
     return ModelTestResponse(success=True, latency_ms=latency, error=None)
 
 
-async def _record_test_usage(model: ModelRow, response: Any, usage: Any) -> None:
-    """Put the test ping's tokens and LiteLLM-priced cost in the usage ledger (never fails the test)."""
+async def _record_test_usage(model: ModelRow, response: Any, usage: Any) -> float:
+    """Put the test ping's tokens and LiteLLM-priced cost in the usage ledger (never fails the test).
+
+    Returns the priced cost (0.0 when pricing or the ledger write failed).
+    """
     from datetime import UTC, datetime
 
     from src.domain.interfaces.usage_ledger import UsageRecord
@@ -394,7 +419,9 @@ async def _record_test_usage(model: ModelRow, response: Any, usage: Any) -> None
 
     input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
     output_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+    cost = 0.0
     try:
+        cost = call_cost(model.litellm_model, input_tokens, output_tokens, response=response)
         await get_usage_ledger().record_usage(
             UsageRecord(
                 timestamp=datetime.now(UTC),
@@ -404,14 +431,13 @@ async def _record_test_usage(model: ModelRow, response: Any, usage: Any) -> None
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 total_tokens=input_tokens + output_tokens,
-                cost_usd=call_cost(
-                    model.litellm_model, input_tokens, output_tokens, response=response
-                ),
+                cost_usd=cost,
                 cache_hit=False,
             )
         )
     except Exception:  # a ledger failure must not fail the test
         pass
+    return cost or 0.0
 
 
 # --- fallback chain ----------------------------------------------------------------------

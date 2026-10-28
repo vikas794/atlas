@@ -31,6 +31,52 @@ class UsageTimeRange(BaseModel):
     until: str | None = None
 
 
+class KeyAnalyticsRow(BaseModel):
+    #: ``None`` only for attempts logged without a key.
+    key_id: int | None
+    #: ``None`` when the key was deleted before it was ever labelled.
+    label: str | None
+    provider: str
+    requests: int
+    successes: int
+    errors: int
+    success_rate: float
+    avg_latency_ms: int
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
+
+
+class ModelCostRow(BaseModel):
+    provider: str
+    model: str
+    requests: int
+    successes: int
+    errors: int
+    success_rate: float
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cost_usd: float
+    avg_cost_usd: float
+    cost_share: float
+
+
+class ErrorCategoryCount(BaseModel):
+    category: str
+    count: int
+
+
+class KeyAnalyticsResponse(BaseModel):
+    range: str
+    total_requests: int
+    total_errors: int
+    total_cost_usd: float
+    by_key: list[KeyAnalyticsRow] = Field(default_factory=list)
+    by_model: list[ModelCostRow] = Field(default_factory=list)
+    errors: list[ErrorCategoryCount] = Field(default_factory=list)
+
+
 class UsageAggregateResponse(BaseModel):
     total_requests: int
     total_input_tokens: int

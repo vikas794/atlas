@@ -19,6 +19,7 @@ export const queryKeys = {
   llmRateUsage: ['llm', 'rate-limit-usage'] as const,
   llmTokenUsage: ['llm', 'token-usage'] as const,
   llmKeys: ['llm', 'keys'] as const,
+  usageKeys: (range: string) => ['usage', 'keys', range] as const,
   llmAvailableModels: (provider: string) => ['llm', 'available-models', provider] as const,
 }
 

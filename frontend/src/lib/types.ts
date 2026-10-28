@@ -223,6 +223,47 @@ export interface UsageAggregateResponse {
   time_range: UsageTimeRange | null
 }
 
+export type KeyAnalyticsRange = '24h' | '7d' | '30d' | 'all'
+
+export interface KeyAnalyticsRow {
+  key_id: number | null
+  label: string | null
+  provider: string
+  requests: number
+  successes: number
+  errors: number
+  success_rate: number
+  avg_latency_ms: number
+  input_tokens: number
+  output_tokens: number
+  cost_usd: number
+}
+
+export interface ModelCostRow {
+  provider: string
+  model: string
+  requests: number
+  successes: number
+  errors: number
+  success_rate: number
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  cost_usd: number
+  avg_cost_usd: number
+  cost_share: number
+}
+
+export interface KeyAnalyticsResponse {
+  range: KeyAnalyticsRange
+  total_requests: number
+  total_errors: number
+  total_cost_usd: number
+  by_key: KeyAnalyticsRow[]
+  by_model: ModelCostRow[]
+  errors: { category: string; count: number }[]
+}
+
 /* ---------------------------------------------------------------- Settings */
 
 export type SettingKind = 'int' | 'float' | 'bool' | 'list' | 'text'

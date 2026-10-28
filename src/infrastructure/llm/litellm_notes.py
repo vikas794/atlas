@@ -17,6 +17,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -34,6 +35,7 @@ from src.infrastructure.llm.notes_base import (
     check_finish_reason,
     check_input_size,
     classify_provider_exception,
+    error_category_of,
     estimate_tokens,
     render_prompt,
     request_timeout_seconds,
@@ -210,11 +212,20 @@ class LiteLLMNotesGenerator:
                 base_spec, api_key_env=f"{REGISTRY_KEY_PREFIX}{key.label}"
             )
             registry.begin_attempt(key, model)
+            started = time.monotonic()
             try:
                 response = await self._request(spec, key.key_value, prompt_text)
             except (NotesGenerationError, NotesGeneratorConfigError) as exc:
                 problem = _key_problem_of(exc)
                 registry.record_failure(key, model, problem)
+                registry.log_attempt(
+                    key,
+                    model,
+                    operation=NOTES_OPERATION,
+                    success=False,
+                    latency_ms=int((time.monotonic() - started) * 1000),
+                    error_category=error_category_of(exc),
+                )
                 if problem is None:
                     raise
                 logger.warning(
@@ -228,6 +239,16 @@ class LiteLLMNotesGenerator:
 
             text, input_tokens, output_tokens, finish, cost = _parse_response(response)
             registry.record_success(key, model, input_tokens + output_tokens)
+            registry.log_attempt(
+                key,
+                model,
+                operation=NOTES_OPERATION,
+                success=True,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_usd=cost or call_cost(spec.litellm_model, input_tokens, output_tokens),
+            )
             return text, input_tokens, output_tokens, finish, cost
 
         assert last is not None  # candidate.keys is non-empty

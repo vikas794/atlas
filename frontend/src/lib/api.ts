@@ -7,6 +7,8 @@ import type {
   DriveStatusResponse,
   FallbackResponse,
   FallbackUpdate,
+  KeyAnalyticsRange,
+  KeyAnalyticsResponse,
   LlmKey,
   LlmKeyPatch,
   LlmModel,
@@ -389,6 +391,10 @@ export function getUsageAggregate(params?: UsageQueryParams) {
 
   const query = searchParams.toString()
   return request<UsageAggregateResponse>(`/api/usage${query ? `?${query}` : ''}`)
+}
+
+export function getKeyAnalytics(range: KeyAnalyticsRange) {
+  return request<KeyAnalyticsResponse>(`/api/usage/keys?range=${range}`)
 }
 
 export type { DriveActionResponse, DriveStatusResponse, UsageAggregateResponse }

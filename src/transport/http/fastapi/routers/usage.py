@@ -4,11 +4,75 @@ from fastapi import APIRouter, Depends, Query
 
 from src.domain.interfaces.usage_ledger import UsageLedgerPort
 from src.transport.http.fastapi.dependencies import get_usage_ledger
-from src.transport.http.fastapi.schemas.usage import UsageAggregateResponse
+from src.transport.http.fastapi.schemas.usage import (
+    ErrorCategoryCount,
+    KeyAnalyticsResponse,
+    KeyAnalyticsRow,
+    ModelCostRow,
+    UsageAggregateResponse,
+)
 
 router = APIRouter(prefix="/api", tags=["usage"])
 
 usage_ledger_dependency = Depends(get_usage_ledger)
+
+
+def _rate(successes: int, requests: int) -> float:
+    return round(successes * 100.0 / requests, 1) if requests else 0.0
+
+
+@router.get("/usage/keys", response_model=KeyAnalyticsResponse)
+async def get_key_analytics(
+    range: str = Query("7d", pattern="^(24h|7d|30d|all)$", description="Time window"),
+) -> KeyAnalyticsResponse:
+    """Per-key success/error/cost, cost per model and error categories from the attempt log."""
+    from src.transport.http.fastapi.dependencies import get_model_registry
+
+    stats = get_model_registry().attempt_stats(range)
+    by_key = [
+        KeyAnalyticsRow(
+            key_id=row["key_id"],
+            label=row["label"] or None,
+            provider=row["provider"],
+            requests=row["requests"],
+            successes=row["successes"],
+            errors=row["requests"] - row["successes"],
+            success_rate=_rate(row["successes"], row["requests"]),
+            avg_latency_ms=round(row["avg_latency_ms"]),
+            input_tokens=row["input_tokens"],
+            output_tokens=row["output_tokens"],
+            cost_usd=row["cost_usd"],
+        )
+        for row in stats["keys"]
+    ]
+    total_cost = sum(row["cost_usd"] for row in stats["models"])
+    by_model = [
+        ModelCostRow(
+            provider=row["provider"],
+            model=row["model"],
+            requests=row["requests"],
+            successes=row["successes"],
+            errors=row["requests"] - row["successes"],
+            success_rate=_rate(row["successes"], row["requests"]),
+            input_tokens=row["input_tokens"],
+            output_tokens=row["output_tokens"],
+            total_tokens=row["input_tokens"] + row["output_tokens"],
+            cost_usd=row["cost_usd"],
+            avg_cost_usd=row["cost_usd"] / row["requests"] if row["requests"] else 0.0,
+            cost_share=round(row["cost_usd"] * 100.0 / total_cost, 1) if total_cost else 0.0,
+        )
+        for row in stats["models"]
+    ]
+    total_requests = sum(row.requests for row in by_model)
+    return KeyAnalyticsResponse(
+        range=range,
+        total_requests=total_requests,
+        total_errors=sum(row.errors for row in by_model),
+        total_cost_usd=total_cost,
+        by_key=by_key,
+        by_model=by_model,
+        errors=[ErrorCategoryCount(**row) for row in stats["errors"]],
+    )
 
 
 @router.get("/usage", response_model=UsageAggregateResponse)
