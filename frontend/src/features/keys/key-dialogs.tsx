@@ -1,7 +1,7 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Copy, Eye, EyeOff, X } from 'lucide-react'
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 
 import { Field, FormDialog } from '../../components/shared/form-dialog'
 import { useToast } from '../../components/shared/toast'
@@ -71,13 +71,32 @@ export function KeyFormDialog({
   })
   const providerList = providers.data?.providers ?? []
 
+  // Editing prefills the stored key (same reveal call as the Reveal action). Not cached after close.
+  const stored = useQuery({
+    queryKey: ['llm-key-reveal', keyRow?.id],
+    queryFn: () => revealLlmKey(keyRow?.id as number),
+    enabled: open && editing,
+    gcTime: 0,
+    staleTime: 0,
+    retry: false,
+  })
+  const storedKey = stored.data?.key ?? null
+  const keyTouched = useRef(false)
+
   useEffect(() => {
     if (open) {
+      keyTouched.current = false
       setForm(formFrom(keyRow, defaultProvider))
       setErrors({})
       setShowKey(false)
     }
   }, [open, keyRow, defaultProvider])
+
+  useEffect(() => {
+    if (storedKey !== null && !keyTouched.current) {
+      setForm((current) => ({ ...current, key: storedKey }))
+    }
+  }, [storedKey])
 
   const provider = form.provider || providerList[0]?.name || ''
 
@@ -109,7 +128,7 @@ export function KeyFormDialog({
       if (keyRow) {
         const patch: LlmKeyPatch = {}
         if (form.label.trim() !== keyRow.label) patch.label = form.label.trim() || keyRow.label
-        if (form.key.trim()) patch.key = form.key.trim()
+        if (form.key.trim() && form.key.trim() !== storedKey) patch.key = form.key.trim()
         if (requestValue !== (keyRow.monthly_request_cap || null))
           patch.monthly_request_cap = requestValue
         if (tokenValue !== (keyRow.monthly_token_cap || null)) patch.monthly_token_cap = tokenValue
@@ -181,7 +200,13 @@ export function KeyFormDialog({
         id={fid('key')}
         label="Key"
         error={errors.key}
-        hint={editing ? 'Leave empty to keep the stored key.' : undefined}
+        hint={
+          editing
+            ? stored.isPending
+              ? 'Loading the stored key…'
+              : 'Showing the stored key. Change it to replace it, or clear it to keep the stored key.'
+            : undefined
+        }
       >
         <div className="flex gap-2">
           <input
@@ -192,7 +217,10 @@ export function KeyFormDialog({
             spellCheck={false}
             value={form.key}
             aria-invalid={errors.key ? true : undefined}
-            onChange={(event) => set('key', event.target.value)}
+            onChange={(event) => {
+              keyTouched.current = true
+              set('key', event.target.value)
+            }}
           />
           <Button
             variant="secondary"

@@ -114,14 +114,28 @@ describe('KeysScreen', () => {
     expect(api.callsTo('POST', '/api/llm/keys')).toHaveLength(0)
   })
 
-  it('edits only what changed and keeps the stored key when the field is empty', async () => {
-    const api = setup().on('PATCH', '/api/llm/keys/1', key(1, { label: 'Renamed' }))
+  it('prefills the stored key when editing', async () => {
+    setup().on('POST', '/api/llm/keys/1/reveal', { key: 'sk-stored-secret' })
+    const user = userEvent.setup()
+    renderRoute('/keys')
+
+    await user.click(await screen.findByRole('button', { name: 'Actions for Key 1' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit' }))
+
+    expect(await screen.findByDisplayValue('sk-stored-secret')).toBeInTheDocument()
+  })
+
+  it('edits only what changed and does not resend the unchanged stored key', async () => {
+    const api = setup()
+      .on('POST', '/api/llm/keys/1/reveal', { key: 'sk-stored-secret' })
+      .on('PATCH', '/api/llm/keys/1', key(1, { label: 'Renamed' }))
     const user = userEvent.setup()
     renderRoute('/keys')
 
     await user.click(await screen.findByRole('button', { name: 'Actions for Key 1' }))
     await user.click(await screen.findByRole('menuitem', { name: 'Edit' }))
     const dialog = await screen.findByRole('dialog')
+    await within(dialog).findByDisplayValue('sk-stored-secret')
     const label = within(dialog).getByLabelText('Label')
     await user.clear(label)
     await user.type(label, 'Renamed')
