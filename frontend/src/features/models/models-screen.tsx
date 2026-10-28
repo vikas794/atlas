@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRight, KeyRound, Layers, Plus, Power, Zap } from 'lucide-react'
+import { ArrowRight, KeyRound, Layers, Plus, Power, Search, Zap } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useBlocker } from 'react-router-dom'
 
@@ -22,7 +22,9 @@ import { errorMessage, failureMessage } from '../../lib/errors'
 import {
   applyStaged,
   chainChanged,
+  filterEntries,
   setEnabled,
+  toggleMessage,
   toStaged,
   toUpdates,
   type StagedEntry,
@@ -46,6 +48,9 @@ export function ModelsScreen() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<FallbackEntry | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<FallbackEntry | null>(null)
+  // View only: never part of the staged chain, so it cannot make the page "dirty".
+  const [query, setQuery] = useState('')
+  const [announcement, setAnnouncement] = useState('')
 
   const queryClient = useQueryClient()
   const { toast } = useToast()
@@ -86,13 +91,22 @@ export function ModelsScreen() {
   )
   const scope = useReveal<HTMLDivElement>([visible.length])
 
+  const matches = useMemo(() => filterEntries(visible, query).length, [visible, query])
+
   const stage = (next: FallbackEntry[]) => setStaged(toStaged(next))
+  const toggle = (ids: number | number[], enabled: boolean) => {
+    const next = setEnabled(entries, ids, enabled)
+    stage(next)
+    const message = toggleMessage(entries, next, enabled)
+    if (message) setAnnouncement(message)
+  }
 
   const save = useMutation({
     mutationFn: () => saveFallback(toUpdates(entries)),
     onSuccess: (data) => {
       queryClient.setQueryData(queryKeys.llmFallback, data)
       setStaged(null)
+      setAnnouncement('')
       toast('Model chain saved.')
       void queryClient.invalidateQueries({ queryKey: queryKeys.llmRateUsage })
     },
@@ -149,7 +163,7 @@ export function ModelsScreen() {
     <div ref={scope}>
       <PageHeader
         title="Models"
-        description="Notes generation tries these in order. If a model has no usable key or fails, the next one takes over."
+        description="Notes generation tries these in order. If a model has no usable key or fails, the next one takes over. Disabled models move to the bottom; turning one back on puts it last among enabled models."
         actions={
           <>
             <Link to="/keys" className={buttonClasses({ variant: 'secondary' })}>
@@ -163,6 +177,10 @@ export function ModelsScreen() {
           </>
         }
       />
+
+      <p className="sr-only" aria-live="polite">
+        {announcement}
+      </p>
 
       {entries.length > 0 ? (
         <>
@@ -253,22 +271,59 @@ export function ModelsScreen() {
             </Link>
           </EmptyState>
         ) : (
-          <ModelTable
-            entries={entries}
-            rates={rates}
-            onReorder={stage}
-            onToggle={(id, enabled) => stage(setEnabled(entries, id, enabled))}
-            onToggleMany={(ids, enabled) => stage(setEnabled(entries, ids, enabled))}
-            onEdit={openEdit}
-            onTest={(entry) => test.mutate(entry)}
-            onDelete={setDeleteTarget}
-          />
+          <>
+            <div
+              role="search"
+              className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="relative w-full max-w-sm">
+                <Search
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-3 top-2 size-icon text-text-muted"
+                />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape' && query !== '') {
+                      event.preventDefault()
+                      setQuery('')
+                    }
+                  }}
+                  aria-label="Search models"
+                  placeholder="Search by model, ID or provider"
+                  className="input pl-6"
+                />
+              </div>
+              <p className="text-label tabular-nums text-text-muted" aria-live="polite">
+                {query.trim() === ''
+                  ? `${visible.length} models`
+                  : `${matches} of ${visible.length} models. Reordering is off while searching.`}
+              </p>
+            </div>
+            <ModelTable
+              entries={entries}
+              rates={rates}
+              onReorder={stage}
+              onToggle={(id, enabled) => toggle(id, enabled)}
+              onToggleMany={(ids, enabled) => toggle(ids, enabled)}
+              onEdit={openEdit}
+              onTest={(entry) => test.mutate(entry)}
+              onDelete={setDeleteTarget}
+              query={query}
+              onClearSearch={() => setQuery('')}
+            />
+          </>
         )}
       </div>
 
       {dirty ? (
         <StagedBar
-          onDiscard={() => setStaged(null)}
+          onDiscard={() => {
+            setStaged(null)
+            setAnnouncement('')
+          }}
           onSave={() => save.mutate()}
           isSaving={save.isPending}
         />

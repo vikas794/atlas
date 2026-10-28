@@ -21,14 +21,18 @@ import { Link } from 'react-router-dom'
 import { ActionMenu } from '../../components/shared/action-menu'
 import { Meter } from '../../components/shared/meter'
 import { ProviderMark } from '../../components/shared/provider-mark'
+import { EmptyState } from '../../components/shared/state-panels'
 import { Badge } from '../../components/ui/badge'
+import { Button } from '../../components/ui/button'
 import { Switch } from '../../components/ui/switch'
 import {
   blockedReason,
   clampRank,
+  filterEntries,
   formatContext,
   groupByProvider,
   moveEntry,
+  primaryIndex,
   quotaFraction,
   quotaSummary,
   withEnabledKey,
@@ -48,12 +52,17 @@ interface ModelTableProps {
   onEdit: (entry: FallbackEntry) => void
   onTest: (entry: FallbackEntry) => void
   onDelete: (entry: FallbackEntry) => void
+  /** Search text; only matching models are listed and reordering is off while it is set. */
+  query: string
+  onClearSearch: () => void
 }
 
 /**
  * Chain table (design.md 6.4), grouped by provider: drag handle, rank, model, context, quota,
  * keys, enabled, menu. Only providers with a key switched on are listed; the rank is the model's
- * place in the whole chain, hidden models included.
+ * place in the whole chain, hidden models included. Toggling a model moves it (see `setEnabled`);
+ * "Primary" marks the first enabled model in the whole chain. A search only filters the view:
+ * ranks stay put, matching groups open, and drag, the rank box and group headers are off.
  */
 export function ModelTable({
   entries,
@@ -64,13 +73,20 @@ export function ModelTable({
   onEdit,
   onTest,
   onDelete,
+  query,
+  onClearSearch,
 }: ModelTableProps) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
-  const groups = groupByProvider(withEnabledKey(entries))
+  const searching = query.trim() !== ''
+  const listed = withEnabledKey(entries)
+  const groups = groupByProvider(filterEntries(listed, query))
+  const totals = new Map<string, number>()
+  for (const entry of listed) totals.set(entry.provider, (totals.get(entry.provider) ?? 0) + 1)
+  const primary = primaryIndex(entries)
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const toggleGroup = (provider: string) =>
     setCollapsed((current) => {
@@ -80,7 +96,7 @@ export function ModelTable({
     })
 
   const handleDragEnd = ({ active, over }: DragEndEvent) => {
-    if (!over || active.id === over.id) return
+    if (searching || !over || active.id === over.id) return
     const from = entries.findIndex((entry) => entry.id === active.id)
     const to = entries.findIndex((entry) => entry.id === over.id)
     // Dragging reorders within a provider; the rank box moves a model anywhere in the chain.
@@ -92,9 +108,18 @@ export function ModelTable({
     // DndContext renders hidden <div>s: keep it outside the list element.
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <div className="space-y-6">
+        {searching && groups.length === 0 ? (
+          <EmptyState title="No models match your search.">
+            <Button className="mt-3" variant="secondary" onClick={onClearSearch}>
+              Clear search
+            </Button>
+          </EmptyState>
+        ) : null}
         {groups.map((group) => {
-          const open = !collapsed.has(group.provider)
+          // A search opens every group that has matches; the user's own collapse state is kept.
+          const open = searching || !collapsed.has(group.provider)
           const panelId = `models-${group.provider}`
+          const count = group.entries.length
           return (
             <section key={group.provider} aria-label={`${group.provider} models`}>
               <h2 className={cn('flex items-center gap-2', open && 'mb-3')}>
@@ -102,13 +127,16 @@ export function ModelTable({
                   type="button"
                   aria-expanded={open}
                   aria-controls={panelId}
+                  disabled={searching}
                   onClick={() => toggleGroup(group.provider)}
-                  className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1 text-left hover:bg-surface-muted"
+                  className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1 text-left hover:bg-surface-muted disabled:hover:bg-transparent"
                 >
                   <ProviderMark name={group.provider} size="lg" />
                   <span className="text-section capitalize text-text">{group.provider}</span>
                   <Badge tone="neutral">
-                    {group.entries.length} {group.entries.length === 1 ? 'model' : 'models'}
+                    {searching
+                      ? `${count} of ${totals.get(group.provider) ?? count}`
+                      : `${count} ${count === 1 ? 'model' : 'models'}`}
                   </Badge>
                   <ChevronDown
                     aria-hidden="true"
@@ -120,7 +148,11 @@ export function ModelTable({
                 </button>
                 <button
                   type="button"
-                  aria-label={`Select all ${group.provider} models`}
+                  aria-label={
+                    searching
+                      ? `Select ${count} matching ${group.provider} models`
+                      : `Select all ${group.provider} models`
+                  }
                   disabled={group.entries.every((entry) => entry.enabled)}
                   onClick={() =>
                     onToggleMany(
@@ -130,11 +162,15 @@ export function ModelTable({
                   }
                   className="rounded-lg px-2 py-1 text-label font-normal text-text-muted hover:bg-surface-muted hover:text-text disabled:opacity-40 disabled:hover:bg-transparent"
                 >
-                  Select all
+                  {searching ? `Select ${count} matching` : 'Select all'}
                 </button>
                 <button
                   type="button"
-                  aria-label={`Deselect all ${group.provider} models`}
+                  aria-label={
+                    searching
+                      ? `Deselect ${count} matching ${group.provider} models`
+                      : `Deselect all ${group.provider} models`
+                  }
                   disabled={group.entries.every((entry) => !entry.enabled)}
                   onClick={() =>
                     onToggleMany(
@@ -144,7 +180,7 @@ export function ModelTable({
                   }
                   className="rounded-lg px-2 py-1 text-label font-normal text-text-muted hover:bg-surface-muted hover:text-text disabled:opacity-40 disabled:hover:bg-transparent"
                 >
-                  Deselect all
+                  {searching ? `Deselect ${count} matching` : 'Deselect all'}
                 </button>
               </h2>
               <div id={panelId} hidden={!open}>
@@ -162,6 +198,8 @@ export function ModelTable({
                             entry={entry}
                             index={index}
                             total={entries.length}
+                            isPrimary={index === primary}
+                            searching={searching}
                             rate={rates.get(entry.id)}
                             onRank={(rank) => onReorder(moveEntry(entries, index, rank - 1))}
                             onToggle={onToggle}
@@ -187,6 +225,10 @@ interface ModelRowProps {
   entry: FallbackEntry
   index: number
   total: number
+  /** The first enabled model in the whole chain. */
+  isPrimary: boolean
+  /** A search is active: drag and the rank box are off. */
+  searching: boolean
   rate: RateLimitRow | undefined
   onRank: (rank: number) => void
   onToggle: (id: number, enabled: boolean) => void
@@ -199,6 +241,8 @@ function ModelRow({
   entry,
   index,
   total,
+  isPrimary,
+  searching,
   rate,
   onRank,
   onToggle,
@@ -214,7 +258,7 @@ function ModelRow({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: entry.id })
+  } = useSortable({ id: entry.id, disabled: searching })
   const name = entry.display_name || entry.model_id
   const quota = quotaSummary(rate)
   const blocked = blockedReason(entry.blocked)
@@ -230,24 +274,40 @@ function ModelRow({
       data-reveal
       className={cn(
         'panel card-lift relative flex flex-wrap items-center gap-x-5 gap-y-3 py-4 pl-3 pr-4',
-        index === 0 && 'border-accent/40',
+        isPrimary && 'border-accent/40',
         isDragging && 'z-10 scale-[1.01] shadow-float',
       )}
     >
       <button
         type="button"
         ref={setActivatorNodeRef}
-        aria-label={`Reorder ${name}. Press Space to lift, arrow keys to move, Space to drop.`}
-        className="inline-flex cursor-grab touch-none rounded-lg p-2 text-text-muted hover:bg-surface-muted hover:text-text active:cursor-grabbing"
+        aria-label={
+          searching
+            ? `Reordering ${name} is unavailable while searching`
+            : `Reorder ${name}. Press Space to lift, arrow keys to move, Space to drop.`
+        }
+        title={searching ? 'Clear search to reorder' : undefined}
+        className={cn(
+          'inline-flex touch-none rounded-lg p-2 text-text-muted',
+          searching
+            ? 'cursor-not-allowed opacity-40'
+            : 'cursor-grab hover:bg-surface-muted hover:text-text active:cursor-grabbing',
+        )}
         {...attributes}
-        {...listeners}
+        {...(searching ? { 'aria-disabled': true } : listeners)}
       >
         <GripVertical aria-hidden="true" className="size-icon-lg" />
       </button>
 
       <div className="flex flex-col items-center">
-        <RankInput name={name} rank={index + 1} total={total} onCommit={onRank} />
-        {index === 0 ? (
+        <RankInput
+          name={name}
+          rank={index + 1}
+          total={total}
+          readOnly={searching}
+          onCommit={onRank}
+        />
+        {isPrimary ? (
           <span className="text-[10px] font-semibold uppercase tracking-wider text-accent">
             Primary
           </span>
@@ -346,17 +406,20 @@ function RankInput({
   name,
   rank,
   total,
+  readOnly,
   onCommit,
 }: {
   name: string
   rank: number
   total: number
+  /** While a search is active the box only shows the rank; the draft is ignored. */
+  readOnly: boolean
   onCommit: (rank: number) => void
 }) {
   const [draft, setDraft] = useState<string | null>(null)
 
   const commit = () => {
-    if (draft === null) return
+    if (readOnly || draft === null) return
     const parsed = Number(draft)
     setDraft(null)
     if (!Number.isFinite(parsed) || draft.trim() === '') return
@@ -378,11 +441,14 @@ function RankInput({
       type="text"
       inputMode="numeric"
       aria-label={`Rank of ${name}`}
-      title="Type a number to move this model to that rank"
+      title={readOnly ? 'Clear search to reorder' : 'Type a number to move this model to that rank'}
+      readOnly={readOnly}
       className="tabular h-10 w-14 rounded-lg border border-transparent bg-transparent px-1 text-center font-display text-[24px] font-semibold text-text hover:border-border focus:border-accent"
-      value={draft ?? formatPosition(rank, 2)}
+      value={readOnly ? formatPosition(rank, 2) : (draft ?? formatPosition(rank, 2))}
       onFocus={(event) => event.currentTarget.select()}
-      onChange={(event) => setDraft(event.target.value.replace(/[^0-9]/g, ''))}
+      onChange={(event) => {
+        if (!readOnly) setDraft(event.target.value.replace(/[^0-9]/g, ''))
+      }}
       onBlur={commit}
       onKeyDown={onKeyDown}
     />

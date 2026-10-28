@@ -2,6 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 
+import { formatPosition } from '../../lib/format'
 import type { FallbackEntry } from '../../lib/types'
 import { mockApi, renderRoute } from '../../test/harness'
 
@@ -70,7 +71,7 @@ describe('ModelsScreen', () => {
     renderRoute('/models')
 
     expect(await screen.findByRole('heading', { name: 'Models' })).toBeInTheDocument()
-    expect(await screen.findByText('Model 1')).toBeInTheDocument()
+    expect(await screen.findByRole('searchbox', { name: 'Search models' })).toBeInTheDocument()
     expect(rowNames()).toEqual(['Model 1', 'Model 2'])
     expect(screen.getByRole('link', { name: 'No keys' })).toHaveAttribute('href', '/keys')
     expect(screen.getByText('1M')).toBeInTheDocument()
@@ -140,7 +141,7 @@ describe('ModelsScreen', () => {
 
   it('stages an enable toggle and saves it with dense priorities', async () => {
     const api = setup().on('PUT', '/api/llm/fallback', {
-      entries: [entry(1), entry(2, { enabled: false, chain_enabled: false }), entry(3)],
+      entries: [entry(1), entry(3), entry(2, { enabled: false, chain_enabled: false })],
     })
     const user = userEvent.setup()
     renderRoute('/models')
@@ -156,8 +157,8 @@ describe('ModelsScreen', () => {
     expect(api.callsTo('PUT', '/api/llm/fallback')[0].body).toEqual({
       entries: [
         { model_id: 1, priority: 1, enabled: true },
-        { model_id: 2, priority: 2, enabled: false },
-        { model_id: 3, priority: 3, enabled: true },
+        { model_id: 3, priority: 2, enabled: true },
+        { model_id: 2, priority: 3, enabled: false },
       ],
     })
     expect(await screen.findByText('Model chain saved.')).toBeInTheDocument()
@@ -181,6 +182,250 @@ describe('ModelsScreen', () => {
     await user.click(screen.getByRole('button', { name: 'Discard' }))
     expect(rowNames()).toEqual(['Model 1', 'Model 2', 'Model 3'])
     expect(screen.queryByRole('region', { name: 'Unsaved changes' })).not.toBeInTheDocument()
+  })
+
+  it('re-enabling puts the model after the last enabled one', async () => {
+    const off = { enabled: false, chain_enabled: false }
+    setup([entry(1), entry(2), entry(3, off), entry(4, off)])
+    const user = userEvent.setup()
+    renderRoute('/models')
+
+    await user.click(await screen.findByRole('switch', { name: 'Enable Model 4' }))
+    expect(rowNames()).toEqual(['Model 1', 'Model 2', 'Model 4', 'Model 3'])
+  })
+
+  it('select all after deselect all moves only the changed models', async () => {
+    setup([
+      entry(1, { enabled: false, chain_enabled: false }),
+      entry(2, { provider: 'nvidia' }),
+      entry(3),
+    ])
+    const user = userEvent.setup()
+    renderRoute('/models')
+
+    await user.click(await screen.findByRole('button', { name: 'Select all gemini models' }))
+    // Model 1 was the only change, so it goes after the last enabled model (3).
+    expect(rowNames()).toEqual(['Model 2', 'Model 3', 'Model 1'])
+  })
+
+  it('labels the first enabled model Primary', async () => {
+    setup([entry(1, { enabled: false, chain_enabled: false }), entry(2), entry(3)])
+    renderRoute('/models')
+
+    const second = (await screen.findByRole('textbox', { name: 'Rank of Model 2' })).closest('li')!
+    const first = screen.getByRole('textbox', { name: 'Rank of Model 1' }).closest('li')!
+    expect(within(second).getByText('Primary')).toBeInTheDocument()
+    expect(within(first).queryByText('Primary')).not.toBeInTheDocument()
+  })
+
+  it('labels no row Primary when the first enabled model is hidden', async () => {
+    setup([
+      entry(1, { provider: 'openai', key_count: 1, enabled_key_count: 0, usable_key_count: 0 }),
+      entry(2),
+    ])
+    renderRoute('/models')
+
+    await screen.findAllByText('Model 2')
+    expect(screen.queryByText('Primary')).not.toBeInTheDocument()
+  })
+
+  it('announces a toggle in the live region', async () => {
+    setup()
+    const user = userEvent.setup()
+    renderRoute('/models')
+
+    await user.click(await screen.findByRole('switch', { name: 'Disable Model 2' }))
+    expect(screen.getByText('Model 2 disabled, moved to rank 3')).toBeInTheDocument()
+  })
+
+  describe('search', () => {
+    const MIXED = () => [
+      entry(1),
+      entry(2, { provider: 'nvidia' }),
+      entry(3),
+    ]
+    const searchBox = () => screen.getByRole('searchbox', { name: 'Search models' })
+
+    it('filters by name, id and provider', async () => {
+      setup(MIXED())
+      const user = userEvent.setup()
+      renderRoute('/models')
+
+      await screen.findByRole('searchbox', { name: 'Search models' })
+      await user.type(searchBox(), 'model-3')
+      expect(rowNames()).toEqual(['Model 3'])
+      await user.clear(searchBox())
+      await user.type(searchBox(), 'NVIDIA')
+      expect(rowNames()).toEqual(['Model 2'])
+      await user.clear(searchBox())
+      await user.type(searchBox(), 'model 1')
+      expect(rowNames()).toEqual(['Model 1'])
+    })
+
+    it('hides groups with no matches and opens collapsed groups that match', async () => {
+      setup(MIXED())
+      const user = userEvent.setup()
+      renderRoute('/models')
+
+      await user.click(await screen.findByRole('button', { name: /gemini/i, expanded: true }))
+      expect(rowNames()).toEqual(['Model 2'])
+
+      await user.type(searchBox(), 'model-1')
+      expect(rowNames()).toEqual(['Model 1'])
+      expect(screen.queryByRole('region', { name: 'nvidia models' })).not.toBeInTheDocument()
+    })
+
+    it('restores the collapse layout after clearing a search', async () => {
+      setup(MIXED())
+      const user = userEvent.setup()
+      renderRoute('/models')
+
+      await user.click(await screen.findByRole('button', { name: /gemini/i, expanded: true }))
+      await user.type(searchBox(), 'model-1')
+      expect(rowNames()).toEqual(['Model 1'])
+      await user.clear(searchBox())
+      expect(rowNames()).toEqual(['Model 2'])
+    })
+
+    it('shows the no-match state with a Clear search button and keeps the collapse layout', async () => {
+      setup(MIXED())
+      const user = userEvent.setup()
+      renderRoute('/models')
+
+      await user.click(await screen.findByRole('button', { name: /gemini/i, expanded: true }))
+      await user.type(searchBox(), 'zzz')
+      expect(screen.getByText('No models match your search.')).toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Clear search' }))
+      expect(searchBox()).toHaveValue('')
+      expect(rowNames()).toEqual(['Model 2'])
+    })
+
+    it('keeps rank numbers at chain positions while searching', async () => {
+      setup(MIXED())
+      const user = userEvent.setup()
+      renderRoute('/models')
+
+      await screen.findByRole('searchbox', { name: 'Search models' })
+      await user.type(searchBox(), 'model-3')
+      expect(screen.getByRole('textbox', { name: 'Rank of Model 3' })).toHaveValue(
+        formatPosition(3, 2),
+      )
+    })
+
+    it('turns off drag and the rank input while searching', async () => {
+      setup(MIXED())
+      const user = userEvent.setup()
+      renderRoute('/models')
+
+      await screen.findByRole('searchbox', { name: 'Search models' })
+      await user.type(searchBox(), 'model-3')
+      const rank = screen.getByRole('textbox', { name: 'Rank of Model 3' })
+      expect(rank).toHaveAttribute('readonly')
+      expect(
+        screen.getByRole('button', { name: 'Reordering Model 3 is unavailable while searching' }),
+      ).toHaveAttribute('aria-disabled', 'true')
+
+      await user.type(rank, '1{Enter}')
+      expect(rowNames()).toEqual(['Model 3'])
+      expect(screen.queryByRole('region', { name: 'Unsaved changes' })).not.toBeInTheDocument()
+
+      await user.clear(searchBox())
+      expect(screen.getByRole('textbox', { name: 'Rank of Model 3' })).not.toHaveAttribute(
+        'readonly',
+      )
+      expect(screen.getByRole('button', { name: /^Reorder Model 3/ })).toHaveAttribute(
+        'aria-disabled',
+        'false',
+      )
+    })
+
+    it('limits select all and deselect all to matches', async () => {
+      setup([
+        entry(1, { display_name: 'Alpha one' }),
+        entry(2, { display_name: 'Alpha two' }),
+        entry(3, { display_name: 'Beta' }),
+      ])
+      const user = userEvent.setup()
+      renderRoute('/models')
+
+      await screen.findAllByText('Beta')
+      await user.type(searchBox(), 'alpha')
+      await user.click(screen.getByRole('button', { name: 'Deselect 2 matching gemini models' }))
+      await user.clear(searchBox())
+
+      expect(screen.getByRole('switch', { name: 'Enable Alpha one' })).toBeInTheDocument()
+      expect(screen.getByRole('switch', { name: 'Enable Alpha two' })).toBeInTheDocument()
+      expect(screen.getByRole('switch', { name: 'Disable Beta' })).toBeInTheDocument()
+    })
+
+    it('shows N of M and the matching count labels', async () => {
+      setup([entry(1), entry(2), entry(3, { provider: 'nvidia' })])
+      const user = userEvent.setup()
+      renderRoute('/models')
+
+      await screen.findByRole('searchbox', { name: 'Search models' })
+      await user.type(searchBox(), 'model-1')
+      expect(screen.getByText('1 of 2')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Select 1 matching gemini models' })).toBeVisible()
+      expect(screen.getByText('Select 1 matching')).toBeInTheDocument()
+    })
+
+    it('disables group headers while searching', async () => {
+      setup(MIXED())
+      const user = userEvent.setup()
+      renderRoute('/models')
+
+      await screen.findByRole('searchbox', { name: 'Search models' })
+      await user.type(searchBox(), 'model')
+      expect(screen.getByRole('button', { name: /gemini/i, expanded: true })).toBeDisabled()
+    })
+
+    it('Escape clears a non-empty search', async () => {
+      setup(MIXED())
+      const user = userEvent.setup()
+      renderRoute('/models')
+
+      await screen.findByRole('searchbox', { name: 'Search models' })
+      await user.type(searchBox(), 'model-3{Escape}')
+      expect(searchBox()).toHaveValue('')
+      expect(rowNames()).toEqual(['Model 1', 'Model 3', 'Model 2'])
+    })
+
+    it('shows the result count and the reorder-off line', async () => {
+      setup(MIXED())
+      const user = userEvent.setup()
+      renderRoute('/models')
+
+      await screen.findByRole('searchbox', { name: 'Search models' })
+      expect(screen.getByText('3 models')).toBeInTheDocument()
+      await user.type(searchBox(), 'model-1')
+      expect(
+        screen.getByText('1 of 3 models. Reordering is off while searching.'),
+      ).toBeInTheDocument()
+    })
+
+    it('shows no search row when no model is visible', async () => {
+      setup([entry(1, { key_count: 1, enabled_key_count: 0, usable_key_count: 0 })])
+      renderRoute('/models')
+
+      expect(await screen.findByText(/No models to show/)).toBeInTheDocument()
+      expect(screen.queryByRole('searchbox')).not.toBeInTheDocument()
+    })
+
+    it('does not mark the page changed and keeps stat cards and Serving order unfiltered', async () => {
+      setup(MIXED())
+      const user = userEvent.setup()
+      renderRoute('/models')
+
+      await screen.findByRole('searchbox', { name: 'Search models' })
+      await user.type(searchBox(), 'model-1')
+      expect(screen.queryByRole('region', { name: 'Unsaved changes' })).not.toBeInTheDocument()
+      const servingOrder = screen.getByText('Serving order').parentElement
+      expect(servingOrder).toHaveTextContent('Model 1')
+      expect(servingOrder).toHaveTextContent('Model 2')
+      expect(servingOrder).toHaveTextContent('Model 3')
+    })
   })
 
   it('exposes a keyboard-operable drag handle per row', async () => {

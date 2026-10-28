@@ -23,6 +23,17 @@ export function withEnabledKey(entries: readonly FallbackEntry[]): FallbackEntry
   return entries.filter((entry) => entry.enabled_key_count > 0)
 }
 
+/** Entries whose name, model id or provider contains the query (trimmed, case-insensitive). */
+export function filterEntries(entries: readonly FallbackEntry[], query: string): FallbackEntry[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return [...entries]
+  return entries.filter((entry) =>
+    [entry.display_name, entry.model_id, entry.provider].some((field) =>
+      field?.toLowerCase().includes(needle),
+    ),
+  )
+}
+
 /** Group by provider; groups and the models inside keep chain order (a group sits where its first model does). */
 export function groupByProvider(entries: readonly FallbackEntry[]): ProviderGroup[] {
   const groups = new Map<string, FallbackEntry[]>()
@@ -39,16 +50,45 @@ export function clampRank(index: number, length: number): number {
   return Math.min(Math.max(Math.trunc(index), 0), Math.max(length - 1, 0))
 }
 
-/** Set the enabled flag of one entry (by model id). */
+/**
+ * Enable or disable models (by id) and move only the ones whose state changed. Disabled models go
+ * to the end of the whole chain; enabled ones go right after the last enabled entry (hidden models
+ * included). Moved models keep their current relative order. Other entries stay where they are.
+ */
 export function setEnabled(
   entries: readonly FallbackEntry[],
   modelIds: number | readonly number[],
   enabled: boolean,
 ): FallbackEntry[] {
   const ids = new Set(typeof modelIds === 'number' ? [modelIds] : modelIds)
-  return entries.map((entry) =>
-    ids.has(entry.id) ? { ...entry, enabled, chain_enabled: enabled } : entry,
-  )
+  const changed = entries.filter((entry) => ids.has(entry.id) && entry.enabled !== enabled)
+  if (changed.length === 0) return [...entries]
+  const moved = changed.map((entry) => ({ ...entry, enabled, chain_enabled: enabled }))
+  const rest = entries.filter((entry) => !(ids.has(entry.id) && entry.enabled !== enabled))
+  if (!enabled) return [...rest, ...moved]
+  const lastEnabled = rest.map((entry) => entry.enabled).lastIndexOf(true)
+  return [...rest.slice(0, lastEnabled + 1), ...moved, ...rest.slice(lastEnabled + 1)]
+}
+
+/** Index of the first enabled entry in the whole chain (the model tried first), or -1. */
+export function primaryIndex(entries: readonly FallbackEntry[]): number {
+  return entries.findIndex((entry) => entry.enabled)
+}
+
+/** Screen-reader message for a toggle: what changed and where it landed; '' when nothing did. */
+export function toggleMessage(
+  before: readonly FallbackEntry[],
+  after: readonly FallbackEntry[],
+  enabled: boolean,
+): string {
+  const wasEnabled = new Map(before.map((entry) => [entry.id, entry.enabled]))
+  const changed = after.filter((entry) => wasEnabled.get(entry.id) !== entry.enabled)
+  const state = enabled ? 'enabled' : 'disabled'
+  if (changed.length === 0) return ''
+  if (changed.length > 1) return `${changed.length} models ${state}`
+  const [entry] = changed
+  const rank = after.findIndex((item) => item.id === entry.id) + 1
+  return `${entry.display_name || entry.model_id} ${state}, moved to rank ${rank}`
 }
 
 /** A staged edit of the chain: order plus enable flags, by model id. */
