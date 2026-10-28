@@ -14,7 +14,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { ChevronDown, GripVertical, Pencil, PlayCircle, Trash2 } from 'lucide-react'
+import { ChevronDown, Eye, EyeOff, GripVertical, Pencil, PlayCircle, Trash2 } from 'lucide-react'
 import { useState, type KeyboardEvent } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -31,11 +31,11 @@ import {
   filterEntries,
   formatContext,
   groupByProvider,
+  listedEntries,
   moveEntry,
   primaryIndex,
   quotaFraction,
   quotaSummary,
-  withEnabledKey,
 } from '../../lib/model-chain'
 import { formatPosition } from '../../lib/format'
 import type { FallbackEntry, RateLimitRow } from '../../lib/types'
@@ -52,6 +52,12 @@ interface ModelTableProps {
   onEdit: (entry: FallbackEntry) => void
   onTest: (entry: FallbackEntry) => void
   onDelete: (entry: FallbackEntry) => void
+  /** Hide or unhide one model (hidden models are off and only listed when `showHidden`). */
+  onHide: (entry: FallbackEntry, hidden: boolean) => void
+  showHidden: boolean
+  /** Ids ticked for a bulk Hide or Delete. */
+  selected: ReadonlySet<number>
+  onSelect: (ids: number[], checked: boolean) => void
   /** Search text; only matching models are listed and reordering is off while it is set. */
   query: string
   onClearSearch: () => void
@@ -73,6 +79,10 @@ export function ModelTable({
   onEdit,
   onTest,
   onDelete,
+  onHide,
+  showHidden,
+  selected,
+  onSelect,
   query,
   onClearSearch,
 }: ModelTableProps) {
@@ -82,7 +92,7 @@ export function ModelTable({
   )
 
   const searching = query.trim() !== ''
-  const listed = withEnabledKey(entries)
+  const listed = listedEntries(entries, showHidden)
   const groups = groupByProvider(filterEntries(listed, query))
   const totals = new Map<string, number>()
   for (const entry of listed) totals.set(entry.provider, (totals.get(entry.provider) ?? 0) + 1)
@@ -120,9 +130,22 @@ export function ModelTable({
           const open = searching || !collapsed.has(group.provider)
           const panelId = `models-${group.provider}`
           const count = group.entries.length
+          const groupIds = group.entries.map((entry) => entry.id)
+          const allTicked = groupIds.every((id) => selected.has(id))
           return (
             <section key={group.provider} aria-label={`${group.provider} models`}>
               <h2 className={cn('flex items-center gap-2', open && 'mb-3')}>
+                <input
+                  type="checkbox"
+                  className="ml-2 size-4 cursor-pointer accent-accent"
+                  aria-label={
+                    searching
+                      ? `Tick ${count} matching ${group.provider} models`
+                      : `Tick all ${group.provider} models`
+                  }
+                  checked={allTicked}
+                  onChange={(event) => onSelect(groupIds, event.target.checked)}
+                />
                 <button
                   type="button"
                   aria-expanded={open}
@@ -153,7 +176,7 @@ export function ModelTable({
                       ? `Select ${count} matching ${group.provider} models`
                       : `Select all ${group.provider} models`
                   }
-                  disabled={group.entries.every((entry) => entry.enabled)}
+                  disabled={group.entries.every((entry) => entry.enabled || entry.hidden)}
                   onClick={() =>
                     onToggleMany(
                       group.entries.map((entry) => entry.id),
@@ -200,12 +223,15 @@ export function ModelTable({
                             total={entries.length}
                             isPrimary={index === primary}
                             searching={searching}
+                            ticked={selected.has(entry.id)}
                             rate={rates.get(entry.id)}
                             onRank={(rank) => onReorder(moveEntry(entries, index, rank - 1))}
                             onToggle={onToggle}
+                            onTick={(checked) => onSelect([entry.id], checked)}
                             onEdit={onEdit}
                             onTest={onTest}
                             onDelete={onDelete}
+                            onHide={onHide}
                           />
                         )
                       })}
@@ -229,12 +255,16 @@ interface ModelRowProps {
   isPrimary: boolean
   /** A search is active: drag and the rank box are off. */
   searching: boolean
+  /** Ticked for a bulk action. */
+  ticked: boolean
   rate: RateLimitRow | undefined
   onRank: (rank: number) => void
   onToggle: (id: number, enabled: boolean) => void
+  onTick: (checked: boolean) => void
   onEdit: (entry: FallbackEntry) => void
   onTest: (entry: FallbackEntry) => void
   onDelete: (entry: FallbackEntry) => void
+  onHide: (entry: FallbackEntry, hidden: boolean) => void
 }
 
 function ModelRow({
@@ -243,12 +273,15 @@ function ModelRow({
   total,
   isPrimary,
   searching,
+  ticked,
   rate,
   onRank,
   onToggle,
+  onTick,
   onEdit,
   onTest,
   onDelete,
+  onHide,
 }: ModelRowProps) {
   const {
     attributes,
@@ -275,9 +308,19 @@ function ModelRow({
       className={cn(
         'panel card-lift relative flex flex-wrap items-center gap-x-5 gap-y-3 py-4 pl-3 pr-4',
         isPrimary && 'border-accent/40',
+        ticked && 'border-accent',
+        entry.hidden && 'opacity-60',
         isDragging && 'z-10 scale-[1.01] shadow-float',
       )}
     >
+      <input
+        type="checkbox"
+        className="size-4 cursor-pointer accent-accent"
+        aria-label={`Select ${name}`}
+        checked={ticked}
+        onChange={(event) => onTick(event.target.checked)}
+      />
+
       <button
         type="button"
         ref={setActivatorNodeRef}
@@ -319,6 +362,7 @@ function ModelRow({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate text-section text-text">{name}</span>
+            {entry.hidden ? <Badge tone="neutral">Hidden</Badge> : null}
           </div>
           <code className="block truncate font-mono text-code text-text-muted">
             {entry.model_id}
@@ -378,6 +422,7 @@ function ModelRow({
 
         <Switch
           checked={entry.enabled}
+          disabled={entry.hidden}
           onCheckedChange={(next) => onToggle(entry.id, next)}
           label={`${entry.enabled ? 'Disable' : 'Enable'} ${name}`}
         />
@@ -387,6 +432,12 @@ function ModelRow({
           actions={[
             { key: 'edit', label: 'Edit', icon: Pencil, onSelect: () => onEdit(entry) },
             { key: 'test', label: 'Test', icon: PlayCircle, onSelect: () => onTest(entry) },
+            {
+              key: 'hide',
+              label: entry.hidden ? 'Unhide' : 'Hide',
+              icon: entry.hidden ? Eye : EyeOff,
+              onSelect: () => onHide(entry, !entry.hidden),
+            },
             {
               key: 'delete',
               label: 'Delete',

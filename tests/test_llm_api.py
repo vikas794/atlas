@@ -398,11 +398,91 @@ def test_bulk_add_creates_disabled_models_and_skips_duplicates(client: TestClien
         json={"provider": "nvidia", "model_ids": ["n1", "n2", "n2", " n3 "]},
     )
     assert response.status_code == 201
-    assert response.json() == {"added": 2, "skipped": 1}
+    assert response.json() == {"added": 2, "skipped": 1, "skipped_hidden": 0}
     models = {m["model_id"]: m for m in client.get("/api/llm/models").json()["models"]}
     assert models["n2"]["enabled"] is False
     assert models["n3"]["enabled"] is False
     assert models["n1"]["enabled"] is True
+
+
+def _models_by_id(client: TestClient) -> dict[str, dict]:
+    return {m["model_id"]: m for m in client.get("/api/llm/models").json()["models"]}
+
+
+def test_bulk_delete_removes_models_and_chain_entries(client: TestClient) -> None:
+    a = _add_model(client, model_id="a")
+    b = _add_model(client, model_id="b")
+    c = _add_model(client, model_id="c")
+    response = client.post("/api/llm/models/bulk-delete", json={"ids": [a["id"], b["id"], 9999]})
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 2}
+    assert [e["id"] for e in client.get("/api/llm/fallback").json()["entries"]] == [c["id"]]
+
+
+def test_deleted_models_come_back_with_bulk_add(client: TestClient) -> None:
+    gone = _add_model(client, provider="nvidia", model_id="n1")
+    client.post("/api/llm/models/bulk-delete", json={"ids": [gone["id"]]})
+    body = client.post(
+        "/api/llm/models/bulk", json={"provider": "nvidia", "model_ids": ["n1"]}
+    ).json()
+    assert body["added"] == 1
+
+
+def test_hidden_models_are_off_and_skipped_by_bulk_add(client: TestClient) -> None:
+    a = _add_model(client, provider="nvidia", model_id="n1")
+    _add_model(client, provider="nvidia", model_id="n2")
+    response = client.post("/api/llm/models/bulk-hide", json={"ids": [a["id"]], "hidden": True})
+    assert response.json() == {"updated": 1}
+    hidden = _models_by_id(client)["n1"]
+    assert hidden["hidden"] is True
+    assert hidden["enabled"] is False
+    assert hidden["chain_enabled"] is False
+
+    body = client.post(
+        "/api/llm/models/bulk", json={"provider": "nvidia", "model_ids": ["n1", "n2", "n3"]}
+    ).json()
+    assert body == {"added": 1, "skipped": 2, "skipped_hidden": 1}
+    after = _models_by_id(client)
+    assert after["n1"]["hidden"] is True
+    assert after["n1"]["enabled"] is False
+
+
+def test_hiding_moves_models_to_the_end_and_reranks_the_rest(client: TestClient) -> None:
+    a, b, c, d = (_add_model(client, model_id=m) for m in "abcd")
+    client.post("/api/llm/models/bulk-hide", json={"ids": [b["id"], c["id"]], "hidden": True})
+    entries = client.get("/api/llm/fallback").json()["entries"]
+    assert [e["model_id"] for e in entries] == ["a", "d", "b", "c"]
+    assert [e["priority"] for e in entries] == [1, 2, 3, 4]
+
+    client.post("/api/llm/models/bulk-hide", json={"ids": [b["id"]], "hidden": False})
+    entries = client.get("/api/llm/fallback").json()["entries"]
+    assert [e["model_id"] for e in entries] == ["a", "d", "b", "c"]
+    assert [e["priority"] for e in entries] == [1, 2, 3, 4]
+    assert entries[2]["enabled"] is False
+    assert a["id"] != d["id"]
+
+
+def test_a_hidden_model_cannot_be_switched_on(client: TestClient) -> None:
+    model = _add_model(client)
+    client.post("/api/llm/models/bulk-hide", json={"ids": [model["id"]], "hidden": True})
+    patched = client.patch(f"/api/llm/models/{model['id']}", json={"enabled": True}).json()
+    assert patched["enabled"] is False
+    client.put(
+        "/api/llm/fallback",
+        json={"entries": [{"model_id": model["id"], "priority": 1, "enabled": True}]},
+    )
+    entry = client.get("/api/llm/fallback").json()["entries"][0]
+    assert entry["enabled"] is False
+    assert entry["chain_enabled"] is False
+
+
+def test_unhide_keeps_the_model_off_but_listed(client: TestClient) -> None:
+    model = _add_model(client)
+    client.post("/api/llm/models/bulk-hide", json={"ids": [model["id"]], "hidden": True})
+    client.post("/api/llm/models/bulk-hide", json={"ids": [model["id"]], "hidden": False})
+    after = _models_by_id(client)["gemini-test"]
+    assert after["hidden"] is False
+    assert after["enabled"] is False
 
 
 # --- model test ----------------------------------------------------------------------------

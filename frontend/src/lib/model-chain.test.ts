@@ -7,6 +7,7 @@ import {
   clampRank,
   filterEntries,
   formatContext,
+  listedEntries,
   moveEntry,
   primaryIndex,
   quotaSummary,
@@ -35,6 +36,7 @@ function entry(id: number, overrides: Partial<FallbackEntry> = {}): FallbackEntr
     source: 'user',
     priority: id,
     chain_enabled: true,
+    hidden: false,
     key_count: 1,
     enabled_key_count: 1,
     usable_key_count: 1,
@@ -71,6 +73,33 @@ describe('clampRank', () => {
 
 const off = (id: number, overrides: Partial<FallbackEntry> = {}) =>
   entry(id, { enabled: false, chain_enabled: false, ...overrides })
+
+describe('hidden models', () => {
+  const hidden = (id: number) => off(id, { hidden: true })
+
+  it('listedEntries drops hidden models and those without a key, unless asked', () => {
+    const input = [entry(1), hidden(2), entry(3, { enabled_key_count: 0 })]
+    expect(ids(listedEntries(input, false))).toEqual([1])
+    expect(ids(listedEntries(input, true))).toEqual([1, 2])
+  })
+
+  it('setEnabled never switches a hidden model on', () => {
+    const input = [entry(1), hidden(2)]
+    expect(ids(setEnabled(input, 2, true))).toEqual([1, 2])
+    expect(setEnabled(input, 2, true)[1].enabled).toBe(false)
+  })
+
+  it('applyStaged moves a model hidden since staging to the end', () => {
+    const staged = toStaged([entry(1), entry(2), entry(3)])
+    expect(ids(applyStaged([entry(1), hidden(2), entry(3)], staged))).toEqual([1, 3, 2])
+  })
+
+  it('applyStaged keeps a model hidden since staging off', () => {
+    const staged = toStaged([entry(1), entry(2)])
+    const result = applyStaged([entry(1), hidden(2)], staged)
+    expect(result[1]).toMatchObject({ enabled: false, chain_enabled: false })
+  })
+})
 
 describe('setEnabled', () => {
   it('moves a disabled model to the end of the chain', () => {

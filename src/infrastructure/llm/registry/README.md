@@ -5,7 +5,7 @@ Database-backed model registry: models, API keys, one ordered fallback chain, pe
 
 ## Interface
 - `ModelRegistry(repo, *, clock=time.time)` (injectable clock), `Candidate` (`service.py`): `candidates(estimated_tokens)`, `usable_keys`, `begin_attempt`, `record_success`, `record_failure`, `cooldowns_by_key`, `rate_limit_usage`, `token_usage`, `check_key`, `check_all`. Constants `RATE_LIMIT_LADDER`, `AUTO_DISABLE_AFTER`, `USABLE_STATUSES`, cooldown seconds.
-- `RegistryRepo(db_path)`, `ModelRow`, `KeyRow` (`repo.py`): CRUD for models and keys, `replace_chain`, key health, cooldown and usage tables, meta and `saved_settings`. `ALL_MODELS = "*"`.
+- `RegistryRepo(db_path)`, `ModelRow`, `KeyRow` (`repo.py`): CRUD for models and keys (`delete_models`, `set_hidden` for bulk delete and hide), `replace_chain`, key health, cooldown and usage tables, meta and `saved_settings`. `ALL_MODELS = "*"`.
 - `seed_registry(registry)` (`seed.py`): one-time seeding of defaults.
 - `PROVIDERS`, `ProviderInfo`, `known_providers()`, `provider_info(name)`, `litellm_model_for(provider, model_id)`, `mask_key(value)` (`providers.py`).
 - `fetch_provider_models(provider, key, api_base)`, `probe_key(...)`, `ProviderQueryError`, `GEMINI_BASE` (`health.py`). `registry/__init__.py` exports only `Candidate`, `ModelRegistry`, `RegistryRepo`, `seed_registry`.
@@ -16,6 +16,7 @@ Database-backed model registry: models, API keys, one ordered fallback chain, pe
 - Key values are masked when exposed.
 - `known_providers()` / `provider_info()` also cover every OpenAI-compatible LiteLLM provider except `github_copilot`, `azure_ai`, `chatgpt`. The slug check for model ids lives in `schemas/llm.py`; `providers.py` has a private `_SLUG` for discovery.
 - Seeding runs once (guarded by a meta flag).
+- A hidden model (`llm_models.hidden`, migration 0008) is a registered row, so bulk import skips it; hiding switches it off, and `update_model` / `replace_chain` never switch a hidden model on.
 
 ## Side Effects
 - SQLite reads/writes; network calls to provider APIs for model listing and key probes (15s timeout).

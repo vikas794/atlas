@@ -5,7 +5,7 @@ Model catalog and fallback-chain editor (route `/models`).
 
 ## Interface
 - `ModelsScreen` - route component; stages ordering/enable changes and saves the fallback chain.
-- `ModelTable` - provider-grouped, collapsible table with select/deselect all per provider.
+- `ModelTable` - provider-grouped, collapsible table with select/deselect all (enable) per provider, row and group checkboxes for bulk actions, and a row Hide/Unhide action.
 - `ModelDialog` - add/edit model and bulk import dialog.
 
 - `ModelsScreen` also calls `getRateLimitUsage` (quota display); `ModelDialog` calls `getAvailableModels` for the bulk-import picker.
@@ -17,8 +17,11 @@ Model catalog and fallback-chain editor (route `/models`).
 - "Primary" is the first enabled entry in the whole chain (`primaryIndex`); it can be a hidden model, in which case no row shows it.
 - Search (`filterEntries`) is view-only state in `ModelsScreen`: it never enters the staged chain, ranks stay whole-chain positions, matching groups open, group headers, drag and the rank box are off, and select/deselect all act on the matches only.
 
+- Bulk Hide / Delete (ticked rows, a bar at the bottom like the Keys batch bar) are immediate server calls, not staged: they never touch the staged chain. Ticks only count while the row is listed.
+- A hidden model stays registered so "Add all" skips it (the `UNIQUE (provider, model_id)` check), but it is switched off and not listed (`listedEntries`) unless "Show hidden" is on; there it can be unhidden. `setEnabled` and `applyStaged` never switch a hidden model on. Hiding moves the model to the end of the chain and renumbers the rest (server `set_hidden`; `applyStaged` does the same for staged edits), so visible ranks have no gaps. Delete removes the row, so "Add all" can re-add it.
+
 ## Side Effects
-- Network calls: create (single/bulk), update, delete, test models; `saveFallback`.
+- Network calls: create (single/bulk), update, delete (single/bulk), hide/unhide (bulk), test models; `saveFallback`.
 
 ## Verification
 - Run: `npm test` (from `frontend/`)

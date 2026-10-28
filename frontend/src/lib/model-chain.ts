@@ -23,6 +23,14 @@ export function withEnabledKey(entries: readonly FallbackEntry[]): FallbackEntry
   return entries.filter((entry) => entry.enabled_key_count > 0)
 }
 
+/** The models the table lists: a key is switched on for the provider, and hidden ones only on request. */
+export function listedEntries(
+  entries: readonly FallbackEntry[],
+  showHidden: boolean,
+): FallbackEntry[] {
+  return withEnabledKey(entries).filter((entry) => showHidden || !entry.hidden)
+}
+
 /** Entries whose name, model id or provider contains the query (trimmed, case-insensitive). */
 export function filterEntries(entries: readonly FallbackEntry[], query: string): FallbackEntry[] {
   const needle = query.trim().toLowerCase()
@@ -61,10 +69,13 @@ export function setEnabled(
   enabled: boolean,
 ): FallbackEntry[] {
   const ids = new Set(typeof modelIds === 'number' ? [modelIds] : modelIds)
-  const changed = entries.filter((entry) => ids.has(entry.id) && entry.enabled !== enabled)
+  // A hidden model is never switched on.
+  const flips = (entry: FallbackEntry) =>
+    ids.has(entry.id) && entry.enabled !== enabled && !(enabled && entry.hidden)
+  const changed = entries.filter(flips)
   if (changed.length === 0) return [...entries]
   const moved = changed.map((entry) => ({ ...entry, enabled, chain_enabled: enabled }))
-  const rest = entries.filter((entry) => !(ids.has(entry.id) && entry.enabled !== enabled))
+  const rest = entries.filter((entry) => !flips(entry))
   if (!enabled) return [...rest, ...moved]
   const lastEnabled = rest.map((entry) => entry.enabled).lastIndexOf(true)
   return [...rest.slice(0, lastEnabled + 1), ...moved, ...rest.slice(lastEnabled + 1)]
@@ -118,12 +129,15 @@ export function applyStaged(
     const entry = byId.get(item.id)
     if (!entry || seen.has(item.id)) continue
     seen.add(item.id)
-    result.push({ ...entry, enabled: item.enabled, chain_enabled: item.enabled })
+    // A model hidden since staging stays off, whatever the staged flag says.
+    const on = item.enabled && !entry.hidden
+    result.push({ ...entry, enabled: on, chain_enabled: on })
   }
   for (const entry of saved) {
     if (!seen.has(entry.id)) result.push(entry)
   }
-  return result
+  // Hidden models sit at the end of the chain, so the rest are ranked without gaps.
+  return [...result.filter((entry) => !entry.hidden), ...result.filter((entry) => entry.hidden)]
 }
 
 /** The `PUT /fallback` body: dense priorities 1..N in display order. */

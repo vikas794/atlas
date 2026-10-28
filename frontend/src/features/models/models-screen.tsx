@@ -12,6 +12,8 @@ import { useToast } from '../../components/shared/toast'
 import { Button } from '../../components/ui/button'
 import { buttonClasses } from '../../components/ui/button-styles'
 import {
+  bulkDeleteLlmModels,
+  bulkHideLlmModels,
   deleteLlmModel,
   getFallback,
   getRateLimitUsage,
@@ -23,15 +25,16 @@ import {
   applyStaged,
   chainChanged,
   filterEntries,
+  listedEntries,
   setEnabled,
   toggleMessage,
   toStaged,
   toUpdates,
   type StagedEntry,
-  withEnabledKey,
 } from '../../lib/model-chain'
 import { queryKeys } from '../../lib/query-keys'
 import { useReveal } from '../../lib/use-reveal'
+import { cn } from '../../lib/utils'
 import type { FallbackEntry, RateLimitRow } from '../../lib/types'
 import { ModelDialog } from './model-dialog'
 import { ModelTable } from './model-table'
@@ -51,6 +54,10 @@ export function ModelsScreen() {
   // View only: never part of the staged chain, so it cannot make the page "dirty".
   const [query, setQuery] = useState('')
   const [announcement, setAnnouncement] = useState('')
+  // Ticked rows for a bulk Hide / Delete, and whether hidden models are listed (to unhide them).
+  const [selected, setSelected] = useState<ReadonlySet<number>>(new Set())
+  const [showHidden, setShowHidden] = useState(false)
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
 
   const queryClient = useQueryClient()
   const { toast } = useToast()
@@ -72,15 +79,23 @@ export function ModelsScreen() {
     [usage.data],
   )
 
-  // Models of a provider with no enabled key are hidden (Keys tab), not counted or listed.
-  const visible = useMemo(() => withEnabledKey(entries), [entries])
+  // Models of a provider with no enabled key are not listed (Keys tab); models the user hid are
+  // left out too unless "Show hidden" is on. Neither kind is counted in the stats.
+  const visible = useMemo(() => listedEntries(entries, showHidden), [entries, showHidden])
+  const active = useMemo(() => listedEntries(entries, false), [entries])
+  const hiddenCount = useMemo(() => entries.filter((entry) => entry.hidden).length, [entries])
   const stats = useMemo(
     () => ({
-      enabled: visible.filter((entry) => entry.enabled).length,
-      ready: visible.filter((entry) => entry.enabled && entry.usable_key_count > 0).length,
-      hidden: entries.length - visible.length,
+      enabled: active.filter((entry) => entry.enabled).length,
+      ready: active.filter((entry) => entry.enabled && entry.usable_key_count > 0).length,
+      noKey: entries.filter((entry) => !entry.hidden && entry.enabled_key_count === 0).length,
     }),
-    [entries, visible],
+    [entries, active],
+  )
+  // Ticks only count while the row is listed (a refetch, search-free filter or key change drops them).
+  const selectedEntries = useMemo(
+    () => visible.filter((entry) => selected.has(entry.id)),
+    [visible, selected],
   )
   const servingOrder = useMemo(
     () =>
@@ -131,6 +146,47 @@ export function ModelsScreen() {
     },
     onError: (error) => toast(failureMessage('Could not delete the model', error), 'error'),
   })
+
+  const afterBulk = () => {
+    setSelected(new Set())
+    void queryClient.invalidateQueries({ queryKey: queryKeys.llmFallback })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.llmRateUsage })
+  }
+
+  const bulkDelete = useMutation({
+    mutationFn: (ids: number[]) => bulkDeleteLlmModels(ids),
+    onSuccess: ({ deleted }) => {
+      toast(`${deleted} model${deleted === 1 ? '' : 's'} deleted.`)
+      afterBulk()
+    },
+    onError: (error) => toast(failureMessage('Could not delete the models', error), 'error'),
+  })
+
+  const hide = useMutation({
+    mutationFn: ({ ids, hidden }: { ids: number[]; hidden: boolean }) =>
+      bulkHideLlmModels(ids, hidden),
+    onSuccess: ({ updated }, { hidden }) => {
+      const noun = `${updated} model${updated === 1 ? '' : 's'}`
+      toast(
+        hidden
+          ? `${noun} hidden. "Add all" skips them; turn on Show hidden to bring them back.`
+          : `${noun} unhidden, switched off.`,
+      )
+      setAnnouncement(hidden ? `${noun} hidden` : `${noun} unhidden`)
+      afterBulk()
+    },
+    onError: (error) => toast(failureMessage('Could not update the models', error), 'error'),
+  })
+
+  const tick = (ids: number[], checked: boolean) =>
+    setSelected((current) => {
+      const next = new Set(current)
+      for (const id of ids) {
+        if (checked) next.add(id)
+        else next.delete(id)
+      }
+      return next
+    })
 
   // Leaving with staged edits asks first (in-app navigation and closing the tab).
   const blocker = useBlocker(
@@ -187,7 +243,7 @@ export function ModelsScreen() {
           <div className="mt-6 grid grid-flow-dense grid-cols-2 gap-4 lg:grid-cols-4">
             <StatCard
               label="In the chain"
-              value={visible.length}
+              value={active.length}
               hint="Tried top to bottom"
               icon={Layers}
             />
@@ -207,10 +263,10 @@ export function ModelsScreen() {
             />
             <StatCard
               label="Hidden, no key"
-              value={stats.hidden}
+              value={stats.noKey}
               hint="Enable a provider key to show them"
               icon={KeyRound}
-              tone={stats.hidden > 0 ? 'error' : 'neutral'}
+              tone={stats.noKey > 0 ? 'error' : 'neutral'}
             />
           </div>
 
@@ -264,11 +320,24 @@ export function ModelsScreen() {
             </Button>
           </EmptyState>
         ) : visible.length === 0 ? (
-          <EmptyState title="No models to show. Enable a key for a provider in the Keys tab to list its models.">
-            <Link to="/keys" className={buttonClasses({ variant: 'secondary' }) + ' mt-3'}>
-              <KeyRound aria-hidden="true" className="size-icon" />
-              Open Keys
-            </Link>
+          <EmptyState
+            title={
+              hiddenCount > 0
+                ? `No models to show. ${hiddenCount} hidden, or enable a key for a provider in the Keys tab.`
+                : 'No models to show. Enable a key for a provider in the Keys tab to list its models.'
+            }
+          >
+            <div className="mt-3 flex flex-wrap justify-center gap-2">
+              {hiddenCount > 0 ? (
+                <Button variant="secondary" onClick={() => setShowHidden(true)}>
+                  Show hidden
+                </Button>
+              ) : null}
+              <Link to="/keys" className={buttonClasses({ variant: 'secondary' })}>
+                <KeyRound aria-hidden="true" className="size-icon" />
+                Open Keys
+              </Link>
+            </div>
           </EmptyState>
         ) : (
           <>
@@ -296,11 +365,24 @@ export function ModelsScreen() {
                   className="input pl-6"
                 />
               </div>
-              <p className="text-label tabular-nums text-text-muted" aria-live="polite">
-                {query.trim() === ''
-                  ? `${visible.length} models`
-                  : `${matches} of ${visible.length} models. Reordering is off while searching.`}
-              </p>
+              <div className="flex flex-wrap items-center gap-4">
+                {hiddenCount > 0 || showHidden ? (
+                  <label className="flex items-center gap-2 text-label text-text">
+                    <input
+                      type="checkbox"
+                      className="size-4 cursor-pointer accent-accent"
+                      checked={showHidden}
+                      onChange={(event) => setShowHidden(event.target.checked)}
+                    />
+                    Show hidden ({hiddenCount})
+                  </label>
+                ) : null}
+                <p className="text-label tabular-nums text-text-muted" aria-live="polite">
+                  {query.trim() === ''
+                    ? `${visible.length} models`
+                    : `${matches} of ${visible.length} models. Reordering is off while searching.`}
+                </p>
+              </div>
             </div>
             <ModelTable
               entries={entries}
@@ -311,12 +393,67 @@ export function ModelsScreen() {
               onEdit={openEdit}
               onTest={(entry) => test.mutate(entry)}
               onDelete={setDeleteTarget}
+              onHide={(entry, hidden) => hide.mutate({ ids: [entry.id], hidden })}
+              showHidden={showHidden}
+              selected={selected}
+              onSelect={tick}
               query={query}
               onClearSearch={() => setQuery('')}
             />
           </>
         )}
       </div>
+
+      {selectedEntries.length > 0 ? (
+        <div
+          role="region"
+          aria-label="Selected models"
+          className={cn(
+            'glass fixed left-1/2 z-40 flex w-[min(40rem,calc(100vw-2rem))] -translate-x-1/2 flex-wrap items-center justify-between gap-3 rounded-pill py-2 pl-5 pr-2 shadow-float',
+            dirty ? 'bottom-24' : 'bottom-5',
+          )}
+        >
+          <span role="status" className="text-body font-medium text-text">
+            {selectedEntries.length} selected
+          </span>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="ghost" onClick={() => setSelected(new Set())}>
+              Clear
+            </Button>
+            {selectedEntries.some((entry) => entry.hidden) ? (
+              <Button
+                variant="secondary"
+                disabled={hide.isPending}
+                onClick={() =>
+                  hide.mutate({
+                    ids: selectedEntries.filter((entry) => entry.hidden).map((entry) => entry.id),
+                    hidden: false,
+                  })
+                }
+              >
+                Unhide
+              </Button>
+            ) : null}
+            {selectedEntries.some((entry) => !entry.hidden) ? (
+              <Button
+                variant="secondary"
+                disabled={hide.isPending}
+                onClick={() =>
+                  hide.mutate({
+                    ids: selectedEntries.filter((entry) => !entry.hidden).map((entry) => entry.id),
+                    hidden: true,
+                  })
+                }
+              >
+                Hide
+              </Button>
+            ) : null}
+            <Button variant="danger" onClick={() => setBulkDeleteOpen(true)}>
+              Delete
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {dirty ? (
         <StagedBar
@@ -345,6 +482,16 @@ export function ModelsScreen() {
         confirmLabel="Delete model"
         isLoading={remove.isPending}
         onConfirm={() => (deleteTarget ? remove.mutateAsync(deleteTarget) : undefined)}
+      />
+
+      <ConfirmDialog
+        open={bulkDeleteOpen}
+        onOpenChange={setBulkDeleteOpen}
+        title={`Delete ${selectedEntries.length} models`}
+        description={`Remove ${selectedEntries.length} selected model${selectedEntries.length === 1 ? '' : 's'} from the chain? Notes already generated with them are kept. "Add all" can add them back; Hide them instead to keep them out.`}
+        confirmLabel={`Delete ${selectedEntries.length} models`}
+        isLoading={bulkDelete.isPending}
+        onConfirm={() => bulkDelete.mutateAsync(selectedEntries.map((entry) => entry.id))}
       />
 
       <ConfirmDialog

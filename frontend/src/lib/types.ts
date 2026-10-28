@@ -323,6 +323,8 @@ export interface LlmModel {
   source: string
   priority: number | null
   chain_enabled: boolean
+  /** Hidden models stay registered (bulk import skips them) but are off and not listed. */
+  hidden: boolean
 }
 
 /** A chain entry: the model plus how many keys can serve it right now. */
@@ -464,4 +466,6 @@ export interface AvailableModelsResponse {
 export interface BulkModelsResponse {
   added: number
   skipped: number
+  /** Of `skipped`, the ones skipped because the model is hidden. */
+  skipped_hidden: number
 }

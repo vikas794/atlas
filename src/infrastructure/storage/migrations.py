@@ -465,6 +465,14 @@ MIGRATIONS: list[tuple[str, list[str]]] = [
             "CREATE TABLE llm_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
         ],
     ),
+    (
+        "0008_model_hidden",
+        [
+            # A hidden model stays registered (so bulk import skips it as a duplicate) but is
+            # switched off and left out of the Models list until it is unhidden.
+            "ALTER TABLE llm_models ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
+        ],
+    ),
 ]
 
 #: Migrations that must run with ``PRAGMA foreign_keys = OFF`` (the pragma is a

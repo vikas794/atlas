@@ -197,9 +197,10 @@ export function ModelDialog({ open, onOpenChange, model }: ModelDialogProps) {
 
   const importAll = useMutation({
     mutationFn: () => createLlmModelsBulk(provider, modelIds, form.api_base.trim() || null),
-    onSuccess: ({ added, skipped }) => {
+    onSuccess: ({ added, skipped, skipped_hidden }) => {
+      const hiddenNote = skipped_hidden ? `, ${skipped_hidden} hidden` : ''
       toast(
-        `Added ${added} model${added === 1 ? '' : 's'}, switched off${skipped ? ` (${skipped} already in the chain)` : ''}.`,
+        `Added ${added} model${added === 1 ? '' : 's'}, switched off${skipped ? ` (${skipped} already in the chain${hiddenNote})` : ''}.`,
       )
       void queryClient.invalidateQueries({ queryKey: queryKeys.llmFallback })
       void queryClient.invalidateQueries({ queryKey: queryKeys.llmModels })

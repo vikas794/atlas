@@ -42,6 +42,8 @@ class ModelOut(BaseModel):
     source: str
     priority: int | None
     chain_enabled: bool
+    #: Hidden models stay registered (bulk import skips them) but are off and not listed by default.
+    hidden: bool = False
 
 
 class ModelsResponse(BaseModel):
@@ -180,6 +182,24 @@ class ModelBulkCreate(_Strict):
 class ModelBulkResponse(BaseModel):
     added: int
     skipped: int
+    #: Of ``skipped``, how many were skipped because the model is hidden.
+    skipped_hidden: int = 0
+
+
+class ModelBulkIds(_Strict):
+    ids: list[int] = Field(min_length=1, max_length=500)
+
+
+class ModelBulkHide(ModelBulkIds):
+    hidden: bool
+
+
+class BulkDeletedResponse(BaseModel):
+    deleted: int
+
+
+class BulkUpdatedResponse(BaseModel):
+    updated: int
 
 
 class RateLimitUsageResponse(BaseModel):
@@ -188,6 +208,10 @@ class RateLimitUsageResponse(BaseModel):
 
 __all__ = [
     "AvailableModelsResponse",
+    "BulkDeletedResponse",
+    "BulkUpdatedResponse",
+    "ModelBulkHide",
+    "ModelBulkIds",
     "ChainEntryIn",
     "ChainUpdate",
     "ClearedResponse",

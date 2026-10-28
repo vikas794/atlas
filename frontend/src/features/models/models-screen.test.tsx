@@ -24,6 +24,7 @@ function entry(id: number, overrides: Partial<FallbackEntry> = {}): FallbackEntr
     source: 'user',
     priority: id,
     chain_enabled: true,
+    hidden: false,
     key_count: 2,
     enabled_key_count: 2,
     usable_key_count: 2,
@@ -516,6 +517,89 @@ describe('ModelsScreen', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Delete model' }))
 
     await waitFor(() => expect(api.callsTo('DELETE', '/api/llm/models/3')).toHaveLength(1))
+  })
+
+  describe('bulk hide and delete', () => {
+    it('hides the ticked models in one request', async () => {
+      const api = setup().on('POST', '/api/llm/models/bulk-hide', { updated: 2 })
+      const user = userEvent.setup()
+      renderRoute('/models')
+
+      await user.click(await screen.findByRole('checkbox', { name: 'Select Model 1' }))
+      await user.click(screen.getByRole('checkbox', { name: 'Select Model 3' }))
+      const bar = screen.getByRole('region', { name: 'Selected models' })
+      expect(within(bar).getByText('2 selected')).toBeInTheDocument()
+      await user.click(within(bar).getByRole('button', { name: 'Hide' }))
+
+      await waitFor(() => expect(api.callsTo('POST', '/api/llm/models/bulk-hide')).toHaveLength(1))
+      expect(api.callsTo('POST', '/api/llm/models/bulk-hide')[0].body).toEqual({
+        ids: [1, 3],
+        hidden: true,
+      })
+      await waitFor(() =>
+        expect(screen.queryByRole('region', { name: 'Selected models' })).not.toBeInTheDocument(),
+      )
+    })
+
+    it('deletes the ticked models after confirmation, using the group checkbox', async () => {
+      const api = setup().on('POST', '/api/llm/models/bulk-delete', { deleted: 3 })
+      const user = userEvent.setup()
+      renderRoute('/models')
+
+      await user.click(await screen.findByRole('checkbox', { name: 'Tick all gemini models' }))
+      await user.click(
+        within(screen.getByRole('region', { name: 'Selected models' })).getByRole('button', {
+          name: 'Delete',
+        }),
+      )
+      const dialog = await screen.findByRole('dialog')
+      expect(api.callsTo('POST', '/api/llm/models/bulk-delete')).toHaveLength(0)
+      await user.click(within(dialog).getByRole('button', { name: 'Delete 3 models' }))
+
+      await waitFor(() => expect(api.callsTo('POST', '/api/llm/models/bulk-delete')).toHaveLength(1))
+      expect(api.callsTo('POST', '/api/llm/models/bulk-delete')[0].body).toEqual({
+        ids: [1, 2, 3],
+      })
+    })
+
+    it('shows no gap in the ranks once a model is hidden', async () => {
+      setup([entry(1), entry(3), entry(2, { hidden: true, enabled: false, chain_enabled: false })])
+      renderRoute('/models')
+
+      expect(await screen.findByRole('textbox', { name: 'Rank of Model 1' })).toHaveValue(
+        formatPosition(1, 2),
+      )
+      expect(screen.getByRole('textbox', { name: 'Rank of Model 3' })).toHaveValue(
+        formatPosition(2, 2),
+      )
+    })
+
+    it('lists hidden models only with Show hidden and unhides them', async () => {
+      const api = setup([entry(1), entry(2, { hidden: true, enabled: false, chain_enabled: false })])
+        .on('POST', '/api/llm/models/bulk-hide', { updated: 1 })
+      const user = userEvent.setup()
+      renderRoute('/models')
+
+      await screen.findByRole('textbox', { name: 'Rank of Model 1' })
+      expect(screen.queryByRole('textbox', { name: 'Rank of Model 2' })).not.toBeInTheDocument()
+
+      await user.click(screen.getByRole('checkbox', { name: 'Show hidden (1)' }))
+      expect(await screen.findByRole('textbox', { name: 'Rank of Model 2' })).toBeInTheDocument()
+      expect(screen.getByRole('switch', { name: 'Enable Model 2' })).toBeDisabled()
+
+      await user.click(screen.getByRole('checkbox', { name: 'Select Model 2' }))
+      await user.click(
+        within(screen.getByRole('region', { name: 'Selected models' })).getByRole('button', {
+          name: 'Unhide',
+        }),
+      )
+
+      await waitFor(() => expect(api.callsTo('POST', '/api/llm/models/bulk-hide')).toHaveLength(1))
+      expect(api.callsTo('POST', '/api/llm/models/bulk-hide')[0].body).toEqual({
+        ids: [2],
+        hidden: false,
+      })
+    })
   })
 
   it('reports a failed load with a Retry', async () => {

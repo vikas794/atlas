@@ -63,5 +63,5 @@ Installed in `.claude/skills/`; read the `SKILL.md` before applying.
 
 - All project documentation lives in the `docs/` folder (e.g. `docs/ARCHITECTURE.md`, `docs/CONFIG.md`, `docs/TROUBLESHOOTING.md`, `docs/AUDIT_REPORT.md`, `docs/Atlas_PRD.md`, `docs/design.md`). New docs go there, not the repo root. `README.md`, `CLAUDE.md` and `AGENTS.md` stay at the root.
 - **Before making any change**, read the docs relevant to it (`docs/`, `docs/Atlas_PRD.md`, `docs/design.md`) and verify they match the current code. If they disagree with the code, flag it to the user before proceeding.
-- **After every change**, update the affected docs in the same change so they stay accurate to the code (behavior, config/env vars, API, architecture, troubleshooting). Never leave docs stale. Do not finish a task until the docs are checked.
+- **After every change**, update the `README.md` and the affected docs in `docs/` in the same change so they stay accurate to the code (behavior, config/env vars, API, architecture, setup/usage, troubleshooting). This includes the blueprint READMEs in the affected layer folders. Never leave the README or docs stale. Do not finish a task until the README and docs are checked.
 - `docs/Atlas_PRD.md` and `docs/design.md` are still only edited when the user asks; if a change makes them out of date, tell the user instead of editing them.

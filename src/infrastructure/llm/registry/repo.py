@@ -55,6 +55,7 @@ class ModelRow:
     source: str
     priority: int | None = None
     chain_enabled: bool = False
+    hidden: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +94,7 @@ def _model(row: sqlite3.Row) -> ModelRow:
         source=row["source"],
         priority=row["priority"] if "priority" in keys else None,
         chain_enabled=bool(row["chain_enabled"]) if "chain_enabled" in keys else False,
+        hidden=bool(row["hidden"]) if "hidden" in keys else False,
     )
 
 
@@ -118,6 +120,18 @@ _MODEL_SELECT = """
     SELECT m.*, f.priority AS priority, COALESCE(f.enabled, 0) AS chain_enabled
     FROM llm_models m LEFT JOIN llm_fallback f ON f.model_id = m.id
 """
+
+
+def _renumber_chain(conn: sqlite3.Connection) -> None:
+    """Dense priorities 1..N, hidden models last, everything else keeping its order."""
+    rows = conn.execute(
+        "SELECT f.model_id FROM llm_fallback f JOIN llm_models m ON m.id = f.model_id "
+        "ORDER BY m.hidden, f.priority, f.model_id"
+    ).fetchall()
+    for priority, row in enumerate(rows, start=1):
+        conn.execute(
+            "UPDATE llm_fallback SET priority = ? WHERE model_id = ?", (priority, row["model_id"])
+        )
 
 
 class RegistryRepo:
@@ -242,6 +256,11 @@ class RegistryRepo:
         conn = self._conn()
         try:
             with transaction(conn):
+                flag = conn.execute(
+                    "SELECT hidden FROM llm_models WHERE id = ?", (model_pk,)
+                ).fetchone()
+                if flag and flag["hidden"]:
+                    fields.pop("enabled", None)  # a hidden model cannot be switched on
                 if fields:
                     values = [int(v) if k == "enabled" else v for k, v in fields.items()]
                     conn.execute(
@@ -265,17 +284,55 @@ class RegistryRepo:
             conn.close()
         return cur.rowcount > 0
 
+    def delete_models(self, model_pks: list[int]) -> int:
+        """Delete every listed model (the chain rows cascade); unknown ids are ignored."""
+        conn = self._conn()
+        try:
+            with transaction(conn):
+                count = 0
+                for pk in dict.fromkeys(model_pks):
+                    count += conn.execute("DELETE FROM llm_models WHERE id = ?", (pk,)).rowcount
+        finally:
+            conn.close()
+        return count
+
+    def set_hidden(self, model_pks: list[int], hidden: bool) -> int:
+        """Hide or unhide models; hiding also switches them off. Unknown ids are ignored."""
+        conn = self._conn()
+        try:
+            with transaction(conn):
+                count = 0
+                for pk in dict.fromkeys(model_pks):
+                    if hidden:
+                        cur = conn.execute(
+                            "UPDATE llm_models SET hidden = 1, enabled = 0 WHERE id = ?", (pk,)
+                        )
+                        conn.execute("UPDATE llm_fallback SET enabled = 0 WHERE model_id = ?", (pk,))
+                    else:
+                        cur = conn.execute("UPDATE llm_models SET hidden = 0 WHERE id = ?", (pk,))
+                    count += cur.rowcount
+                _renumber_chain(conn)
+        finally:
+            conn.close()
+        return count
+
     # --- fallback chain --------------------------------------------------
 
     def replace_chain(self, entries: list[tuple[int, int, bool]]) -> None:
-        """Set ``(model_pk, priority, enabled)`` for every listed model; unknown ids are skipped."""
+        """Set ``(model_pk, priority, enabled)`` for every listed model; unknown ids are skipped.
+
+        A hidden model keeps its priority but is never switched on.
+        """
         conn = self._conn()
         try:
             with transaction(conn):
                 known = {r["id"] for r in conn.execute("SELECT id FROM llm_models")}
+                hidden = {r["id"] for r in conn.execute("SELECT id FROM llm_models WHERE hidden = 1")}
                 for model_pk, priority, enabled in entries:
                     if model_pk not in known:
                         continue
+                    if model_pk in hidden:
+                        enabled = False
                     conn.execute(
                         "INSERT INTO llm_fallback (model_id, priority, enabled) VALUES (?, ?, ?) "
                         "ON CONFLICT(model_id) DO UPDATE SET "

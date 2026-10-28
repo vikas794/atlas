@@ -274,6 +274,22 @@ export function deleteLlmModel(id: number) {
   return request<void>(`${LLM}/models/${id}`, { method: 'DELETE' })
 }
 
+/** Deletes many models at once; a later "Add all" can bring them back. */
+export function bulkDeleteLlmModels(ids: number[]) {
+  return request<{ deleted: number }>(`${LLM}/models/bulk-delete`, {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  })
+}
+
+/** Hides (switched off, still registered so "Add all" skips them) or unhides many models. */
+export function bulkHideLlmModels(ids: number[], hidden: boolean) {
+  return request<{ updated: number }>(`${LLM}/models/bulk-hide`, {
+    method: 'POST',
+    body: JSON.stringify({ ids, hidden }),
+  })
+}
+
 /** Sends a one-line ping through the model; a failure is a normal answer, not a thrown error. */
 export function testLlmModel(id: number) {
   return request<ModelTestResult>(`${LLM}/models/${id}/test`, { method: 'POST' })

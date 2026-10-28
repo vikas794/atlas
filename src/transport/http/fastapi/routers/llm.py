@@ -27,6 +27,8 @@ from src.infrastructure.llm.registry.repo import KeyRow, ModelRow
 from src.transport.http.fastapi.errors import HTTPError
 from src.transport.http.fastapi.schemas.llm import (
     AvailableModelsResponse,
+    BulkDeletedResponse,
+    BulkUpdatedResponse,
     ChainUpdate,
     ClearedResponse,
     CooldownOut,
@@ -38,6 +40,8 @@ from src.transport.http.fastapi.schemas.llm import (
     KeysResponse,
     KeyUpdate,
     ModelBulkCreate,
+    ModelBulkHide,
+    ModelBulkIds,
     ModelBulkResponse,
     ModelCreate,
     ModelOut,
@@ -96,6 +100,7 @@ def _model_out(model: ModelRow) -> ModelOut:
         source=model.source,
         priority=model.priority,
         chain_enabled=model.chain_enabled,
+        hidden=model.hidden,
     )
 
 
@@ -246,13 +251,14 @@ def create_model(body: ModelCreate) -> ModelOut:
 
 @router.post("/models/bulk", response_model=ModelBulkResponse, status_code=201)
 def create_models_bulk(body: ModelBulkCreate) -> ModelBulkResponse:
-    """Add many models of one provider, disabled; ids already registered are skipped."""
+    """Add many models of one provider, disabled; ids already registered (hidden ones too) are skipped."""
     registry = _registry()
     provider = body.provider.strip().lower()
     info = provider_info(provider)
     api_base = (body.api_base or "").strip() or info.default_api_base
     limits = catalog_models(provider)
-    added = skipped = 0
+    hidden_ids = {m.model_id for m in registry.repo.list_models() if m.provider == provider and m.hidden}
+    added = skipped = skipped_hidden = 0
     for model_id in dict.fromkeys(m.strip() for m in body.model_ids if m.strip()):
         try:
             registry.repo.add_model(
@@ -268,7 +274,23 @@ def create_models_bulk(body: ModelBulkCreate) -> ModelBulkResponse:
             added += 1
         except sqlite3.IntegrityError:
             skipped += 1
-    return ModelBulkResponse(added=added, skipped=skipped)
+            skipped_hidden += model_id in hidden_ids
+    return ModelBulkResponse(added=added, skipped=skipped, skipped_hidden=skipped_hidden)
+
+
+@router.post("/models/bulk-delete", response_model=BulkDeletedResponse)
+def delete_models_bulk(body: ModelBulkIds) -> BulkDeletedResponse:
+    """Delete many models at once (unknown ids are ignored)."""
+    deleted = _registry().repo.delete_models(body.ids)
+    for pk in body.ids:
+        _last_test.pop(pk, None)
+    return BulkDeletedResponse(deleted=deleted)
+
+
+@router.post("/models/bulk-hide", response_model=BulkUpdatedResponse)
+def hide_models_bulk(body: ModelBulkHide) -> BulkUpdatedResponse:
+    """Hide (switched off, kept registered so bulk import skips them) or unhide many models."""
+    return BulkUpdatedResponse(updated=_registry().repo.set_hidden(body.ids, body.hidden))
 
 
 @router.patch("/models/{model_pk}", response_model=ModelOut)

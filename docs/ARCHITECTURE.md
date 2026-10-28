@@ -65,7 +65,8 @@ updated_at)`: one row per setting changed on the Settings page. `load_settings` 
 
 Migration `0007` adds the LLM model registry, independent of the playlist tables: `llm_models`
 (provider, model id, LiteLLM name, endpoint, input token limit, timeout, RPM/RPD/TPM/TPD limits,
-enabled; unique on provider + model id), `llm_api_keys` (provider, label, plain-text `key_value`,
+enabled; unique on provider + model id; `hidden` from migration `0008`: a hidden model stays
+registered so bulk import skips it, but is off and not listed by default), `llm_api_keys` (provider, label, plain-text `key_value`,
 status, enabled, consecutive failures, health timestamps and error, monthly request/token caps),
 `llm_fallback` (model id, priority, enabled: the single global chain), `llm_cooldowns` (key id +
 model scope, `*` = the whole key; expiry and source), `llm_rate_usage` (sliding-window request and
@@ -590,7 +591,9 @@ recovered on the next start.
 | `DELETE /api/llm/keys/{id}/cooldowns` | Clear a key's cooldowns (`{cleared}`) |
 | `POST /api/llm/keys/{id}/check`, `POST /api/llm/keys/check-all` | Health-check one key or all |
 | `GET /api/llm/providers/{provider}/available-models` | Model ids for the add-model picker: LiteLLM's bundled table (`infrastructure/llm/catalog.py`; Gemini and OpenAI only, empty for OpenRouter/NVIDIA/FreeLLMAPI) merged with the provider's live list from its first usable key. `live` says whether the live list was reached; `warning` carries the provider error when only the table is shown; `input_token_limits` prefills the form. 400 `CONFIG_MISSING` / 502 `PROVIDER_ERROR` only when the table is empty too |
-| `POST /api/llm/models/bulk` | `{provider, model_ids[], api_base?}`: adds every id disabled at the end of the chain (limit from LiteLLM when known); returns `{added, skipped}`, existing ids are skipped |
+| `POST /api/llm/models/bulk` | `{provider, model_ids[], api_base?}`: adds every id disabled at the end of the chain (limit from LiteLLM when known); returns `{added, skipped, skipped_hidden}`, existing ids (hidden ones included) are skipped |
+| `POST /api/llm/models/bulk-delete` | `{ids[]}` (1-500): deletes the models (chain rows cascade; unknown ids ignored); returns `{deleted}`. A later bulk add can re-add them |
+| `POST /api/llm/models/bulk-hide` | `{ids[], hidden}`: hides (switches off, keeps the row so bulk add skips it) or unhides; returns `{updated}`. Hidden models move to the end of the chain and priorities are renumbered 1..N. A hidden model can't be switched on by `PATCH` or `PUT /api/llm/fallback` |
 | `GET /api/usage` | Usage ledger aggregates |
 | `GET /api/health`, `GET /api/diagnostics` | Liveness; readiness checks and the last 50 warnings/errors |
 | `DELETE /api/diagnostics/recent-errors` | Empty the in-memory warnings/errors buffer (204; `logs/atlas.log` is untouched) |
