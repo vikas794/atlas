@@ -1,4 +1,5 @@
 import { screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 
 import type { KeyAnalyticsResponse } from '../../lib/types'
@@ -53,7 +54,23 @@ const ANALYTICS: KeyAnalyticsResponse = {
       cost_share: 100,
     },
   ],
-  errors: [{ category: 'rejected', count: 1 }],
+  errors: [
+    {
+      category: 'rejected',
+      count: 1,
+      details: [
+        {
+          provider: 'gemini',
+          model: 'gem-9',
+          operation: 'generate_notes',
+          key_label: 'Personal',
+          count: 1,
+          last_at: '2026-01-01T00:00:00+00:00',
+          last_message: 'API key rejected',
+        },
+      ],
+    },
+  ],
 }
 
 describe('KeyAnalytics', () => {
@@ -79,6 +96,8 @@ describe('KeyAnalytics', () => {
     expect(within(section).getByText('Key #7')).toBeInTheDocument()
     expect(within(section).getByText('Cost per model')).toBeInTheDocument()
     expect(within(section).getByText('gem-1')).toBeInTheDocument()
-    expect(within(section).getByText('rejected')).toBeInTheDocument()
+    await userEvent.click(within(section).getByRole('button', { name: /rejected/ }))
+    expect(within(section).getByText('gem-9')).toBeInTheDocument()
+    expect(within(section).getByText('API key rejected')).toBeInTheDocument()
   })
 })

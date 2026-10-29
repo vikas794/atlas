@@ -261,7 +261,23 @@ export interface KeyAnalyticsResponse {
   total_cost_usd: number
   by_key: KeyAnalyticsRow[]
   by_model: ModelCostRow[]
-  errors: { category: string; count: number }[]
+  errors: ErrorCategoryRow[]
+}
+
+export interface ErrorDetailRow {
+  provider: string
+  model: string
+  operation: string
+  key_label: string
+  count: number
+  last_at: string
+  last_message: string | null
+}
+
+export interface ErrorCategoryRow {
+  category: string
+  count: number
+  details: ErrorDetailRow[]
 }
 
 /* ---------------------------------------------------------------- Settings */

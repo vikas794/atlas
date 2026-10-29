@@ -62,9 +62,23 @@ class ModelCostRow(BaseModel):
     cost_share: float
 
 
+class ErrorDetailRow(BaseModel):
+    """Failures of one category for one provider, model, operation and key."""
+
+    provider: str
+    model: str
+    operation: str
+    key_label: str
+    count: int
+    last_at: str
+    #: ``None`` for attempts logged before the message was recorded.
+    last_message: str | None = None
+
+
 class ErrorCategoryCount(BaseModel):
     category: str
     count: int
+    details: list[ErrorDetailRow] = Field(default_factory=list)
 
 
 class KeyAnalyticsResponse(BaseModel):

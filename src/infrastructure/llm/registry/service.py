@@ -174,6 +174,7 @@ class ModelRegistry:
         input_tokens: int = 0,
         output_tokens: int = 0,
         cost_usd: float = 0.0,
+        error_message: str | None = None,
     ) -> None:
         """Record one provider call for analytics; never fails the call itself."""
         try:
@@ -189,6 +190,7 @@ class ModelRegistry:
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 cost_usd=cost_usd,
+                error_message=None if success else error_message,
                 created_at=datetime.fromtimestamp(self._clock(), UTC).isoformat(timespec="seconds"),
             )
         except Exception:

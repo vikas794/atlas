@@ -260,6 +260,7 @@ class LiteLLMNotesGenerator:
                     success=False,
                     latency_ms=int((time.monotonic() - started) * 1000),
                     error_category=error_category_of(exc),
+                    error_message=str(exc),
                 )
                 if problem is None:
                     raise

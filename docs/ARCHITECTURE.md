@@ -72,7 +72,8 @@ status, enabled, consecutive failures, health timestamps and error, monthly requ
 model scope, `*` = the whole key; expiry and source), `llm_rate_usage` (sliding-window request and
 token ledger per key and model), `llm_key_monthly_usage` (requests and tokens per key and UTC
 month), `llm_attempts` (migration `0009`: one row per provider call with key id and label,
-provider, model, operation, success, error category, latency, tokens and cost; no foreign key, so
+provider, model, operation, success, error category, latency, tokens and cost, plus the failure
+message from migration `0010`; no foreign key, so
 rows outlive a deleted key and keep its label) and `llm_meta` (the `seeded` marker). Cooldown, usage and monthly rows cascade when their
 key is deleted; the chain row cascades with its model. Deleting or hiding models renumbers the
 chain to dense priorities 1..N (hidden models last), so ranks never have gaps. `RegistryRepo`
@@ -599,7 +600,7 @@ recovered on the next start.
 | `POST /api/llm/models/bulk-delete` | `{ids[]}` (1-500): deletes the models (chain rows cascade; unknown ids ignored); returns `{deleted}`. A later bulk add can re-add them |
 | `POST /api/llm/models/bulk-hide` | `{ids[], hidden}`: hides (switches off, keeps the row so bulk add skips it) or unhides; returns `{updated}`. Hidden models move to the end of the chain and priorities are renumbered 1..N. A hidden model can't be switched on by `PATCH` or `PUT /api/llm/fallback` |
 | `GET /api/usage` | Usage ledger aggregates |
-| `GET /api/usage/keys?range=24h\|7d\|30d\|all` | Per-key analytics from `llm_attempts`: `by_key` (calls, successes, errors, success rate, avg latency, tokens, cost), `by_model` (cost per model: tokens, cost, average cost per call, share of total), `errors` (failed calls by category) and totals. Default range `7d` |
+| `GET /api/usage/keys?range=24h\|7d\|30d\|all` | Per-key analytics from `llm_attempts`: `by_key` (calls, successes, errors, success rate, avg latency, tokens, cost), `by_model` (cost per model: tokens, cost, average cost per call, share of total), `errors` (failed calls by category, each with `details` per provider, model, operation and key: count, last seen, last message) and totals. Default range `7d` |
 | `GET /api/health`, `GET /api/diagnostics` | Liveness; readiness checks and the last 50 warnings/errors |
 | `DELETE /api/diagnostics/recent-errors` | Empty the in-memory warnings/errors buffer (204; `logs/atlas.log` is untouched) |
 

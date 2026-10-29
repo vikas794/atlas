@@ -386,6 +386,7 @@ async def test_model(model_pk: int) -> ModelTestResponse:
             success=False,
             latency_ms=int((time.monotonic() - started) * 1000),
             error_category=error_category_of(error),
+            error_message=str(error),
         )
         return ModelTestResponse(success=False, latency_ms=None, error=str(error))
     latency = int((time.monotonic() - started) * 1000)

@@ -499,6 +499,14 @@ MIGRATIONS: list[tuple[str, list[str]]] = [
             "CREATE INDEX idx_llm_attempts_key ON llm_attempts(key_id, created_at)",
         ],
     ),
+    (
+        "0010_llm_attempt_error",
+        [
+            # The provider's (secret-scrubbed) error text, so a failure can be traced past its
+            # category. NULL for successes and for rows logged before this migration.
+            "ALTER TABLE llm_attempts ADD COLUMN error_message TEXT",
+        ],
+    ),
 ]
 
 #: Migrations that must run with ``PRAGMA foreign_keys = OFF`` (the pragma is a

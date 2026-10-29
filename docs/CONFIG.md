@@ -232,7 +232,9 @@ Modeled on FreeLLMAPI. Tables (migration `0007`): `llm_models`, `llm_api_keys`, 
 - **Per-key analytics.** Every provider call through a registry key (notes generation and the
   model test ping) is also logged to `llm_attempts` (migration `0009`), failures included, with
   latency, tokens and estimated cost. `GET /api/usage/keys` and the "API key analytics" section of
-  Settings read it: success and errors per key, cost per model, and error categories. It is
+  Settings read it: success and errors per key, cost per model, and error categories (click a category for its model, provider, key, operation,
+  count, last seen and last error message; the message, added in migration `0010`, is the
+  classified secret-free reason, capped at 500 characters, and empty for older rows). It is
   separate from `usage_ledger`, so existing `/api/usage` totals are unchanged. Calls made before
   the migration are not in it. Cost is the LiteLLM price estimate, so free-tier models show $0.
 - `Summary.provider` / `Summary.model` and the usage ledger record the model that actually answered.

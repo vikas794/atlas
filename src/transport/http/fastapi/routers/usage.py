@@ -6,6 +6,7 @@ from src.domain.interfaces.usage_ledger import UsageLedgerPort
 from src.transport.http.fastapi.dependencies import get_usage_ledger
 from src.transport.http.fastapi.schemas.usage import (
     ErrorCategoryCount,
+    ErrorDetailRow,
     KeyAnalyticsResponse,
     KeyAnalyticsRow,
     ModelCostRow,
@@ -63,6 +64,11 @@ async def get_key_analytics(
         )
         for row in stats["models"]
     ]
+    details: dict[str, list[ErrorDetailRow]] = {}
+    for row in stats["error_details"]:
+        details.setdefault(row["category"], []).append(
+            ErrorDetailRow(**{k: v for k, v in row.items() if k != "category"})
+        )
     total_requests = sum(row.requests for row in by_model)
     return KeyAnalyticsResponse(
         range=range,
@@ -71,7 +77,10 @@ async def get_key_analytics(
         total_cost_usd=total_cost,
         by_key=by_key,
         by_model=by_model,
-        errors=[ErrorCategoryCount(**row) for row in stats["errors"]],
+        errors=[
+            ErrorCategoryCount(**row, details=details.get(row["category"], []))
+            for row in stats["errors"]
+        ],
     )
 
 

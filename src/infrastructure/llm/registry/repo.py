@@ -607,13 +607,14 @@ class RegistryRepo:
         output_tokens: int,
         cost_usd: float,
         created_at: str,
+        error_message: str | None = None,
     ) -> None:
         conn = self._conn()
         try:
             conn.execute(
                 "INSERT INTO llm_attempts (key_id, key_label, provider, model_id, operation, "
                 "success, error_category, latency_ms, input_tokens, output_tokens, cost_usd, "
-                "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "created_at, error_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     key_pk,
                     key_label,
@@ -627,6 +628,7 @@ class RegistryRepo:
                     max(0, output_tokens),
                     max(0.0, cost_usd),
                     created_at,
+                    error_message[:500] if error_message else None,
                 ),
             )
         finally:
@@ -665,10 +667,23 @@ class RegistryRepo:
                 f"GROUP BY category ORDER BY count DESC",
                 args,
             ).fetchall()
+            # Per category, where it came from. ``last_message`` is the newest message of the
+            # group (SQLite returns the bare column from the row that holds MAX(created_at)).
+            error_details = conn.execute(
+                f"SELECT COALESCE(a.error_category, 'unknown') AS category, "
+                f"a.provider AS provider, a.model_id AS model, a.operation AS operation, "
+                f"a.key_label AS key_label, COUNT(*) AS count, MAX(a.created_at) AS last_at, "
+                f"a.error_message AS last_message "
+                f"FROM llm_attempts a {where}{' AND' if where else 'WHERE'} a.success = 0 "
+                f"GROUP BY category, a.provider, a.model_id, a.operation, a.key_label "
+                f"ORDER BY count DESC, last_at DESC",
+                args,
+            ).fetchall()
         finally:
             conn.close()
         return {
             "keys": [dict(row) for row in keys],
             "models": [dict(row) for row in models],
             "errors": [dict(row) for row in errors],
+            "error_details": [dict(row) for row in error_details],
         }

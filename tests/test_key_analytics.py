@@ -44,7 +44,12 @@ def test_migration_0009_creates_the_attempt_table(tmp_path) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_attempts)")}
     conn.close()
     assert {"key_id", "key_label", "success", "error_category", "latency_ms", "cost_usd"} <= columns
-    assert registry.attempt_stats("all") == {"keys": [], "models": [], "errors": []}
+    assert registry.attempt_stats("all") == {
+        "keys": [],
+        "models": [],
+        "errors": [],
+        "error_details": [],
+    }
 
 
 def test_attempt_stats_split_by_key_model_and_error(tmp_path) -> None:
@@ -90,6 +95,36 @@ def test_attempt_stats_split_by_key_model_and_error(tmp_path) -> None:
     assert (row["provider"], row["model"], row["requests"]) == ("gemini", "gem-1", 3)
     assert row["input_tokens"] == 30 and row["cost_usd"] == pytest.approx(2.0)
     assert stats["errors"] == [{"category": "rejected", "count": 1}]
+
+
+def test_error_details_group_by_model_and_keep_the_message(tmp_path) -> None:
+    registry = _registry(tmp_path)
+    model, good, bad = _seed(registry)
+    for key in (good, bad):
+        registry.log_attempt(
+            key,
+            model,
+            operation="generate_notes",
+            success=False,
+            latency_ms=5,
+            error_category="rate_limited",
+            error_message="quota exceeded " + "x" * 600,
+        )
+    registry.log_attempt(
+        bad, model, operation="model_test", success=False, latency_ms=5, error_category="rate_limited"
+    )
+    # A success never stores a message, even if one is passed.
+    registry.log_attempt(good, model, operation="x", success=True, latency_ms=1, error_message="no")
+
+    details = registry.attempt_stats("all")["error_details"]
+    assert {(d["operation"], d["key_label"], d["count"]) for d in details} == {
+        ("generate_notes", "good", 1),
+        ("generate_notes", "bad", 1),
+        ("model_test", "bad", 1),
+    }
+    notes = next(d for d in details if d["key_label"] == "good")
+    assert notes["model"] == "gem-1" and len(notes["last_message"]) == 500
+    assert next(d for d in details if d["operation"] == "model_test")["last_message"] is None
 
 
 def test_range_excludes_old_attempts_and_deleted_keys_keep_their_label(tmp_path) -> None:
@@ -179,6 +214,9 @@ def test_a_failed_model_test_counts_as_an_error(
     assert body["total_errors"] == 1
     assert body["by_key"][0]["errors"] == 1 and body["by_key"][0]["success_rate"] == 0.0
     assert body["errors"][0]["count"] == 1
+    (detail,) = body["errors"][0]["details"]
+    assert detail["model"] == "gemini-test" and detail["operation"] == "model_test"
+    assert detail["last_message"]  # the classified, secret-free reason
 
 
 def test_invalid_range_is_rejected(client: TestClient) -> None:

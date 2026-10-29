@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 
 import { ErrorState, SkeletonBar } from '../../components/shared/state-panels'
 import { getKeyAnalytics } from '../../lib/api'
@@ -22,6 +22,7 @@ function percent(value: number) {
 /** Per-key success and error counts, cost per model and error categories (from the attempt log). */
 export function KeyAnalytics() {
   const [range, setRange] = useState<KeyAnalyticsRange>('7d')
+  const [expanded, setExpanded] = useState<string | null>(null)
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: queryKeys.usageKeys(range),
     queryFn: () => getKeyAnalytics(range),
@@ -195,15 +196,72 @@ export function KeyAnalytics() {
               <TableShell>
                 <Head columns={['Category', 'Count']} />
                 <tbody>
-                  {data.errors.map((row) => (
-                    <tr
-                      key={row.category}
-                      className="h-row border-t border-border hover:bg-surface-muted"
-                    >
-                      <td className="px-3 py-1 text-text">{row.category.replaceAll('_', ' ')}</td>
-                      <td className="px-3 py-1 tabular-nums text-text">{row.count}</td>
-                    </tr>
-                  ))}
+                  {data.errors.map((row) => {
+                    const isOpen = expanded === row.category
+                    return (
+                      <Fragment key={row.category}>
+                        <tr className="h-row border-t border-border hover:bg-surface-muted">
+                          <td className="px-3 py-1 text-text">
+                            <button
+                              type="button"
+                              className="flex items-center gap-2 text-left"
+                              aria-expanded={isOpen}
+                              onClick={() => setExpanded(isOpen ? null : row.category)}
+                            >
+                              <span aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
+                              {row.category.replaceAll('_', ' ')}
+                            </button>
+                          </td>
+                          <td className="px-3 py-1 tabular-nums text-text">{row.count}</td>
+                        </tr>
+                        {isOpen ? (
+                          <tr className="border-t border-border bg-surface-muted">
+                            <td colSpan={2} className="px-3 py-2">
+                              <TableShell>
+                                <Head
+                                  columns={[
+                                    'Model',
+                                    'Provider',
+                                    'Label',
+                                    'Operation',
+                                    'Count',
+                                    'Last seen',
+                                    'Last message',
+                                  ]}
+                                />
+                                <tbody>
+                                  {row.details.map((d) => (
+                                    <tr
+                                      key={`${d.provider}/${d.model}/${d.operation}/${d.key_label}`}
+                                      className="h-row border-t border-border"
+                                    >
+                                      <td className="px-3 py-1 text-text">{d.model}</td>
+                                      <td className="px-3 py-1 capitalize text-text">
+                                        {d.provider}
+                                      </td>
+                                      <td className="px-3 py-1 text-text">{d.key_label || '-'}</td>
+                                      <td className="px-3 py-1 text-text">
+                                        {d.operation.replaceAll('_', ' ')}
+                                      </td>
+                                      <td className="px-3 py-1 tabular-nums text-text">
+                                        {d.count}
+                                      </td>
+                                      <td className="px-3 py-1 text-text">
+                                        {new Date(d.last_at).toLocaleString()}
+                                      </td>
+                                      <td className="px-3 py-1 break-words text-text-muted">
+                                        {d.last_message ?? 'Not recorded'}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </TableShell>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    )
+                  })}
                 </tbody>
               </TableShell>
             </div>
